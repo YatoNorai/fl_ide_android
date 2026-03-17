@@ -8,6 +8,7 @@ import 'package:terminal_pkg/terminal_pkg.dart';
 
 import '../providers/settings_provider.dart';
 import '../widgets/animated_toggle.dart';
+import 'extensions_screen.dart';
 
 // ── Home screen ───────────────────────────────────────────────────────────────
 
@@ -503,6 +504,20 @@ class _SettingsScreenBody extends StatelessWidget {
                             iconBg: Colors.orange,
                             icon: FontAwesomeIcons.bug),
                         _buildOption(context,
+                            title: 'Extensions',
+                            subtitle: 'Themes and add-ons.',
+                            onTap: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                      builder: (_) =>
+                                          const ExtensionsScreen()),
+                                ),
+                            borderRadius: const BorderRadius.vertical(
+                                top: Radius.circular(10),
+                                bottom: Radius.circular(10)),
+                            iconBg: Colors.teal,
+                            icon: FontAwesomeIcons.puzzlePiece),
+                        _buildOption(context,
                             title: 'About',
                             subtitle: 'App information.',
                             onTap: () =>
@@ -555,6 +570,8 @@ class _SettingsScreenBody extends StatelessWidget {
         return Container(key: pageKey, child: _buildTerminal(context));
       case SettingsPage.runDebug:
         return Container(key: pageKey, child: _buildRunDebug(context));
+      case SettingsPage.extensions:
+        return const SizedBox.shrink(); // handled via direct push
       case SettingsPage.about:
         return Container(key: pageKey, child: _buildAbout(context));
     }

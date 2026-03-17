@@ -11,6 +11,8 @@ import 'package:quill_code/quill_code.dart' show DiagnosticSeverity;
 import 'package:sdk_manager/sdk_manager.dart';
 import 'package:terminal_pkg/terminal_pkg.dart';
 
+import '../providers/extensions_provider.dart';
+
 /// AndroidIDE-style workspace:
 /// - Narrow left icon rail (always visible)
 /// - File tree slides in as an overlay from the left
@@ -120,7 +122,13 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                   child: Stack(
                     children: [
                       // Editor takes full area
-                      const Positioned.fill(child: EditorArea()),
+                      Positioned.fill(
+                        child: EditorArea(
+                          editorTheme: context
+                              .watch<ExtensionsProvider>()
+                              .activeEditorTheme,
+                        ),
+                      ),
                       // Bottom draggable sheet
                       DraggableScrollableSheet(
                         controller: _sheetController,

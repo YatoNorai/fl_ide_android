@@ -11,6 +11,7 @@ import 'package:rootfs_manager/rootfs_manager.dart';
 import 'package:sdk_manager/sdk_manager.dart';
 import 'package:terminal_pkg/terminal_pkg.dart';
 
+import 'providers/extensions_provider.dart';
 import 'providers/settings_provider.dart';
 import 'screens/home_screen.dart';
 import 'screens/splash_screen.dart';
@@ -24,37 +25,60 @@ class FlIdeApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => SettingsProvider()),
+        ChangeNotifierProvider(create: (_) => ExtensionsProvider()),
         ChangeNotifierProvider(create: (_) => RootfsProvider()..checkBootstrap()),
         ChangeNotifierProvider(create: (_) => SdkManagerProvider()..initialize()),
         ChangeNotifierProvider(create: (_) => ProjectManagerProvider()..initialize()),
       ],
-      child: Consumer<SettingsProvider>(
-        builder: (context, settings, _) {
+      child: Consumer2<SettingsProvider, ExtensionsProvider>(
+        builder: (context, settings, extensions, _) {
           return DynamicColorBuilder(
             builder: (ColorScheme? lightDynamic, ColorScheme? darkDynamic) {
-              final lightScheme = settings.useDynamicColors && lightDynamic != null
-                  ? lightDynamic.harmonized()
-                  : ColorScheme.fromSeed(
-                      seedColor: Colors.blue,
-                      brightness: Brightness.light,
-                    );
-              final darkScheme = settings.useDynamicColors && darkDynamic != null
-                  ? darkDynamic.harmonized()
-                  : ColorScheme.fromSeed(
-                      seedColor: Colors.blueGrey,
-                      brightness: Brightness.dark,
-                    );
+              // If a theme extension is active, derive seed from its preview color
+              final activeMeta = extensions.activeMeta;
+              final Color? extSeed = activeMeta != null
+                  ? Color(activeMeta.previewArgb)
+                  : null;
 
-              final themeMode = settings.followSystemTheme
-                  ? ThemeMode.system
-                  : (settings.useDarkMode ? ThemeMode.dark : ThemeMode.light);
+              final lightScheme = extSeed != null
+                  ? ColorScheme.fromSeed(
+                      seedColor: extSeed,
+                      brightness: Brightness.light,
+                    )
+                  : settings.useDynamicColors && lightDynamic != null
+                      ? lightDynamic.harmonized()
+                      : ColorScheme.fromSeed(
+                          seedColor: Colors.blue,
+                          brightness: Brightness.light,
+                        );
+              final darkScheme = extSeed != null
+                  ? ColorScheme.fromSeed(
+                      seedColor: extSeed,
+                      brightness: Brightness.dark,
+                    )
+                  : settings.useDynamicColors && darkDynamic != null
+                      ? darkDynamic.harmonized()
+                      : ColorScheme.fromSeed(
+                          seedColor: Colors.blueGrey,
+                          brightness: Brightness.dark,
+                        );
+
+              // If extension theme is active, force its brightness
+              final ThemeMode themeMode = activeMeta != null
+                  ? (activeMeta.dark ? ThemeMode.dark : ThemeMode.light)
+                  : settings.followSystemTheme
+                      ? ThemeMode.system
+                      : (settings.useDarkMode
+                          ? ThemeMode.dark
+                          : ThemeMode.light);
 
               return MaterialApp(
                 title: 'FL IDE',
                 debugShowCheckedModeBanner: false,
                 themeMode: themeMode,
                 theme: _buildLightTheme(lightScheme),
-                darkTheme: _buildDarkTheme(darkScheme, amoled: settings.useAmoled),
+                darkTheme: _buildDarkTheme(darkScheme,
+                    amoled: activeMeta == null && settings.useAmoled),
                 home: const _SplashGate(),
               );
             },
@@ -141,6 +165,10 @@ class _AppShell extends StatelessWidget {
                   ChangeNotifierProvider(create: (_) => BuildProvider()),
                   ChangeNotifierProvider(create: (_) => LspProvider()),
                   ChangeNotifierProvider(create: (_) => AppInstallerProvider()),
+                  // Expose root-level ExtensionsProvider to workspace tree
+                  ChangeNotifierProvider<ExtensionsProvider>.value(
+                    value: context.read<ExtensionsProvider>(),
+                  ),
                 ],
                 child: WorkspaceScreen(project: activeProject),
               );

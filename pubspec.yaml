@@ -48,6 +48,8 @@ dependencies:
   dynamic_color: ^1.7.0
   font_awesome_flutter: ^10.7.0
   shared_preferences: ^2.3.0
+  http: ^1.2.0
+  path_provider: ^2.1.4
 
   # Code editor (direct dep for DiagnosticSeverity access in shell)
   quill_code:

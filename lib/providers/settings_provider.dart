@@ -8,6 +8,7 @@ enum SettingsPage {
   fileExplorer,
   terminal,
   runDebug,
+  extensions,
   about,
 }
 

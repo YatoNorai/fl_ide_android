@@ -9,7 +9,8 @@ import '../providers/editor_provider.dart';
 import 'editor_tab_bar.dart';
 
 class EditorArea extends StatelessWidget {
-  const EditorArea({super.key});
+  final EditorTheme? editorTheme;
+  const EditorArea({super.key, this.editorTheme});
 
   @override
   Widget build(BuildContext context) {
@@ -21,7 +22,8 @@ class EditorArea extends StatelessWidget {
             Expanded(
               child: editor.activeFile == null
                   ? const _WelcomePane()
-                  : _ActiveEditor(file: editor.activeFile!),
+                  : _ActiveEditor(
+                      file: editor.activeFile!, editorTheme: editorTheme),
             ),
           ],
         );
@@ -33,8 +35,9 @@ class EditorArea extends StatelessWidget {
 
 class _ActiveEditor extends StatelessWidget {
   final OpenFile file;
+  final EditorTheme? editorTheme;
 
-  const _ActiveEditor({required this.file});
+  const _ActiveEditor({required this.file, this.editorTheme});
 
   @override
   Widget build(BuildContext context) {
@@ -66,6 +69,7 @@ class _ActiveEditor extends StatelessWidget {
                     // Pass LSP config if server is running
                     lspConfig: lspProvider.lspConfig,
                     fileUri: Uri.file(file.path).toString(),
+                    theme: editorTheme,
                   ),
                   // Inline diagnostics summary bar
                   Positioned(
