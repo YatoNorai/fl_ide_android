@@ -1,0 +1,77 @@
+{
+  "id": "github_light",
+  "name": "GitHub",
+  "dark": false,
+  "colors": {
+    "background": "#FFFFFF",
+    "lineNumberBackground": "#F6F8FA",
+    "textNormal": "#24292F",
+    "lineNumber": "#6E7781",
+    "lineNumberCurrent": "#24292F",
+    "cursor": "#0550AE",
+    "selectionColor": "#0550AE33",
+    "keyword": "#CF222E",
+    "string": "#0A3069",
+    "comment": "#6E7781",
+    "number": "#0550AE",
+    "operator": "#24292F",
+    "identifier": "#24292F",
+    "function": "#8250DF",
+    "type": "#953800",
+    "annotation": "#0550AE",
+    "blockLine": "#D0D7DE",
+    "completionBackground": "#F6F8FA",
+    "ghostTextForeground": "#8C959F",
+    "currentLineBackground": "#EAF0F6",
+    "activeBlockHighlight": "#EAF0F6BB",
+    "searchMatchBackground": "#FFF8C5",
+    "searchMatchBorder": "#D4A72C"
+  },
+  "lineHighlight": {
+    "style": "fill",
+    "fillColor": "#EAF0F6",
+    "strokeColor": "#D0D7DE",
+    "accentColor": "#0550AE",
+    "activeBlockColor": "#EAF0F699"
+  },
+  "blockLines": {
+    "color": "#D0D7DE88",
+    "activeColor": "#0550AEFF",
+    "width": 1.0,
+    "activeWidth": 1.5,
+    "colorMode": "single",
+    "inactiveOpacity": 0.6,
+    "program": [
+      {
+        "op": "line",
+        "fill": true
+      }
+    ],
+    "endCap": {
+      "type": "none"
+    },
+    "activeProgram": [
+      {
+        "op": "line",
+        "fill": true
+      }
+    ],
+    "activeEndCap": {
+      "type": "curve",
+      "radius": 7,
+      "tick": 6
+    }
+  },
+  "bracketPair": {
+    "fillColor": "#0550AE1A",
+    "borderColor": "#0550AE80",
+    "borderWidth": 1.2,
+    "radius": 2.0
+  },
+  "indentDots": {
+    "visible": false,
+    "color": "#6E778144",
+    "size": 1.5,
+    "mode": "indentOnly"
+  }
+}

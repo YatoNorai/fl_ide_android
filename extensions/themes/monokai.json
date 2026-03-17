@@ -1,0 +1,97 @@
+{
+  "id": "monokai",
+  "name": "Monokai",
+  "dark": true,
+  "colors": {
+    "background": "#272822",
+    "lineNumberBackground": "#1E1F1C",
+    "textNormal": "#F8F8F2",
+    "lineNumber": "#75715E",
+    "lineNumberCurrent": "#F8F8F2",
+    "cursor": "#F8F8F0",
+    "selectionColor": "#49483E80",
+    "keyword": "#F92672",
+    "string": "#E6DB74",
+    "comment": "#75715E",
+    "number": "#AE81FF",
+    "operator": "#F92672",
+    "identifier": "#F8F8F2",
+    "function": "#A6E22E",
+    "type": "#66D9EF",
+    "annotation": "#E6DB74",
+    "blockLine": "#3E3D32",
+    "completionBackground": "#1E1F1C",
+    "ghostTextForeground": "#75715E",
+    "currentLineBackground": "#3E3D32",
+    "activeBlockHighlight": "#3E3D32BB",
+    "searchMatchBackground": "#E6DB7433",
+    "searchMatchBorder": "#E6DB74"
+  },
+  "lineHighlight": {
+    "style": "fill",
+    "fillColor": "#3E3D32",
+    "strokeColor": "#49483E",
+    "accentColor": "#A6E22E",
+    "activeBlockColor": "#3E3D3299"
+  },
+  "blockLines": {
+    "color": "#3E3D3266",
+    "activeColor": "#A6E22EFF",
+    "width": 1.0,
+    "activeWidth": 2.0,
+    "colorMode": "rainbow",
+    "inactiveOpacity": 0.55,
+    "rainbowColors": [
+      "#F92672",
+      "#A6E22E",
+      "#E6DB74",
+      "#66D9EF",
+      "#AE81FF",
+      "#FD971F"
+    ],
+    "program": [
+      {
+        "op": "line",
+        "length": 6
+      },
+      {
+        "op": "gap",
+        "length": 2
+      },
+      {
+        "op": "dot",
+        "radius": 1.2,
+        "gap": 2
+      },
+      {
+        "op": "gap",
+        "length": 2
+      }
+    ],
+    "endCap": {
+      "type": "none"
+    },
+    "activeProgram": [
+      {
+        "op": "line",
+        "fill": true
+      }
+    ],
+    "activeEndCap": {
+      "type": "arrow",
+      "size": 5
+    }
+  },
+  "bracketPair": {
+    "fillColor": "#A6E22E1A",
+    "borderColor": "#A6E22E80",
+    "borderWidth": 1.2,
+    "radius": 2.0
+  },
+  "indentDots": {
+    "visible": true,
+    "color": "#75715E55",
+    "size": 1.5,
+    "mode": "indentOnly"
+  }
+}

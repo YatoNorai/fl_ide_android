@@ -1,0 +1,80 @@
+{
+  "id": "ember_glow",
+  "name": "Ember Glow",
+  "dark": true,
+  "colors": {
+    "background": "#180800",
+    "lineNumberBackground": "#100500",
+    "textNormal": "#E8B080",
+    "lineNumber": "#5A2800",
+    "lineNumberCurrent": "#FF8844",
+    "cursor": "#FF5500",
+    "selectionHandle": "#CC3300",
+    "selectionColor": "#FF550033",
+    "keyword": "#FF7733",
+    "string": "#88CC44",
+    "comment": "#804020",
+    "number": "#FFCC44",
+    "operator": "#FF9944",
+    "identifier": "#E8B080",
+    "function": "#FFAA55",
+    "type": "#FF6633",
+    "annotation": "#CC88FF",
+    "blockLine": "#281200",
+    "completionBackground": "#180800",
+    "ghostTextForeground": "#5A2800",
+    "currentLineBackground": "#220B00",
+    "searchMatchBackground": "#FF550033",
+    "searchMatchBorder": "#FF5500",
+    "cursorWidth": 2.5
+  },
+  "lineHighlight": {
+    "style": "fill",
+    "fillColor": "#220B00",
+    "strokeColor": "#401500",
+    "accentColor": "#FF5500",
+    "activeBlockColor": "#220B0099"
+  },
+  "blockLines": {
+    "color": "#401500AA",
+    "activeColor": "#FF5500FF",
+    "width": 1.0,
+    "activeWidth": 1.8,
+    "colorMode": "rainbow",
+    "inactiveOpacity": 0.5,
+    "rainbowColors": [
+      "#FF5500",
+      "#FF7733",
+      "#FF9944",
+      "#FFCC44",
+      "#FF6633",
+      "#FFAA55"
+    ],
+    "style": "longDash",
+    "dashLength": 8.0,
+    "dashGap": 4.0,
+    "program": [
+      { "op": "line", "length": 8 },
+      { "op": "gap", "length": 4 }
+    ],
+    "endCap": { "type": "none" },
+    "startCap": { "type": "none" },
+    "activeProgram": [
+      { "op": "line", "fill": true }
+    ],
+    "activeEndCap": { "type": "arrow", "size": 6 },
+    "activeStartCap": { "type": "none" }
+  },
+  "bracketPair": {
+    "fillColor": "#FF550020",
+    "borderColor": "#FF550077",
+    "borderWidth": 1.4,
+    "radius": 2.5
+  },
+  "indentDots": {
+    "visible": false,
+    "color": "#5A280066",
+    "size": 1.5,
+    "mode": "indentOnly"
+  }
+}
