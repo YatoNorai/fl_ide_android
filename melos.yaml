@@ -1,0 +1,22 @@
+name: fl_ide_workspace
+
+packages:
+  - .
+  - packages/*
+
+command:
+  bootstrap:
+    usePubspecOverrides: true
+
+scripts:
+  analyze:
+    run: dart analyze
+    description: Analyze all packages
+
+  format:
+    run: dart format .
+    description: Format all Dart files
+
+  get:
+    run: melos exec -- flutter pub get
+    description: Get dependencies for all packages

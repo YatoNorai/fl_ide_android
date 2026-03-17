@@ -1,0 +1,66 @@
+name: termare_app
+description: A new Flutter project.
+
+publish_to: 'none' 
+
+version: 1.0.0+1
+
+environment:
+  sdk: ">=2.9.0 <3.0.0"
+
+dependencies:
+  xterm:
+    git: https://github.com/TerminalStudio/xterm.dart
+
+  flutter_acrylic: ^1.0.0
+  pty:
+    git: https://github.com/TerminalStudio/pty
+  vibration: ^1.7.3
+  archive: ^3.1.2
+  get: ^4.1.4
+  flutter:
+    sdk: flutter
+  # just_audio: ^0.9.5
+  global_repository:
+    git: https://github.com/nightmare-space/global_repository
+  cupertino_icons: ^1.0.2
+  dio: ^4.0.0
+  webview_flutter: ^2.0.12
+  pseudo_terminal_utils:
+    git: https://github.com/Termare/pseudo_terminal_utils
+  termare_pty:
+    git: https://github.com/Termare/termare_pty
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+
+flutter:
+  uses-material-design: true
+  fonts:
+    - family: SourceCodePro
+      fonts:
+        - asset: assets/fonts/SourceCodePro.ttf
+    - family: SourceCodeProMediumforPowerline
+      fonts:
+        - asset: assets/fonts/SourceCodeProMediumforPowerline.otf
+    - family: MesloLGMforPowerline
+      fonts:
+        - asset: assets/fonts/MesloLGMforPowerline.ttf
+    - family: MenloforPowerline
+      fonts:
+        - asset: assets/fonts/MenloforPowerline.ttf
+    - family: DroidSansMono
+      fonts:
+        - asset: assets/fonts/DroidSansMono.ttf
+
+  assets:
+    - assets/ogg/
+    - assets/icons/
+    - assets/lib/
+    - assets/text/
+
+
+dependency_overrides:
+  # xterm:
+  #   path: /Users/nightmare/Desktop/TerminalStudio/xterm.dart

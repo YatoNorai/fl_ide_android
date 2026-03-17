@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebSearch",
+      "Bash(flutter analyze:*)",
+      "Bash(wc:*)",
+      "Bash(find \"d:\\\\flutter_ide_android\\\\lib\"\" -type f -name \"*.dart \")",
+      "Bash(find \"d:\\\\flutter_ide_android\\\\lib\\\\utils\"\" -name \"*.dart \" -type f)",
+      "Bash(flutter pub:*)"
+    ]
+  }
+}

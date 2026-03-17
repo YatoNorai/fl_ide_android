@@ -1,0 +1,24 @@
+name: app_installer
+description: "FL IDE — APK installation, logcat, hot reload via Flutter VM service"
+publish_to: none
+version: 0.0.1
+
+environment:
+  sdk: ^3.5.0
+
+resolution: workspace
+
+dependencies:
+  flutter:
+    sdk: flutter
+  core:
+    path: ../core
+  terminal_pkg:
+    path: ../terminal_pkg
+  provider: ^6.1.2
+  http: ^1.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0

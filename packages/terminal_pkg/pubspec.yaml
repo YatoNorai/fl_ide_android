@@ -1,0 +1,23 @@
+name: terminal_pkg
+description: "FL IDE — PTY terminal emulator (flutter_pty + xterm)"
+publish_to: none
+version: 0.0.1
+
+environment:
+  sdk: ^3.5.0
+
+resolution: workspace
+
+dependencies:
+  flutter:
+    sdk: flutter
+  core:
+    path: ../core
+  provider: ^6.1.2
+  xterm: ^4.0.0
+  flutter_pty: ^0.4.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0

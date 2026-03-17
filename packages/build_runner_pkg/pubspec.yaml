@@ -1,0 +1,23 @@
+name: build_runner_pkg
+description: "FL IDE — build execution, APK detection and output streaming"
+publish_to: none
+version: 0.0.1
+
+environment:
+  sdk: ^3.5.0
+
+resolution: workspace
+
+dependencies:
+  flutter:
+    sdk: flutter
+  core:
+    path: ../core
+  terminal_pkg:
+    path: ../terminal_pkg
+  provider: ^6.1.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0

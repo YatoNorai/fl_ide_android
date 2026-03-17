@@ -1,0 +1,66 @@
+name: fl_ide
+description: "FL IDE — Mobile VS Code powered by Flutter"
+publish_to: none
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.5.0
+
+workspace:
+  - packages/core
+  - packages/rootfs_manager
+  - packages/terminal_pkg
+  - packages/sdk_manager
+  - packages/project_manager
+  - packages/code_editor
+  - packages/build_runner_pkg
+  - packages/lsp_client
+  - packages/app_installer
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Local packages
+  core:
+    path: packages/core
+  rootfs_manager:
+    path: packages/rootfs_manager
+  terminal_pkg:
+    path: packages/terminal_pkg
+  sdk_manager:
+    path: packages/sdk_manager
+  project_manager:
+    path: packages/project_manager
+  code_editor:
+    path: packages/code_editor
+  build_runner_pkg:
+    path: packages/build_runner_pkg
+  lsp_client:
+    path: packages/lsp_client
+  app_installer:
+    path: packages/app_installer
+
+  # UI
+  provider: ^6.1.2
+  cupertino_icons: ^1.0.8
+  animated_text_kit: ^4.2.2
+  dynamic_color: ^1.7.0
+  font_awesome_flutter: ^10.7.0
+  shared_preferences: ^2.3.0
+
+  # Code editor (direct dep for DiagnosticSeverity access in shell)
+  quill_code:
+    git:
+      url: https://github.com/YatoNorai/quill_code.git
+      ref: main
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/icons/

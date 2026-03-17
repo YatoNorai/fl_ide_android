@@ -1,0 +1,26 @@
+name: lsp_client
+description: "FL IDE — LSP client bridge using quill_code LspBridge"
+publish_to: none
+version: 0.0.1
+
+environment:
+  sdk: ^3.5.0
+
+resolution: workspace
+
+dependencies:
+  flutter:
+    sdk: flutter
+  core:
+    path: ../core
+  provider: ^6.1.2
+
+  quill_code:
+    git:
+      url: https://github.com/YatoNorai/quill_code.git
+      ref: main
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0

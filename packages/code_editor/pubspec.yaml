@@ -1,0 +1,30 @@
+name: code_editor
+description: "FL IDE — code editor with file tree, QuillCodeEditor and LSP"
+publish_to: none
+version: 0.0.1
+
+environment:
+  sdk: ^3.5.0
+
+resolution: workspace
+
+dependencies:
+  flutter:
+    sdk: flutter
+  core:
+    path: ../core
+  lsp_client:
+    path: ../lsp_client
+  provider: ^6.1.2
+  path: ^1.9.0
+
+  # Code editor package
+  quill_code:
+    git:
+      url: https://github.com/YatoNorai/quill_code.git
+      ref: main
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
