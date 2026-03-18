@@ -27,13 +27,8 @@
     },
     {
       "type": "shell",
-      "command": "pkg install -y cmake clang pkg-config 2>&1",
-      "description": "Installing build dependencies"
-    },
-    {
-      "type": "shell",
-      "command": "dpkg -i $DOWNLOAD_PATH 2>&1",
-      "description": "Installing Flutter .deb package"
+      "command": "dpkg -i $DOWNLOAD_PATH 2>&1; apt-get install -f -y 2>&1",
+      "description": "Installing Flutter .deb and resolving all dependencies"
     },
     {
       "type": "shell",
