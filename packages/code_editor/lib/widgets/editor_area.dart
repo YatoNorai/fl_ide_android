@@ -10,7 +10,23 @@ import 'editor_tab_bar.dart';
 
 class EditorArea extends StatelessWidget {
   final EditorTheme? editorTheme;
-  const EditorArea({super.key, this.editorTheme});
+  /// Applied to the controller's props before each build.
+  final void Function(EditorProps props)? configureProps;
+  /// Whether to show the symbol input bar (mobile keyboard helpers).
+  final bool showSymbolBar;
+  /// Font size override applied to [editorTheme].
+  final double? fontSize;
+  /// Font family override applied to [editorTheme].
+  final String? fontFamily;
+
+  const EditorArea({
+    super.key,
+    this.editorTheme,
+    this.configureProps,
+    this.showSymbolBar = true,
+    this.fontSize,
+    this.fontFamily,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -23,7 +39,13 @@ class EditorArea extends StatelessWidget {
               child: editor.activeFile == null
                   ? const _WelcomePane()
                   : _ActiveEditor(
-                      file: editor.activeFile!, editorTheme: editorTheme),
+                      file: editor.activeFile!,
+                      editorTheme: editorTheme,
+                      configureProps: configureProps,
+                      showSymbolBar: showSymbolBar,
+                      fontSize: fontSize,
+                      fontFamily: fontFamily,
+                    ),
             ),
           ],
         );
@@ -36,8 +58,19 @@ class EditorArea extends StatelessWidget {
 class _ActiveEditor extends StatelessWidget {
   final OpenFile file;
   final EditorTheme? editorTheme;
+  final void Function(EditorProps props)? configureProps;
+  final bool showSymbolBar;
+  final double? fontSize;
+  final String? fontFamily;
 
-  const _ActiveEditor({required this.file, this.editorTheme});
+  const _ActiveEditor({
+    required this.file,
+    this.editorTheme,
+    this.configureProps,
+    this.showSymbolBar = true,
+    this.fontSize,
+    this.fontFamily,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -46,6 +79,19 @@ class _ActiveEditor extends StatelessWidget {
         child: CircularProgressIndicator(color: AppTheme.darkAccent),
       );
     }
+
+    // Apply caller-supplied props (e.g. from SettingsProvider)
+    if (configureProps != null) {
+      configureProps!(file.controller!.props);
+    }
+
+    // Apply font size and font family overrides to theme
+    final effectiveTheme = (fontSize != null || fontFamily != null)
+        ? (editorTheme ?? QuillThemeDark.build()).copyWith(
+            fontSize: fontSize,
+            fontFamily: fontFamily,
+          )
+        : editorTheme;
 
     final lspProvider = context.watch<LspProvider>();
 
@@ -69,7 +115,8 @@ class _ActiveEditor extends StatelessWidget {
                     // Pass LSP config if server is running
                     lspConfig: lspProvider.lspConfig,
                     fileUri: Uri.file(file.path).toString(),
-                    theme: editorTheme,
+                    theme: effectiveTheme,
+                    showSymbolBar: showSymbolBar,
                   ),
                   // Inline diagnostics summary bar
                   Positioned(

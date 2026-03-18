@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "sdk": "flutter",
+  "sdk_version": "3.29.2",
+  "display_name": "Flutter SDK 3.29.2 (mumumusuc)",
+  "description": "Flutter 3.29.2 compiled for Termux as a .deb package. Supports ARM64 (aarch64). Includes Dart SDK and all Flutter tools.",
+  "package": {
+    "type": "deb",
+    "url": "https://github.com/mumumusuc/termux-flutter/releases/download/3.29.2/flutter_3.29.2_aarch64.deb",
+    "filename": "flutter_3.29.2_aarch64.deb",
+    "arch": "arm64",
+    "size_mb": 200
+  },
+  "package_author": {
+    "name": "mumumusuc",
+    "github": "https://github.com/mumumusuc/termux-flutter"
+  },
+  "json_author": {
+    "name": "Yato",
+    "date": "2026-03-18"
+  },
+  "install_steps": [
+    {
+      "type": "shell",
+      "command": "dpkg -i $DOWNLOAD_PATH 2>&1",
+      "description": "Installing Flutter .deb package"
+    },
+    {
+      "type": "shell",
+      "command": "grep -qxF 'export PATH=\"$PATH:$PREFIX/flutter/bin\"' $HOME/.bashrc || echo 'export PATH=\"$PATH:$PREFIX/flutter/bin\"' >> $HOME/.bashrc",
+      "description": "Adding Flutter to PATH"
+    }
+  ],
+  "config_steps": [
+    {
+      "type": "shell",
+      "command": "flutter config --no-analytics 2>&1 || true",
+      "description": "Disabling analytics"
+    },
+    {
+      "type": "shell",
+      "command": "flutter config --android-sdk $ANDROID_HOME 2>&1 || true",
+      "description": "Configuring Android SDK path"
+    },
+    {
+      "type": "shell",
+      "command": "flutter doctor -v 2>&1 || true",
+      "description": "Running Flutter doctor"
+    }
+  ],
+  "verify_binary": "flutter",
+  "verify_command": "flutter --version"
+}

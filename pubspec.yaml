@@ -56,6 +56,7 @@ dependencies:
     git:
       url: https://github.com/YatoNorai/quill_code.git
       ref: main
+  url_launcher: ^6.3.2
 
 dev_dependencies:
   flutter_test:
@@ -65,5 +66,26 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
+
+    - assets/logo.png
     - assets/icons/
     - assets/themes/
+    - assets/fonts/
+
+
+  fonts:
+    - family: FiraCode
+      fonts:
+        - asset: assets/fonts/FiraCode-Regular.ttf
+    - family: CourierPrime
+      fonts:
+        - asset: assets/fonts/CourierPrime-Regular.ttf
+    - family: SpaceMono
+      fonts:
+        - asset: assets/fonts/SpaceMono-Regular.ttf
+    - family: RobotoMono
+      fonts:
+        - asset: assets/fonts/Roboto-Regular.ttf
+    - family: OpenSans
+      fonts:
+        - asset: assets/fonts/OpenSans-Regular.ttf

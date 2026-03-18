@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "sdk": "flutter",
+  "sdk_version": "2026-03-17",
+  "display_name": "Flutter SDK (zhzhzhy)",
+  "description": "Daily Flutter SDK build for Termux ARM64. Includes Dart SDK and Flutter tools. Updated regularly from official Flutter releases.",
+  "package": {
+    "type": "zip",
+    "url": "https://github.com/zhzhzhy/Flutter-SDK-ARM64/releases/download/Flutter-SDK-2026-03-17/Flutter-SDK-ARM64.zip",
+    "filename": "Flutter-SDK-ARM64.zip",
+    "arch": "arm64",
+    "size_mb": 600
+  },
+  "package_author": {
+    "name": "zhzhzhy",
+    "github": "https://github.com/zhzhzhy/Flutter-SDK-ARM64"
+  },
+  "json_author": {
+    "name": "Yato",
+    "date": "2026-03-18"
+  },
+  "install_steps": [
+    {
+      "type": "shell",
+      "command": "mkdir -p $PREFIX/tmp",
+      "description": "Preparing directories"
+    },
+    {
+      "type": "extract",
+      "dest": "$PREFIX",
+      "description": "Extracting Flutter SDK to $PREFIX"
+    },
+    {
+      "type": "shell",
+      "command": "chmod -R 755 $PREFIX/flutter/bin $PREFIX/flutter/bin/cache/dart-sdk/bin 2>/dev/null || true",
+      "description": "Fixing permissions on Flutter binaries"
+    },
+    {
+      "type": "shell",
+      "command": "grep -qxF 'export PATH=\"$PATH:$PREFIX/flutter/bin\"' $HOME/.bashrc || echo 'export PATH=\"$PATH:$PREFIX/flutter/bin\"' >> $HOME/.bashrc",
+      "description": "Adding Flutter to PATH"
+    }
+  ],
+  "config_steps": [
+    {
+      "type": "shell",
+      "command": "flutter config --no-analytics 2>&1 || true",
+      "description": "Disabling analytics"
+    },
+    {
+      "type": "shell",
+      "command": "flutter config --android-sdk $ANDROID_HOME 2>&1 || true",
+      "description": "Configuring Android SDK path"
+    },
+    {
+      "type": "shell",
+      "command": "flutter doctor -v 2>&1 || true",
+      "description": "Running Flutter doctor"
+    }
+  ],
+  "verify_binary": "flutter",
+  "verify_command": "flutter --version"
+}

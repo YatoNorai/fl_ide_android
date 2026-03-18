@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "com.example.fl_ide"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 36 //flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -21,8 +21,8 @@ android {
 
     defaultConfig {
         applicationId = "com.termux" //"com.example.fl_ide"
-        minSdk = 24  // Required for PTY/rootfs operations
-        targetSdk = flutter.targetSdkVersion
+        minSdk = 26  // Required for PTY/rootfs operations
+        targetSdk = 28//flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }

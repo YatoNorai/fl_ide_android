@@ -14,12 +14,21 @@ class DownloadBootstrapScreen extends StatefulWidget {
 }
 
 class _DownloadBootstrapScreenState extends State<DownloadBootstrapScreen> {
+  bool _onReadyCalled = false;
+
+  void _callOnReady() {
+    if (_onReadyCalled || !mounted) return;
+    _onReadyCalled = true;
+    widget.onReady();
+  }
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       if (context.read<RootfsProvider>().state == RootfsState.ready) {
-        widget.onReady();
+        _callOnReady();
       }
     });
   }
@@ -29,8 +38,7 @@ class _DownloadBootstrapScreenState extends State<DownloadBootstrapScreen> {
     return Consumer<RootfsProvider>(
       builder: (context, rootfs, _) {
         if (rootfs.state == RootfsState.ready) {
-          WidgetsBinding.instance
-              .addPostFrameCallback((_) => widget.onReady());
+          WidgetsBinding.instance.addPostFrameCallback((_) => _callOnReady());
         }
 
         return Scaffold(

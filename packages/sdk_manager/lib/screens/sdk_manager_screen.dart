@@ -11,23 +11,27 @@ class SdkManagerScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
     return Scaffold(
-      backgroundColor: AppTheme.darkBg,
+      backgroundColor: cs.surface,
       appBar: AppBar(
-        backgroundColor: AppTheme.darkBg,
+        backgroundColor: cs.surface,
         elevation: 0,
+        surfaceTintColor: Colors.transparent,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: AppTheme.darkText),
+          icon: Icon(Icons.arrow_back_ios_new_rounded,
+              size: 20, color: cs.onSurface),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text('SDK Manager',
+        title: Text('SDK Manager',
             style: TextStyle(
-                color: AppTheme.darkText,
-                fontSize: 20,
-                fontWeight: FontWeight.w600)),
+                color: cs.onSurface,
+                fontSize: 18,
+                fontWeight: FontWeight.w700)),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh, color: AppTheme.darkText, size: 22),
+            icon: Icon(Icons.refresh_rounded, color: cs.onSurface, size: 22),
             onPressed: () => context.read<SdkManagerProvider>().checkAll(),
             tooltip: 'Refresh',
           ),
@@ -37,8 +41,8 @@ class SdkManagerScreen extends StatelessWidget {
         builder: (context, sdk, _) => ListView.separated(
           padding: const EdgeInsets.symmetric(vertical: 8),
           itemCount: SdkDefinition.all.length,
-          separatorBuilder: (_, __) =>
-              const Divider(color: AppTheme.darkDivider, height: 1),
+          separatorBuilder: (_, __) => Divider(
+              color: cs.outline.withValues(alpha: 0.12), height: 1, indent: 16),
           itemBuilder: (context, i) {
             final def = SdkDefinition.all[i];
             return _SdkTile(def: def, sdk: sdk);
@@ -57,6 +61,7 @@ class _SdkTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final installed = sdk.isInstalled(def.type);
     final loading = sdk.isLoading(def.type);
     final version = sdk.version(def.type);
@@ -67,7 +72,7 @@ class _SdkTile extends StatelessWidget {
         width: 44,
         height: 44,
         decoration: BoxDecoration(
-          color: AppTheme.darkSurface,
+          color: cs.surfaceContainerHighest.withValues(alpha: 0.6),
           borderRadius: BorderRadius.circular(10),
         ),
         child: Center(
@@ -75,58 +80,57 @@ class _SdkTile extends StatelessWidget {
         ),
       ),
       title: Text(def.type.displayName,
-          style: const TextStyle(
-              color: AppTheme.darkText,
-              fontSize: 16,
-              fontWeight: FontWeight.w500)),
+          style: TextStyle(
+              color: cs.onSurface,
+              fontSize: 15,
+              fontWeight: FontWeight.w600)),
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(def.type.description,
-              style: const TextStyle(
-                  color: AppTheme.darkTextMuted, fontSize: 13)),
+              style: TextStyle(
+                  color: cs.onSurface.withValues(alpha: 0.55),
+                  fontSize: 13)),
           if (installed && version != null) ...[
             const SizedBox(height: 2),
             Text('v$version',
-                style: const TextStyle(
-                    color: AppTheme.darkSuccess, fontSize: 12)),
+                style: TextStyle(
+                    color: cs.primary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500)),
           ],
         ],
       ),
       trailing: loading
-          ? const SizedBox(
+          ? SizedBox(
               width: 22,
               height: 22,
               child: CircularProgressIndicator(
-                  strokeWidth: 2.5, color: AppTheme.darkAccent),
+                  strokeWidth: 2.5, color: cs.primary),
             )
           : installed
               ? Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.check_circle_rounded,
-                        color: AppTheme.darkSuccess, size: 20),
+                    Icon(Icons.check_circle_rounded,
+                        color: cs.primary, size: 20),
                     const SizedBox(width: 8),
                     TextButton(
                       onPressed: () => _openInstall(context, def),
-                      child: const Text('Update',
+                      child: Text('Update',
                           style: TextStyle(
-                              color: AppTheme.darkAccent, fontSize: 12)),
+                              color: cs.primary, fontSize: 12)),
                     ),
                   ],
                 )
-              : ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.darkAccent,
-                    foregroundColor: const Color(0xFF001849),
+              : FilledButton(
+                  style: FilledButton.styleFrom(
                     padding: const EdgeInsets.symmetric(
                         horizontal: 16, vertical: 8),
                     minimumSize: Size.zero,
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    shape: const StadiumBorder(),
                     textStyle: const TextStyle(
                         fontSize: 13, fontWeight: FontWeight.w600),
-                    elevation: 0,
                   ),
                   onPressed: () => _openInstall(context, def),
                   child: const Text('Install'),
@@ -138,9 +142,9 @@ class _SdkTile extends StatelessWidget {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppTheme.darkSurface,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (ctx) => _InstallSheet(def: def),
     );
@@ -178,18 +182,19 @@ class _InstallSheetState extends State<_InstallSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
     return SizedBox(
       height: MediaQuery.of(context).size.height * 0.75,
       child: Column(
         children: [
-          // Handle
           Center(
             child: Container(
               width: 36,
               height: 4,
               margin: const EdgeInsets.only(top: 12, bottom: 12),
               decoration: BoxDecoration(
-                color: AppTheme.darkBorder,
+                color: cs.outline.withValues(alpha: 0.3),
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
@@ -204,8 +209,8 @@ class _InstallSheetState extends State<_InstallSheet> {
                 Expanded(
                   child: Text(
                     'Installing ${widget.def.type.displayName}',
-                    style: const TextStyle(
-                        color: AppTheme.darkText,
+                    style: TextStyle(
+                        color: cs.onSurface,
                         fontSize: 16,
                         fontWeight: FontWeight.w600),
                   ),
@@ -217,15 +222,15 @@ class _InstallSheetState extends State<_InstallSheet> {
                         .markInstalled(widget.def.type);
                     Navigator.pop(context);
                   },
-                  child: const Text('Done',
+                  child: Text('Done',
                       style: TextStyle(
-                          color: AppTheme.darkAccent,
+                          color: cs.primary,
                           fontWeight: FontWeight.w600)),
                 ),
               ],
             ),
           ),
-          const Divider(color: AppTheme.darkDivider),
+          Divider(color: cs.outline.withValues(alpha: 0.15)),
           Expanded(
             child: ChangeNotifierProvider.value(
               value: _termProvider,

@@ -1,5 +1,5 @@
 import 'package:app_installer/app_installer.dart';
-import 'home_screen.dart' show SettingsScreen;
+import 'settings_screen.dart' show SettingsScreen;
 import 'package:build_runner_pkg/build_runner_pkg.dart';
 import 'package:code_editor/code_editor.dart';
 import 'package:core/core.dart';
@@ -12,6 +12,7 @@ import 'package:sdk_manager/sdk_manager.dart';
 import 'package:terminal_pkg/terminal_pkg.dart';
 
 import '../providers/extensions_provider.dart';
+import '../providers/settings_provider.dart';
 
 /// AndroidIDE-style workspace:
 /// - Narrow left icon rail (always visible)
@@ -123,11 +124,18 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                     children: [
                       // Editor takes full area
                       Positioned.fill(
-                        child: EditorArea(
-                          editorTheme: context
-                              .watch<ExtensionsProvider>()
-                              .activeEditorTheme,
-                        ),
+                        child: Builder(builder: (context) {
+                          final settings = context.watch<SettingsProvider>();
+                          return EditorArea(
+                            editorTheme: context
+                                .watch<ExtensionsProvider>()
+                                .activeEditorTheme,
+                            showSymbolBar: settings.showSymbolBar,
+                            fontSize: settings.fontSize,
+                            fontFamily: settings.fontFamily,
+                            configureProps: settings.applyToProps,
+                          );
+                        }),
                       ),
                       // Bottom draggable sheet
                       DraggableScrollableSheet(

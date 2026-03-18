@@ -4,7 +4,8 @@ class ExtensionThemeMeta {
   final String name;
   final String file;
   final bool dark;
-  final String preview; // hex color for the preview swatch
+  final String preview; // hex background color
+  final String accent;  // hex accent/cursor color
 
   const ExtensionThemeMeta({
     required this.id,
@@ -12,6 +13,7 @@ class ExtensionThemeMeta {
     required this.file,
     required this.dark,
     required this.preview,
+    required this.accent,
   });
 
   factory ExtensionThemeMeta.fromJson(Map<String, dynamic> j) =>
@@ -21,12 +23,15 @@ class ExtensionThemeMeta {
         file: j['file'] as String,
         dark: j['dark'] as bool? ?? true,
         preview: j['preview'] as String? ?? '#1E1E2E',
+        accent: j['accent'] as String? ?? '#89B4FA',
       );
 
-  /// Parse hex preview into a Color value (ARGB int).
-  int get previewArgb {
-    final s = preview.replaceFirst('#', '');
-    final hex = s.length == 6 ? 'FF$s' : s;
-    return int.tryParse(hex, radix: 16) ?? 0xFF1E1E2E;
+  int get previewArgb => _parseHex(preview, 0xFF1E1E2E);
+  int get accentArgb  => _parseHex(accent,  0xFF89B4FA);
+
+  static int _parseHex(String hex, int fallback) {
+    final s = hex.replaceFirst('#', '');
+    final full = s.length == 6 ? 'FF$s' : s;
+    return int.tryParse(full, radix: 16) ?? fallback;
   }
 }

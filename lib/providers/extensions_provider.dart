@@ -2,14 +2,18 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:quill_code/quill_code.dart';
+import 'package:sdk_manager/sdk_manager.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/extension_theme_meta.dart';
 
-const _kAssetsBase = 'assets/themes/';
+const _kRawBase =
+    'https://raw.githubusercontent.com/YatoNorai/fl_ide_android/main/extensions/';
+const _kThemeRawBase = '${_kRawBase}themes/';
+const _kSdkRawBase   = '${_kRawBase}sdk/';
 
 const _kPrefInstalled = 'ext_installed_ids';
 const _kPrefActive = 'ext_active_theme_id';
@@ -25,6 +29,11 @@ class ExtensionsProvider extends ChangeNotifier {
   String? _indexError;
   final Set<String> _downloading = {};
 
+  // SDK extensions
+  List<SdkExtension> _availableSdks = [];
+  bool _loadingSdkIndex = false;
+  String? _sdkIndexError;
+
   // ── Getters ──────────────────────────────────────────────────────────────
   List<ExtensionThemeMeta> get availableThemes => _available;
   List<ExtensionThemeMeta> get installedThemes =>
@@ -39,6 +48,10 @@ class ExtensionsProvider extends ChangeNotifier {
   bool isInstalled(String id) => _installed.containsKey(id);
   bool isDownloading(String id) => _downloading.contains(id);
   bool isActive(String id) => _activeId == id;
+
+  List<SdkExtension> get availableSdks => _availableSdks;
+  bool get loadingSdkIndex => _loadingSdkIndex;
+  String? get sdkIndexError => _sdkIndexError;
 
   ExtensionsProvider() {
     _init();
@@ -73,17 +86,23 @@ class ExtensionsProvider extends ChangeNotifier {
 
     notifyListeners();
     fetchIndex();
+    fetchSdkIndex();
   }
 
-  // ── Fetch index (from bundled assets) ───────────────────────────────────
+  // ── Fetch index (from GitHub) ────────────────────────────────────────────
   Future<void> fetchIndex() async {
     _loadingIndex = true;
     _indexError = null;
     notifyListeners();
 
     try {
-      final raw = await rootBundle.loadString('${_kAssetsBase}index.json');
-      final json = jsonDecode(raw) as Map<String, dynamic>;
+      final resp = await http
+          .get(Uri.parse('${_kThemeRawBase}index.json'))
+          .timeout(const Duration(seconds: 15));
+
+      if (resp.statusCode != 200) throw Exception('HTTP ${resp.statusCode}');
+
+      final json = jsonDecode(resp.body) as Map<String, dynamic>;
       final list = json['themes'] as List<dynamic>;
       _available = list
           .map((e) => ExtensionThemeMeta.fromJson(e as Map<String, dynamic>))
@@ -97,17 +116,60 @@ class ExtensionsProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ── "Download" theme (copy from bundled assets to app documents) ─────────
+  // ── Fetch SDK index (from GitHub) ────────────────────────────────────────
+  Future<void> fetchSdkIndex() async {
+    _loadingSdkIndex = true;
+    _sdkIndexError = null;
+    notifyListeners();
+
+    try {
+      final indexResp = await http
+          .get(Uri.parse('${_kSdkRawBase}index.json'))
+          .timeout(const Duration(seconds: 15));
+
+      if (indexResp.statusCode != 200) {
+        throw Exception('HTTP ${indexResp.statusCode}');
+      }
+
+      final index = jsonDecode(indexResp.body) as Map<String, dynamic>;
+      final files = (index['extensions'] as List).cast<String>();
+
+      final result = <SdkExtension>[];
+      for (final file in files) {
+        try {
+          final resp = await http
+              .get(Uri.parse('$_kSdkRawBase$file'))
+              .timeout(const Duration(seconds: 15));
+          if (resp.statusCode == 200) {
+            result.add(SdkExtension.fromJson(
+                jsonDecode(resp.body) as Map<String, dynamic>));
+          }
+        } catch (_) {}
+      }
+      _availableSdks = result;
+      _sdkIndexError = null;
+    } catch (e) {
+      _sdkIndexError = 'Could not load SDK list: $e';
+    }
+
+    _loadingSdkIndex = false;
+    notifyListeners();
+  }
+
+  // ── Download theme (from GitHub to app documents) ────────────────────────
   Future<void> downloadTheme(ExtensionThemeMeta meta) async {
     if (_downloading.contains(meta.id)) return;
     _downloading.add(meta.id);
     notifyListeners();
 
     try {
-      final raw = await rootBundle.loadString('$_kAssetsBase${meta.file}');
+      final resp = await http
+          .get(Uri.parse('$_kThemeRawBase${meta.file}'))
+          .timeout(const Duration(seconds: 30));
 
-      // Validate JSON
-      final json = jsonDecode(raw) as Map<String, dynamic>;
+      if (resp.statusCode != 200) throw Exception('HTTP ${resp.statusCode}');
+
+      final json = jsonDecode(resp.body) as Map<String, dynamic>;
 
       // Save to documents dir with meta fields embedded
       final enriched = {
