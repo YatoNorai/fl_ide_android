@@ -72,31 +72,45 @@ class _SdkInstallDialogState extends State<_SdkInstallDialog> {
         .replaceAll(r'$DOWNLOAD_PATH', downloadPath);
   }
 
-  Map<String, String> _env(String downloadPath) => {
-        ...RuntimeEnvir.baseEnv,
-        'PREFIX': RuntimeEnvir.usrPath,
-        'DOWNLOAD_PATH': downloadPath,
-      };
+  Map<String, String> _env(String downloadPath) {
+    final base = RuntimeEnvir.baseEnv;
+    return {
+      ...base,
+      'PREFIX': RuntimeEnvir.usrPath,
+      'DOWNLOAD_PATH': downloadPath,
+      // Prepend flutter bin so config steps find the just-installed flutter
+      'PATH': '${RuntimeEnvir.flutterPath}/bin:${base['PATH'] ?? ''}',
+    };
+  }
 
   Future<String> _runShell(String command, String downloadPath) async {
+    final resolved = _resolve(command, downloadPath);
+    debugPrint('[SdkInstall] shell: $resolved');
     final result = await Process.run(
       RuntimeEnvir.bashPath,
-      ['-c', _resolve(command, downloadPath)],
+      ['-c', resolved],
       environment: _env(downloadPath),
       workingDirectory: RuntimeEnvir.homePath,
     );
-    final out = '${result.stdout}${result.stderr}'.trim();
-    return out;
+    final stdout = result.stdout?.toString().trim() ?? '';
+    final stderr = result.stderr?.toString().trim() ?? '';
+    final exitCode = result.exitCode;
+    if (stdout.isNotEmpty) debugPrint('[SdkInstall] stdout: $stdout');
+    if (stderr.isNotEmpty) debugPrint('[SdkInstall] stderr: $stderr');
+    debugPrint('[SdkInstall] exit code: $exitCode');
+    return '$stdout$stderr'.trim();
   }
 
   String _extractCmd(SdkExtStep step, String downloadPath) {
     final dest = _resolve(step.dest ?? r'$PREFIX', downloadPath);
+    debugPrint('[SdkInstall] extract type=${widget.ext.package.type} dest=$dest');
     switch (widget.ext.package.type) {
       case 'zip':
         return 'mkdir -p "$dest" && unzip -o "$downloadPath" -d "$dest"';
       case 'tar_gz':
         return 'mkdir -p "$dest" && tar xzf "$downloadPath" -C "$dest"';
       default:
+        debugPrint('[SdkInstall] unknown package type: ${widget.ext.package.type}');
         return '';
     }
   }
@@ -105,12 +119,22 @@ class _SdkInstallDialogState extends State<_SdkInstallDialog> {
 
   Future<void> _startInstall() async {
     _cancelled = false;
+    debugPrint('[SdkInstall] === starting install: ${widget.ext.displayName} ===');
+    debugPrint('[SdkInstall] package url: ${widget.ext.package.url}');
+    debugPrint('[SdkInstall] package type: ${widget.ext.package.type}');
+    debugPrint('[SdkInstall] bash path: ${RuntimeEnvir.bashPath}');
+    debugPrint('[SdkInstall] bash exists: ${File(RuntimeEnvir.bashPath).existsSync()}');
+    debugPrint('[SdkInstall] PREFIX: ${RuntimeEnvir.usrPath}');
+    debugPrint('[SdkInstall] HOME: ${RuntimeEnvir.homePath}');
+    debugPrint('[SdkInstall] flutter path: ${RuntimeEnvir.flutterPath}');
+    debugPrint('[SdkInstall] flutter binary exists: ${File('${RuntimeEnvir.flutterPath}/bin/flutter').existsSync()}');
 
     try {
       // ── Phase 1: Download ────────────────────────────────────────────────
       final tmpDir = '${RuntimeEnvir.filesPath}/tmp';
       await Directory(tmpDir).create(recursive: true);
       final downloadPath = '$tmpDir/${widget.ext.package.filename}';
+      debugPrint('[SdkInstall] download path: $downloadPath');
 
       _set(() {
         _phase = _Phase.downloading;
@@ -119,6 +143,7 @@ class _SdkInstallDialogState extends State<_SdkInstallDialog> {
       });
 
       final dio = Dio();
+      debugPrint('[SdkInstall] starting dio.download...');
       await dio.download(
         widget.ext.package.url,
         downloadPath,
@@ -136,13 +161,17 @@ class _SdkInstallDialogState extends State<_SdkInstallDialog> {
         },
         options: Options(followRedirects: true, maxRedirects: 10),
       );
+      debugPrint('[SdkInstall] download complete. file exists: ${File(downloadPath).existsSync()}');
+      debugPrint('[SdkInstall] file size: ${File(downloadPath).existsSync() ? File(downloadPath).lengthSync() : 0} bytes');
 
       if (_cancelled) return;
 
       // ── Phase 2: Install steps ──────────────────────────────────────────
+      debugPrint('[SdkInstall] === phase 2: install (${_installStates.length} steps) ===');
       _set(() => _phase = _Phase.installing);
       for (final state in _installStates) {
         if (_cancelled) return;
+        debugPrint('[SdkInstall] install step: "${state.step.description}" type=${state.step.type}');
         _set(() => state.active = true);
 
         final String cmd;
@@ -155,46 +184,62 @@ class _SdkInstallDialogState extends State<_SdkInstallDialog> {
         if (cmd.isNotEmpty) {
           final out = await _runShell(cmd, downloadPath);
           state.output = out;
+        } else {
+          debugPrint('[SdkInstall] skipping empty command');
         }
 
         _set(() {
           state.active = false;
           state.done = true;
         });
+        debugPrint('[SdkInstall] install step done: "${state.step.description}"');
       }
 
       // ── Phase 3: Config steps ───────────────────────────────────────────
+      debugPrint('[SdkInstall] === phase 3: configure (${_configStates.length} steps) ===');
       _set(() => _phase = _Phase.configuring);
       for (final state in _configStates) {
         if (_cancelled) return;
+        debugPrint('[SdkInstall] config step: "${state.step.description}"');
         _set(() => state.active = true);
 
         final cmd = state.step.command ?? '';
         if (cmd.isNotEmpty) {
           final out = await _runShell(cmd, downloadPath);
           state.output = out;
+        } else {
+          debugPrint('[SdkInstall] skipping empty config command');
         }
 
         _set(() {
           state.active = false;
           state.done = true;
         });
+        debugPrint('[SdkInstall] config step done: "${state.step.description}"');
       }
 
       // ── Cleanup temp file ───────────────────────────────────────────────
       try {
         await File(downloadPath).delete();
-      } catch (_) {}
+        debugPrint('[SdkInstall] temp file deleted');
+      } catch (e) {
+        debugPrint('[SdkInstall] could not delete temp file: $e');
+      }
 
+      debugPrint('[SdkInstall] === install complete ===');
       _set(() => _phase = _Phase.done);
     } on DioException catch (e) {
       if (_cancelled) return;
+      debugPrint('[SdkInstall] DioException: ${e.type} | ${e.message} | ${e.error}');
+      debugPrint('[SdkInstall] response: ${e.response?.statusCode} ${e.response?.data}');
       _set(() {
         _phase = _Phase.error;
         _error = 'Download failed: ${e.message}';
       });
-    } catch (e) {
+    } catch (e, stack) {
       if (_cancelled) return;
+      debugPrint('[SdkInstall] unexpected error: $e');
+      debugPrint('[SdkInstall] stack: $stack');
       _set(() {
         _phase = _Phase.error;
         _error = e.toString();
