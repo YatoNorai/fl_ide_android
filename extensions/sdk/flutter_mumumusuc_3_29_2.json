@@ -32,6 +32,11 @@
     },
     {
       "type": "shell",
+      "command": "pkg install -y git 2>&1",
+      "description": "Installing git (required by Flutter)"
+    },
+    {
+      "type": "shell",
       "command": "grep -qxF 'export PATH=\"$PATH:$PREFIX/flutter/bin\"' $HOME/.bashrc || echo 'export PATH=\"$PATH:$PREFIX/flutter/bin\"' >> $HOME/.bashrc",
       "description": "Adding Flutter to PATH"
     }
