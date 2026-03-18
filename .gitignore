@@ -10,8 +10,6 @@
 .history
 .svn/
 .swiftpm/
-.vscode/
-.claude/
 migrate_working_dir/
 
 # IntelliJ related
@@ -34,6 +32,8 @@ migrate_working_dir/
 .pub/
 /build/
 /coverage/
+.vscode/
+.claude/
 
 # Symbolication related
 app.*.symbols
