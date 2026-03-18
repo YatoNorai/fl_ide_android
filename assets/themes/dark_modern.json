@@ -1,0 +1,77 @@
+{
+  "id": "dark_modern",
+  "name": "Dark Modern",
+  "dark": true,
+  "colors": {
+    "background": "#1F1F1F",
+    "lineNumberBackground": "#1A1A1A",
+    "textNormal": "#D4D4D4",
+    "lineNumber": "#858585",
+    "lineNumberCurrent": "#CCCCCC",
+    "cursor": "#AEAFAD",
+    "selectionColor": "#264F7840",
+    "keyword": "#569CD6",
+    "string": "#CE9178",
+    "comment": "#6A9955",
+    "number": "#B5CEA8",
+    "operator": "#D4D4D4",
+    "identifier": "#9CDCFE",
+    "function": "#DCDCAA",
+    "type": "#4EC9B0",
+    "annotation": "#9CDCFE",
+    "blockLine": "#3C3C3C",
+    "completionBackground": "#252526",
+    "ghostTextForeground": "#858585",
+    "currentLineBackground": "#2A2D2E",
+    "activeBlockHighlight": "#2A2D2EBB",
+    "searchMatchBackground": "#613315",
+    "searchMatchBorder": "#EA6A00"
+  },
+  "lineHighlight": {
+    "style": "fill",
+    "fillColor": "#2A2D2E",
+    "strokeColor": "#3C3C3C",
+    "accentColor": "#569CD6",
+    "activeBlockColor": "#2A2D2E99"
+  },
+  "blockLines": {
+    "color": "#00000000",
+    "activeColor": "#569CD6FF",
+    "width": 1.0,
+    "activeWidth": 1.5,
+    "colorMode": "single",
+    "inactiveOpacity": 0.0,
+    "program": [
+      {
+        "op": "gap",
+        "length": 1
+      }
+    ],
+    "endCap": {
+      "type": "none"
+    },
+    "activeProgram": [
+      {
+        "op": "line",
+        "fill": true
+      }
+    ],
+    "activeEndCap": {
+      "type": "curve",
+      "radius": 6,
+      "tick": 6
+    }
+  },
+  "bracketPair": {
+    "fillColor": "#569CD61A",
+    "borderColor": "#569CD680",
+    "borderWidth": 1.2,
+    "radius": 2.0
+  },
+  "indentDots": {
+    "visible": false,
+    "color": "#85858544",
+    "size": 1.5,
+    "mode": "indentOnly"
+  }
+}

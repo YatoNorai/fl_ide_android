@@ -1,0 +1,76 @@
+{
+  "id": "crystal_cave",
+  "name": "Crystal Cave",
+  "dark": true,
+  "colors": {
+    "background": "#001A1F",
+    "lineNumberBackground": "#001215",
+    "textNormal": "#A0E8EE",
+    "lineNumber": "#1A4F55",
+    "lineNumberCurrent": "#55CCDD",
+    "cursor": "#00DDFF",
+    "selectionHandle": "#00AABB",
+    "selectionColor": "#00DDFF33",
+    "keyword": "#55EEFF",
+    "string": "#88DDAA",
+    "comment": "#2A6068",
+    "number": "#AAFFEE",
+    "operator": "#00CCEE",
+    "identifier": "#A0E8EE",
+    "function": "#44EEFF",
+    "type": "#00FFCC",
+    "annotation": "#99BBFF",
+    "blockLine": "#002830",
+    "completionBackground": "#001A1F",
+    "ghostTextForeground": "#1A4F55",
+    "currentLineBackground": "#002228",
+    "searchMatchBackground": "#00DDFF33",
+    "searchMatchBorder": "#00DDFF",
+    "cursorWidth": 2.0
+  },
+  "lineHighlight": {
+    "style": "fill",
+    "fillColor": "#002228",
+    "strokeColor": "#003540",
+    "accentColor": "#00DDFF",
+    "activeBlockColor": "#00222899"
+  },
+  "blockLines": {
+    "color": "#1A4F5566",
+    "activeColor": "#00DDFFCC",
+    "width": 1.0,
+    "activeWidth": 1.5,
+    "colorMode": "rainbow",
+    "inactiveOpacity": 0.45,
+    "rainbowColors": [
+      "#00DDFF",
+      "#55EEFF",
+      "#00FFCC",
+      "#44EEFF",
+      "#00CCEE",
+      "#88DDAA"
+    ],
+    "program": [
+      { "op": "wave", "height": 10, "period": 10, "amplitude": 2 }
+    ],
+    "endCap": { "type": "none" },
+    "startCap": { "type": "none" },
+    "activeProgram": [
+      { "op": "line", "fill": true }
+    ],
+    "activeEndCap": { "type": "curve", "radius": 8, "tick": 8 },
+    "activeStartCap": { "type": "none" }
+  },
+  "bracketPair": {
+    "fillColor": "#00DDFF1A",
+    "borderColor": "#00DDFF55",
+    "borderWidth": 1.2,
+    "radius": 3.0
+  },
+  "indentDots": {
+    "visible": false,
+    "color": "#1A4F5566",
+    "size": 1.5,
+    "mode": "indentOnly"
+  }
+}

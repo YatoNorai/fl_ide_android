@@ -1,0 +1,77 @@
+{
+  "id": "sakura_night",
+  "name": "Sakura Night",
+  "dark": true,
+  "colors": {
+    "background": "#16101A",
+    "lineNumberBackground": "#100B14",
+    "textNormal": "#E8D0E8",
+    "lineNumber": "#4A2A50",
+    "lineNumberCurrent": "#DD99CC",
+    "cursor": "#FF88AA",
+    "selectionHandle": "#CC5588",
+    "selectionColor": "#FF88AA33",
+    "keyword": "#FF99BB",
+    "string": "#AADDAA",
+    "comment": "#6B4870",
+    "number": "#FFB88C",
+    "operator": "#CC88DD",
+    "identifier": "#E8D0E8",
+    "function": "#FFAACC",
+    "type": "#DD99FF",
+    "annotation": "#FF88CC",
+    "blockLine": "#241530",
+    "completionBackground": "#16101A",
+    "ghostTextForeground": "#4A2A50",
+    "currentLineBackground": "#1D1424",
+    "searchMatchBackground": "#FF88AA33",
+    "searchMatchBorder": "#FF88AA",
+    "cursorWidth": 2.0
+  },
+  "lineHighlight": {
+    "style": "fill",
+    "fillColor": "#1D1424",
+    "strokeColor": "#302040",
+    "accentColor": "#FF88AA",
+    "activeBlockColor": "#1D142499"
+  },
+  "blockLines": {
+    "color": "#4A2A5055",
+    "activeColor": "#FF88AACC",
+    "width": 1.0,
+    "activeWidth": 1.5,
+    "colorMode": "rainbow",
+    "inactiveOpacity": 0.5,
+    "rainbowColors": [
+      "#FF88AA",
+      "#CC88DD",
+      "#FF99BB",
+      "#DD99FF",
+      "#FFAACC",
+      "#BB77CC"
+    ],
+    "program": [
+      { "op": "dot", "radius": 1.2 },
+      { "op": "gap", "length": 5 }
+    ],
+    "endCap": { "type": "none" },
+    "startCap": { "type": "none" },
+    "activeProgram": [
+      { "op": "line", "fill": true }
+    ],
+    "activeEndCap": { "type": "curve", "radius": 6, "tick": 6 },
+    "activeStartCap": { "type": "none" }
+  },
+  "bracketPair": {
+    "fillColor": "#FF88AA1A",
+    "borderColor": "#FF88AA66",
+    "borderWidth": 1.2,
+    "radius": 3.0
+  },
+  "indentDots": {
+    "visible": false,
+    "color": "#4A2A5066",
+    "size": 1.5,
+    "mode": "indentOnly"
+  }
+}

@@ -1,0 +1,87 @@
+{
+  "id": "dracula",
+  "name": "Dracula",
+  "dark": true,
+  "colors": {
+    "background": "#282A36",
+    "lineNumberBackground": "#21222C",
+    "textNormal": "#F8F8F2",
+    "lineNumber": "#6272A4",
+    "lineNumberCurrent": "#F8F8F2",
+    "cursor": "#F8F8F2",
+    "selectionColor": "#44475A80",
+    "keyword": "#FF79C6",
+    "string": "#F1FA8C",
+    "comment": "#6272A4",
+    "number": "#BD93F9",
+    "operator": "#FF79C6",
+    "identifier": "#F8F8F2",
+    "function": "#50FA7B",
+    "type": "#8BE9FD",
+    "annotation": "#FFB86C",
+    "blockLine": "#44475A",
+    "completionBackground": "#21222C",
+    "ghostTextForeground": "#6272A4",
+    "currentLineBackground": "#44475A",
+    "activeBlockHighlight": "#44475ABB",
+    "searchMatchBackground": "#F1FA8C33",
+    "searchMatchBorder": "#F1FA8C"
+  },
+  "lineHighlight": {
+    "style": "fill",
+    "fillColor": "#44475A",
+    "strokeColor": "#6272A4",
+    "accentColor": "#BD93F9",
+    "activeBlockColor": "#44475A99"
+  },
+  "blockLines": {
+    "color": "#44475A66",
+    "activeColor": "#FF79C6FF",
+    "width": 1.0,
+    "activeWidth": 2.0,
+    "colorMode": "rainbow",
+    "inactiveOpacity": 0.45,
+    "rainbowColors": [
+      "#FF79C6",
+      "#50FA7B",
+      "#F1FA8C",
+      "#8BE9FD",
+      "#BD93F9",
+      "#FFB86C"
+    ],
+    "program": [
+      {
+        "op": "zigzag",
+        "fill": true,
+        "period": 8,
+        "amplitude": 2.5
+      }
+    ],
+    "endCap": {
+      "type": "none"
+    },
+    "activeProgram": [
+      {
+        "op": "line",
+        "fill": true
+      }
+    ],
+    "activeEndCap": {
+      "type": "curve",
+      "radius": 8,
+      "tick": 6
+    }
+  },
+  "bracketPair": {
+    "fillColor": "#BD93F91A",
+    "borderColor": "#BD93F980",
+    "borderWidth": 1.2,
+    "radius": 3.0
+  },
+  "indentDots": {
+    "visible": true,
+    "color": "#6272A455",
+    "size": 1.8,
+    "mode": "indentOnly"
+  }
+}

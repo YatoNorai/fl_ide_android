@@ -2,17 +2,14 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:quill_code/quill_code.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/extension_theme_meta.dart';
 
-const _kIndexUrl =
-    'https://raw.githubusercontent.com/YatoNorai/fl_ide_android/main/extensions/themes/index.json';
-const _kRawBase =
-    'https://raw.githubusercontent.com/YatoNorai/fl_ide_android/main/extensions/themes/';
+const _kAssetsBase = 'assets/themes/';
 
 const _kPrefInstalled = 'ext_installed_ids';
 const _kPrefActive = 'ext_active_theme_id';
@@ -78,54 +75,41 @@ class ExtensionsProvider extends ChangeNotifier {
     fetchIndex();
   }
 
-  // ── Fetch index ──────────────────────────────────────────────────────────
+  // ── Fetch index (from bundled assets) ───────────────────────────────────
   Future<void> fetchIndex() async {
     _loadingIndex = true;
     _indexError = null;
     notifyListeners();
 
     try {
-      final resp = await http
-          .get(Uri.parse(_kIndexUrl))
-          .timeout(const Duration(seconds: 15));
-      if (resp.statusCode == 200) {
-        final json = jsonDecode(resp.body) as Map<String, dynamic>;
-        final list = (json['themes'] as List<dynamic>);
-        _available =
-            list.map((e) => ExtensionThemeMeta.fromJson(e as Map<String, dynamic>)).toList();
-        _indexError = null;
-      } else {
-        _indexError = 'Server returned ${resp.statusCode}';
-      }
+      final raw = await rootBundle.loadString('${_kAssetsBase}index.json');
+      final json = jsonDecode(raw) as Map<String, dynamic>;
+      final list = json['themes'] as List<dynamic>;
+      _available = list
+          .map((e) => ExtensionThemeMeta.fromJson(e as Map<String, dynamic>))
+          .toList();
+      _indexError = null;
     } catch (e) {
-      _indexError = 'Could not fetch theme list: $e';
+      _indexError = 'Could not load theme list: $e';
     }
 
     _loadingIndex = false;
     notifyListeners();
   }
 
-  // ── Download theme ───────────────────────────────────────────────────────
+  // ── "Download" theme (copy from bundled assets to app documents) ─────────
   Future<void> downloadTheme(ExtensionThemeMeta meta) async {
     if (_downloading.contains(meta.id)) return;
     _downloading.add(meta.id);
     notifyListeners();
 
     try {
-      final url = '$_kRawBase${meta.file}';
-      final resp = await http
-          .get(Uri.parse(url))
-          .timeout(const Duration(seconds: 30));
-
-      if (resp.statusCode != 200) {
-        throw Exception('Download failed: ${resp.statusCode}');
-      }
+      final raw = await rootBundle.loadString('$_kAssetsBase${meta.file}');
 
       // Validate JSON
-      final json = jsonDecode(resp.body) as Map<String, dynamic>;
+      final json = jsonDecode(raw) as Map<String, dynamic>;
 
-      // Save to disk — add id/name/file/dark/preview fields so we can
-      // reconstruct the meta later without the index.
+      // Save to documents dir with meta fields embedded
       final enriched = {
         'id': meta.id,
         'name': meta.name,
@@ -141,12 +125,10 @@ class ExtensionsProvider extends ChangeNotifier {
 
       _installed[meta.id] = meta;
 
-      // Persist installed list
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setStringList(
-          _kPrefInstalled, _installed.keys.toList());
+      await prefs.setStringList(_kPrefInstalled, _installed.keys.toList());
     } catch (e) {
-      debugPrint('[ExtensionsProvider] download error: $e');
+      debugPrint('[ExtensionsProvider] install error: $e');
     }
 
     _downloading.remove(meta.id);

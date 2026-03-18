@@ -1,0 +1,66 @@
+{
+  "id": "winter_is_coming",
+  "name": "Winter is Coming",
+  "dark": true,
+  "colors": {
+    "background": "#011627",
+    "lineNumberBackground": "#01111D",
+    "textNormal": "#D6DEEB",
+    "lineNumber": "#4A5560",
+    "lineNumberCurrent": "#7FDBCA",
+    "cursor": "#7FDBCA",
+    "selectionColor": "#1D3B5360",
+    "keyword": "#0FB4D0",
+    "string": "#ADDB67",
+    "comment": "#637777",
+    "number": "#F78C6C",
+    "operator": "#C792EA",
+    "identifier": "#D6DEEB",
+    "function": "#82AAFF",
+    "type": "#FFCB8B",
+    "annotation": "#7FDBCA",
+    "blockLine": "#122D42",
+    "completionBackground": "#01111D",
+    "ghostTextForeground": "#4A5560",
+    "currentLineBackground": "#0D2B3E",
+    "activeBlockHighlight": "#0D2B3EBB",
+    "searchMatchBackground": "#ADDB6733",
+    "searchMatchBorder": "#ADDB67"
+  },
+  "lineHighlight": {
+    "style": "fill",
+    "fillColor": "#0D2B3E",
+    "strokeColor": "#1D3B53",
+    "accentColor": "#7FDBCA",
+    "activeBlockColor": "#0D2B3E99"
+  },
+  "blockLines": {
+    "color": "#1D3B5355",
+    "activeColor": "#7FDBCAFF",
+    "width": 1.0,
+    "activeWidth": 1.5,
+    "colorMode": "single",
+    "inactiveOpacity": 0.5,
+    "program": [
+      { "op": "line", "length": 8 },
+      { "op": "gap",  "length": 4 }
+    ],
+    "endCap": { "type": "none" },
+    "activeProgram": [
+      { "op": "line", "fill": true }
+    ],
+    "activeEndCap": { "type": "curve", "radius": 8, "tick": 6 }
+  },
+  "bracketPair": {
+    "fillColor": "#7FDBCA1A",
+    "borderColor": "#7FDBCA80",
+    "borderWidth": 1.2,
+    "radius": 2.0
+  },
+  "indentDots": {
+    "visible": false,
+    "color": "#4A556044",
+    "size": 1.5,
+    "mode": "indentOnly"
+  }
+}

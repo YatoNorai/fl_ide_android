@@ -1,0 +1,86 @@
+{
+  "id": "github_dark_curved",
+  "name": "GitHub Dark (Curved)",
+  "dark": true,
+  "colors": {
+    "background": "#0D1117",
+    "lineNumberBackground": "#090D12",
+    "textNormal": "#E6EDF3",
+    "lineNumber": "#6E7681",
+    "lineNumberCurrent": "#E6EDF3",
+    "cursor": "#58A6FF",
+    "selectionColor": "#58A6FF33",
+    "keyword": "#FF7B72",
+    "string": "#A5D6FF",
+    "comment": "#8B949E",
+    "number": "#79C0FF",
+    "operator": "#E6EDF3",
+    "identifier": "#E6EDF3",
+    "function": "#D2A8FF",
+    "type": "#FFA657",
+    "annotation": "#79C0FF",
+    "blockLine": "#21262D",
+    "completionBackground": "#161B22",
+    "ghostTextForeground": "#6E7681",
+    "currentLineBackground": "#161B22",
+    "activeBlockHighlight": "#161B22BB",
+    "searchMatchBackground": "#F9E2AF22",
+    "searchMatchBorder": "#F9E2AF"
+  },
+  "lineHighlight": {
+    "style": "fill",
+    "fillColor": "#161B22",
+    "strokeColor": "#21262D",
+    "accentColor": "#58A6FF",
+    "activeBlockColor": "#161B2299"
+  },
+  "blockLines": {
+    "color": "#21262D44",
+    "activeColor": "#3FB950FF",
+    "width": 1.0,
+    "activeWidth": 1.5,
+    "colorMode": "rainbow",
+    "inactiveOpacity": 0.5,
+    "rainbowColors": [
+      "#58A6FF",
+      "#3FB950",
+      "#FFA657",
+      "#D2A8FF",
+      "#FF7B72",
+      "#79C0FF"
+    ],
+    "program": [
+      {
+        "op": "dot",
+        "radius": 1.2,
+        "gap": 4.0
+      }
+    ],
+    "endCap": {
+      "type": "none"
+    },
+    "activeProgram": [
+      {
+        "op": "line",
+        "fill": true
+      }
+    ],
+    "activeEndCap": {
+      "type": "curve",
+      "radius": 8,
+      "tick": 6
+    }
+  },
+  "bracketPair": {
+    "fillColor": "#58A6FF1A",
+    "borderColor": "#58A6FF80",
+    "borderWidth": 1.2,
+    "radius": 2.0
+  },
+  "indentDots": {
+    "visible": false,
+    "color": "#6E768144",
+    "size": 1.5,
+    "mode": "indentOnly"
+  }
+}
