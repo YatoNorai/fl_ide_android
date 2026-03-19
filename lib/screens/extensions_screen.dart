@@ -230,6 +230,7 @@ class _InstalledContent extends StatelessWidget {
                   ),
                 );
               }),
+                 const SizedBox(height: 32),
             ],
           ],
         );
@@ -519,6 +520,7 @@ class _SdkContent extends StatelessWidget {
                     icon: const Icon(Icons.refresh),
                     label: const Text('Retry'),
                   ),
+                  
                 ],
               ),
             ),
