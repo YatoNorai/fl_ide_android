@@ -48,6 +48,11 @@ jobs:
       # ── Debug build ──────────────────────────────────────────────────────────
       - name: Build debug APK
         run: flutter build apk --debug
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g"
+    # Ninja usa todas as CPUs por default; limitar reduz pico de memória
+          CMAKE_BUILD_PARALLEL_LEVEL: "2"
+
 
       - name: Rename debug APK
         run: |
@@ -57,6 +62,10 @@ jobs:
       # ── Release build ────────────────────────────────────────────────────────
       - name: Build release APK
         run: flutter build apk --release
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g"
+    # Ninja usa todas as CPUs por default; limitar reduz pico de memória
+          CMAKE_BUILD_PARALLEL_LEVEL: "2"
 
       - name: Rename release APK
         run: |
