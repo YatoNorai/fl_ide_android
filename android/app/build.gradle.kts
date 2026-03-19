@@ -22,9 +22,17 @@ android {
     defaultConfig {
         applicationId = "com.termux" //"com.example.fl_ide"
         minSdk = 26  // Required for PTY/rootfs operations
-        targetSdk = 28//flutter.targetSdkVersion
+        targetSdk = 28  // Must stay 28: Android 10+ SELinux blocks execve() from
+                        // app data dirs (/data/data/com.termux/files/usr/bin/)
+                        // for targetSdk >= 29. The real Termux F-Droid app also
+                        // uses targetSdk 28 for this exact reason.
+                        // Lint warning suppressed below via lint { disable }.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+    }
+
+    lint {
+        disable += "ExpiredTargetSdkVersion"
     }
 
     buildTypes {

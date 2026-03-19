@@ -32,14 +32,16 @@ class _BuildToolbar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final ide = Theme.of(context).extension<IdeColors>()!;
     final result = buildProv.result;
 
     return Container(
       height: 44,
       padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: const BoxDecoration(
-        color: AppTheme.darkTabBar,
-        border: Border(bottom: BorderSide(color: AppTheme.darkBorder)),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHigh,
+        border: Border(bottom: BorderSide(color: cs.outlineVariant)),
       ),
       child: Row(
         children: [
@@ -49,7 +51,7 @@ class _BuildToolbar extends StatelessWidget {
           Text(
             _statusLabel(result.status),
             style: TextStyle(
-              color: _statusColor(result.status),
+              color: _statusColor(result.status, cs, ide),
               fontSize: 12,
               fontWeight: FontWeight.w500,
             ),
@@ -60,20 +62,20 @@ class _BuildToolbar extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
-                color: AppTheme.darkSuccess.withValues(alpha: 0.1),
+                color: ide.success.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(6),
                 border: Border.all(
-                    color: AppTheme.darkSuccess.withValues(alpha: 0.3)),
+                    color: ide.success.withValues(alpha: 0.3)),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.android_rounded,
-                      size: 13, color: AppTheme.darkSuccess),
+                  Icon(Icons.android_rounded,
+                      size: 13, color: ide.success),
                   const SizedBox(width: 4),
-                  const Text('APK ready',
+                  Text('APK ready',
                       style: TextStyle(
-                          color: AppTheme.darkSuccess, fontSize: 11)),
+                          color: ide.success, fontSize: 11)),
                 ],
               ),
             ),
@@ -85,7 +87,7 @@ class _BuildToolbar extends StatelessWidget {
           if (result.isRunning)
             TextButton.icon(
               style: TextButton.styleFrom(
-                foregroundColor: AppTheme.darkError,
+                foregroundColor: cs.error,
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               ),
               onPressed: context.read<BuildProvider>().cancel,
@@ -95,7 +97,7 @@ class _BuildToolbar extends StatelessWidget {
           else
             FilledButton.icon(
               style: FilledButton.styleFrom(
-                backgroundColor: AppTheme.darkAccent,
+                backgroundColor: cs.primary,
                 foregroundColor: const Color(0xFF001849),
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 minimumSize: Size.zero,
@@ -128,16 +130,16 @@ class _BuildToolbar extends StatelessWidget {
     }
   }
 
-  Color _statusColor(BuildStatus s) {
+  Color _statusColor(BuildStatus s, ColorScheme cs, IdeColors ide) {
     switch (s) {
       case BuildStatus.idle:
-        return AppTheme.darkTextMuted;
+        return cs.onSurfaceVariant;
       case BuildStatus.running:
-        return AppTheme.darkAccent;
+        return cs.primary;
       case BuildStatus.success:
-        return AppTheme.darkSuccess;
+        return ide.success;
       case BuildStatus.error:
-        return AppTheme.darkError;
+        return cs.error;
     }
   }
 }
@@ -148,23 +150,25 @@ class _StatusIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final ide = Theme.of(context).extension<IdeColors>()!;
     switch (status) {
       case BuildStatus.idle:
-        return const Icon(Icons.circle_outlined,
-            size: 14, color: AppTheme.darkTextMuted);
+        return Icon(Icons.circle_outlined,
+            size: 14, color: cs.onSurfaceVariant);
       case BuildStatus.running:
-        return const SizedBox(
+        return SizedBox(
           width: 14,
           height: 14,
           child: CircularProgressIndicator(
-              strokeWidth: 2, color: AppTheme.darkAccent),
+              strokeWidth: 2, color: cs.primary),
         );
       case BuildStatus.success:
-        return const Icon(Icons.check_circle_rounded,
-            size: 14, color: AppTheme.darkSuccess);
+        return Icon(Icons.check_circle_rounded,
+            size: 14, color: ide.success);
       case BuildStatus.error:
-        return const Icon(Icons.error_rounded,
-            size: 14, color: AppTheme.darkError);
+        return Icon(Icons.error_rounded,
+            size: 14, color: cs.error);
     }
   }
 }
@@ -175,16 +179,17 @@ class _InstallButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ide = Theme.of(context).extension<IdeColors>()!;
     return FilledButton.icon(
       style: FilledButton.styleFrom(
-        backgroundColor: AppTheme.darkSuccess.withValues(alpha: 0.15),
-        foregroundColor: AppTheme.darkSuccess,
+        backgroundColor: ide.success.withValues(alpha: 0.15),
+        foregroundColor: ide.success,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         minimumSize: Size.zero,
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         textStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        side: const BorderSide(color: AppTheme.darkSuccess, width: 0.5),
+        side: BorderSide(color: ide.success, width: 0.5),
       ),
       onPressed: () => _installApk(context),
       icon: const Icon(Icons.install_mobile_rounded, size: 13),
@@ -234,12 +239,13 @@ class _BuildOutputState extends State<_BuildOutput> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Container(
-      color: AppTheme.darkPanel,
+      color: cs.surfaceContainerLow,
       child: widget.result.output.isEmpty
-          ? const Center(
+          ? Center(
               child: Text('Press Build to start',
-                  style: TextStyle(color: AppTheme.darkTextMuted)),
+                  style: TextStyle(color: cs.onSurfaceVariant)),
             )
           : Scrollbar(
               controller: _scroll,
@@ -248,8 +254,8 @@ class _BuildOutputState extends State<_BuildOutput> {
                 padding: const EdgeInsets.all(12),
                 child: SelectableText(
                   widget.result.output,
-                  style: const TextStyle(
-                    color: AppTheme.darkText,
+                  style: TextStyle(
+                    color: cs.onSurface,
                     fontFamily: 'monospace',
                     fontSize: 12,
                     height: 1.5,

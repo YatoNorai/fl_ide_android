@@ -202,16 +202,6 @@ class RootfsProvider extends ChangeNotifier {
         final outFile = File(filePath);
         await outFile.create(recursive: true);
         await outFile.writeAsBytes(file.content as List<int>);
-
-        // Apply Unix permissions from the ZIP entry (lower 9 bits = rwxrwxrwx).
-        // The archive package preserves them in file.mode but dart:io doesn't
-        // apply them on write — without this, all binaries end up as 0644
-        // (no execute bit) and execvp returns EACCES.
-        final unixMode = file.mode & 0x1FF;
-        if (unixMode != 0) {
-          final modeStr = unixMode.toRadixString(8).padLeft(3, '0');
-          await Process.run('/system/bin/chmod', [modeStr, filePath]);
-        }
       } else {
         await Directory(filePath).create(recursive: true);
       }
@@ -258,9 +248,12 @@ class RootfsProvider extends ChangeNotifier {
       }
     }
 
-    // Write a basic .bashrc if not present
+    // Write .bashrc — always overwrite if it contains the old welcome echo
+    // so stale messages don't persist on already-bootstrapped devices.
     final bashrc = File('${RuntimeEnvir.homePath}/.bashrc');
-    if (!await bashrc.exists()) {
+    final needsWrite = !await bashrc.exists() ||
+        (await bashrc.readAsString()).contains('environment ready');
+    if (needsWrite) {
       await bashrc.writeAsString('''
 export HOME="${RuntimeEnvir.homePath}"
 export PREFIX="${RuntimeEnvir.usrPath}"
@@ -276,7 +269,6 @@ export PATH="\$FLUTTER_ROOT/bin:\$PATH"
 export ANDROID_HOME="${RuntimeEnvir.androidSdkPath}"
 export PATH="\$ANDROID_HOME/tools/bin:\$ANDROID_HOME/platform-tools:\$PATH"
 
-echo "FL IDE environment ready"
 ''');
     }
   }

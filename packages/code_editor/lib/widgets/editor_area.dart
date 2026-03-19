@@ -35,6 +35,7 @@ class EditorArea extends StatelessWidget {
         return Column(
           children: [
             const EditorTabBar(),
+            const Divider(height: 1, thickness: 1),
             Expanded(
               child: editor.activeFile == null
                   ? const _WelcomePane()
@@ -74,9 +75,10 @@ class _ActiveEditor extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     if (file.controller == null) {
-      return const Center(
-        child: CircularProgressIndicator(color: AppTheme.darkAccent),
+      return Center(
+        child: CircularProgressIndicator(color: cs.primary),
       );
     }
 
@@ -102,31 +104,22 @@ class _ActiveEditor extends StatelessWidget {
       },
       child: Focus(
         autofocus: true,
-        child: Column(
+        child: Stack(
           children: [
-            _Breadcrumbs(path: file.path),
-            Expanded(
-              child: Stack(
-                children: [
-                  QuillCodeEditor(
-                    controller: file.controller!,
-                    onChanged: (_) =>
-                        context.read<EditorProvider>().markDirty(),
-                    // Pass LSP config if server is running
-                    lspConfig: lspProvider.lspConfig,
-                    fileUri: Uri.file(file.path).toString(),
-                    theme: effectiveTheme,
-                    showSymbolBar: showSymbolBar,
-                  ),
-                  // Inline diagnostics summary bar
-                  Positioned(
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                    child: _DiagnosticsBar(controller: file.controller!),
-                  ),
-                ],
-              ),
+            QuillCodeEditor(
+              controller: file.controller!,
+              onChanged: (_) =>
+                  context.read<EditorProvider>().markDirty(),
+              lspConfig: lspProvider.lspConfig,
+              fileUri: Uri.file(file.path).toString(),
+              theme: effectiveTheme,
+              showSymbolBar: showSymbolBar,
+            ),
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: _DiagnosticsBar(controller: file.controller!),
             ),
           ],
         ),
@@ -142,6 +135,8 @@ class _DiagnosticsBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final ide = Theme.of(context).extension<IdeColors>()!;
     return ListenableBuilder(
       listenable: controller,
       builder: (context, _) {
@@ -153,20 +148,20 @@ class _DiagnosticsBar extends StatelessWidget {
 
         return Container(
           height: 24,
-          color: AppTheme.darkTabBar,
+          color: Theme.of(context).scaffoldBackgroundColor,
           padding: const EdgeInsets.symmetric(horizontal: 12),
           child: Row(
             children: [
               Icon(
                 hasError ? Icons.error_outline : Icons.warning_amber_outlined,
                 size: 14,
-                color: hasError ? AppTheme.darkError : AppTheme.darkWarning,
+                color: hasError ? cs.error : ide.warning,
               ),
               const SizedBox(width: 6),
               Text(
                 '${all.length} problem${all.length == 1 ? '' : 's'}',
-                style: const TextStyle(
-                    color: AppTheme.darkTextMuted, fontSize: 11),
+                style: TextStyle(
+                    color: cs.onSurfaceVariant, fontSize: 11),
               ),
             ],
           ),
@@ -176,84 +171,47 @@ class _DiagnosticsBar extends StatelessWidget {
   }
 }
 
-class _Breadcrumbs extends StatelessWidget {
-  final String path;
-
-  const _Breadcrumbs({required this.path});
-
-  @override
-  Widget build(BuildContext context) {
-    final parts = path.replaceAll('\\', '/').split('/');
-    return Container(
-      height: 28,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      color: AppTheme.darkTabBar,
-      child: Row(
-        children: parts.asMap().entries.map((e) {
-          final isLast = e.key == parts.length - 1;
-          return Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                e.value,
-                style: TextStyle(
-                  color: isLast ? AppTheme.darkText : AppTheme.darkTextMuted,
-                  fontSize: 12,
-                ),
-              ),
-              if (!isLast)
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 4),
-                  child: Icon(Icons.chevron_right,
-                      size: 14, color: AppTheme.darkTextMuted),
-                ),
-            ],
-          );
-        }).toList(),
-      ),
-    );
-  }
-}
 
 class _WelcomePane extends StatelessWidget {
   const _WelcomePane();
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Container(
-      color: AppTheme.darkBg,
+      color: cs.surface,
       child: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('FL IDE',
+            Text('FL IDE',
                 style: TextStyle(
-                    color: AppTheme.darkText,
+                    color: cs.onSurface,
                     fontSize: 26,
                     fontWeight: FontWeight.w700)),
             const SizedBox(height: 16),
             RichText(
               textAlign: TextAlign.center,
-              text: const TextSpan(
-                style: TextStyle(color: AppTheme.darkTextMuted, fontSize: 14, height: 1.6),
+              text: TextSpan(
+                style: TextStyle(color: cs.onSurfaceVariant, fontSize: 14, height: 1.6),
                 children: [
-                  TextSpan(text: 'Swipe right for '),
+                  const TextSpan(text: 'Swipe right for '),
                   TextSpan(
                     text: 'files',
                     style: TextStyle(
-                        color: AppTheme.darkAccent,
+                        color: cs.primary,
                         decoration: TextDecoration.underline,
-                        decorationColor: AppTheme.darkAccent),
+                        decorationColor: cs.primary),
                   ),
-                  TextSpan(text: '.\nSwipe up for '),
+                  const TextSpan(text: '.\nSwipe up for '),
                   TextSpan(
                     text: 'build output',
                     style: TextStyle(
-                        color: AppTheme.darkAccent,
+                        color: cs.primary,
                         decoration: TextDecoration.underline,
-                        decorationColor: AppTheme.darkAccent),
+                        decorationColor: cs.primary),
                   ),
-                  TextSpan(text: '.'),
+                  const TextSpan(text: '.'),
                 ],
               ),
             ),

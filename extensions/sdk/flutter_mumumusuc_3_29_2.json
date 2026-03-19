@@ -59,5 +59,13 @@
     }
   ],
   "verify_binary": "flutter",
-  "verify_command": "flutter --version"
+  "verify_command": "flutter --version",
+  "run_config": {
+    "run": "flutter run",
+    "supports_devices": true,
+    "device_param": "-d",
+    "build_apk": "flutter build apk",
+    "build_appbundle": "flutter build appbundle",
+    "build_debug": "flutter build apk --debug"
+  }
 }

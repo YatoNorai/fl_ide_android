@@ -51,7 +51,7 @@ class _ExtensionsPageContentState extends State<ExtensionsPageContent>
           child: TabBar(
             controller: _tab,
             labelColor: Colors.white,
-            unselectedLabelColor: Colors.white,
+            /* unselectedLabelColor: Colors.white, */
             dividerColor: Colors.transparent,
             indicatorSize: TabBarIndicatorSize.tab,
             indicator: BoxDecoration(

@@ -6,6 +6,7 @@ import 'package:sdk_manager/sdk_manager.dart';
 
 import 'package:url_launcher/url_launcher.dart';
 
+import '../l10n/app_strings.dart';
 import '../models/ai_agent.dart';
 import '../providers/ai_provider.dart' show AiProvider, kGeminiModels, kGptModels, kClaudeModels, kDeepSeekModels;
 import '../providers/extensions_provider.dart';
@@ -71,6 +72,7 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
 
     return Consumer<SettingsProvider>(
       builder: (context, vm, _) {
+        final s = AppStrings.of(context);
         // Scroll to top whenever the page changes.
         if (_prevPage != vm.currentPage) {
           _prevPage = vm.currentPage;
@@ -122,11 +124,11 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
                           Positioned(
                             left: left,
                             bottom: bottom,
-                            child: const Padding(
-                              padding: EdgeInsets.only(top: 16, bottom: 8),
+                            child: Padding(
+                              padding: const EdgeInsets.only(top: 16, bottom: 8),
                               child: Text(
-                                'Settings',
-                                style: TextStyle(
+                                s.settings,
+                                style: const TextStyle(
                                   fontSize: 20,
                                   fontWeight: FontWeight.bold,
                                 ),
@@ -167,59 +169,60 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
   }
 
   Widget _buildMain(BuildContext context, SettingsProvider vm) {
+    final s = AppStrings.of(context);
     return Column(
       children: [
         _buildOption(context,
-            title: 'General',
-            subtitle: 'Appearance and behavior settings.',
+            title: s.general,
+            subtitle: s.generalMenuSub,
             onTap: () => vm.navigateToPage(SettingsPage.general),
             borderRadius: const BorderRadius.vertical(
                 top: Radius.circular(30), bottom: Radius.circular(10)),
             iconBg: Colors.pink,
             icon: FontAwesomeIcons.gear),
         _buildOption(context,
-            title: 'Editor',
-            subtitle: 'Code editor preferences.',
+            title: s.editor,
+            subtitle: s.editorMenuSub,
             onTap: () => vm.navigateToPage(SettingsPage.editor),
             borderRadius: const BorderRadius.vertical(
                 top: Radius.circular(10), bottom: Radius.circular(10)),
             iconBg: Colors.blue,
             icon: FontAwesomeIcons.code),
         _buildOption(context,
-            title: 'Terminal',
-            subtitle: 'Built-in terminal settings.',
+            title: s.terminal,
+            subtitle: s.terminalMenuSub,
             onTap: () => vm.navigateToPage(SettingsPage.terminal),
             borderRadius: const BorderRadius.vertical(
                 top: Radius.circular(10), bottom: Radius.circular(10)),
             iconBg: Colors.black,
             icon: FontAwesomeIcons.terminal),
         _buildOption(context,
-            title: 'Run & Debug',
-            subtitle: 'SDKs and build options.',
+            title: s.runDebug,
+            subtitle: s.runDebugSub,
             onTap: () => vm.navigateToPage(SettingsPage.runDebug),
             borderRadius: const BorderRadius.vertical(
                 top: Radius.circular(10), bottom: Radius.circular(10)),
             iconBg: Colors.orange,
             icon: FontAwesomeIcons.bug),
         _buildOption(context,
-            title: 'Extensions',
-            subtitle: 'Themes and add-ons.',
+            title: s.extensions,
+            subtitle: s.extensionsMenuSub,
             onTap: () => vm.navigateToPage(SettingsPage.extensions),
             borderRadius: const BorderRadius.vertical(
                 top: Radius.circular(10), bottom: Radius.circular(10)),
             iconBg: Colors.teal,
             icon: FontAwesomeIcons.puzzlePiece),
         _buildOption(context,
-            title: 'AI',
-            subtitle: 'API keys and agent configurations.',
+            title: s.ai,
+            subtitle: s.aiMenuSub,
             onTap: () => vm.navigateToPage(SettingsPage.ai),
             borderRadius: const BorderRadius.vertical(
                 top: Radius.circular(10), bottom: Radius.circular(10)),
             iconBg: Colors.deepPurple,
             icon: FontAwesomeIcons.robot),
         _buildOption(context,
-            title: 'About',
-            subtitle: 'App information.',
+            title: s.about,
+            subtitle: s.aboutMenuSub,
             onTap: () => vm.navigateToPage(SettingsPage.about),
             borderRadius: const BorderRadius.vertical(
                 top: Radius.circular(10), bottom: Radius.circular(30)),
@@ -256,6 +259,7 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
 
   // ── General settings ──────────────────────────────────────────────────────
   Widget _buildGeneral(BuildContext context, SettingsProvider vm) {
+    final s = AppStrings.of(context);
     final extProv = context.watch<ExtensionsProvider>();
     final activeMeta = extProv.activeMeta;
 
@@ -283,7 +287,7 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Tema "${activeMeta.name}" ativo',
+                        s.themeActiveBanner(activeMeta.name),
                         style: TextStyle(
                           color: Theme.of(context).colorScheme.onPrimaryContainer,
                           fontWeight: FontWeight.w600,
@@ -292,8 +296,7 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        'As configurações de aparência estão desativadas. '
-                        'Desative o tema nas Extensões para usar as configurações padrão.',
+                        s.themeActiveBannerSub,
                         style: TextStyle(
                           color: Theme.of(context)
                               .colorScheme
@@ -310,18 +313,21 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
                       context.read<SettingsProvider>().navigateToPage(
                             SettingsPage.extensions,
                           ),
-                  child: const Text('Extensões'),
+                  child: Text(s.extensions),
                 ),
               ],
             ),
           ),
         ],
-        _sectionHeader('Theme & Appearance'),
+        _sectionHeader(s.secLangRegion),
+        _languageTile(context, vm),
+        const SizedBox(height: 20),
+        _sectionHeader(s.secThemeAppearance),
         _switchTile(context,
-            title: 'Follow System Theme',
+            title: s.followSystemTheme,
             subtitle: vm.followSystemTheme
-                ? 'App follows system theme'
-                : 'Manual theme control',
+                ? s.followSystemOn
+                : s.followSystemOff,
             value: vm.followSystemTheme,
             onChanged: vm.setFollowSystemTheme,
             borderRadius: const BorderRadius.vertical(
@@ -330,8 +336,8 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
             icon: FontAwesomeIcons.circleHalfStroke,
             enabled: activeMeta == null),
         _switchTile(context,
-            title: 'Dark Mode',
-            subtitle: vm.useDarkMode ? 'Dark theme active' : 'Light theme active',
+            title: s.darkMode,
+            subtitle: vm.useDarkMode ? s.darkModeOn : s.darkModeOff,
             value: vm.useDarkMode,
             onChanged: vm.setUseDarkMode,
             borderRadius: const BorderRadius.vertical(
@@ -340,8 +346,8 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
             icon: FontAwesomeIcons.moon,
             enabled: activeMeta == null),
         _switchTile(context,
-            title: 'AMOLED Black',
-            subtitle: 'Pure black background for OLED screens',
+            title: s.amoledBlack,
+            subtitle: s.amoledBlackSub,
             value: vm.useAmoled,
             onChanged: vm.setUseAmoled,
             borderRadius: const BorderRadius.vertical(
@@ -350,8 +356,8 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
             icon: FontAwesomeIcons.mobileScreen,
             enabled: activeMeta == null),
         _switchTile(context,
-            title: 'Dynamic Colors',
-            subtitle: 'Use Material You colors from wallpaper',
+            title: s.dynamicColors,
+            subtitle: s.dynamicColorsSub,
             value: vm.useDynamicColors,
             onChanged: vm.setUseDynamicColors,
             borderRadius: const BorderRadius.vertical(
@@ -364,17 +370,86 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
     );
   }
 
+  // ── Language tile ─────────────────────────────────────────────────────────
+  Widget _languageTile(BuildContext context, SettingsProvider vm) {
+    final s = AppStrings.of(context);
+    final colors = Theme.of(context).colorScheme;
+    final current = kSupportedLanguages.firstWhere(
+      (l) => l.code == vm.language,
+      orElse: () => kSupportedLanguages.first,
+    );
+    return Card(
+      elevation: 0,
+      color: colors.surfaceTint.withValues(alpha: 0.1),
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16)),
+      margin: const EdgeInsets.symmetric(vertical: 2),
+      child: ListTile(
+        leading: const CircleAvatar(
+          backgroundColor: Colors.deepPurple,
+          child: Icon(Icons.language_rounded, color: Colors.white, size: 20),
+        ),
+        title: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Text(s.language,
+              style: TextStyle(color: colors.onSurface, fontSize: 14)),
+        ),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Text(current.native,
+              style: const TextStyle(fontSize: 12, color: Colors.grey)),
+        ),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () => _showLanguagePicker(context, vm),
+      ),
+    );
+  }
+
+  void _showLanguagePicker(BuildContext context, SettingsProvider vm) {
+    final s = AppStrings.of(context);
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(s.language),
+        contentPadding: const EdgeInsets.symmetric(vertical: 8),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: kSupportedLanguages.map((lang) {
+            final selected = lang.code == vm.language;
+            return ListTile(
+              title: Text(lang.native),
+              subtitle: Text(lang.name,
+                  style: TextStyle(
+                      color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                      fontSize: 12)),
+              trailing: selected
+                  ? Icon(Icons.check_rounded,
+                      color: Theme.of(ctx).colorScheme.primary)
+                  : null,
+              selected: selected,
+              onTap: () {
+                vm.setLanguage(lang.code);
+                Navigator.pop(ctx);
+              },
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+
   // ── Editor settings ───────────────────────────────────────────────────────
   Widget _buildEditor(BuildContext context, SettingsProvider vm) {
+    final s = AppStrings.of(context);
     return ListView(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       children: [
         // ── Font & Display ────────────────────────────────────────────────
-        _sectionHeader('Font & Display'),
+        _sectionHeader(s.secFontDisplay),
         _fontPickerTile(context, vm),
         _sliderTile(context,
-            title: 'Font Size',
+            title: s.fontSize,
             value: vm.fontSize,
             min: 8,
             max: 32,
@@ -386,8 +461,8 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
             icon: FontAwesomeIcons.font,
             divisions: 17),
         _switchTile(context,
-            title: 'Line Numbers',
-            subtitle: 'Show line numbers in the gutter',
+            title: s.lineNumbers,
+            subtitle: s.lineNumbersSub,
             value: vm.showLineNumbers,
             onChanged: vm.setShowLineNumbers,
             borderRadius: const BorderRadius.vertical(
@@ -395,8 +470,8 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
             iconBg: Colors.blueGrey,
             icon: FontAwesomeIcons.listOl),
         _switchTile(context,
-            title: 'Fixed Gutter',
-            subtitle: 'Line numbers stay fixed while scrolling',
+            title: s.fixedGutter,
+            subtitle: s.fixedGutterSub,
             value: vm.fixedGutter,
             onChanged: vm.setFixedGutter,
             borderRadius: const BorderRadius.vertical(
@@ -404,8 +479,8 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
             iconBg: Colors.blueGrey,
             icon: FontAwesomeIcons.tableColumns),
         _switchTile(context,
-            title: 'Minimap',
-            subtitle: 'Code preview panel on the right',
+            title: s.minimap,
+            subtitle: s.minimapSub,
             value: vm.showMinimap,
             onChanged: vm.setShowMinimap,
             borderRadius: const BorderRadius.vertical(
@@ -413,8 +488,8 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
             iconBg: Colors.indigo,
             icon: FontAwesomeIcons.map),
         _switchTile(context,
-            title: 'Symbol Bar',
-            subtitle: 'Mobile keyboard helpers  { } ; = …',
+            title: s.symbolBar,
+            subtitle: s.symbolBarSub,
             value: vm.showSymbolBar,
             onChanged: vm.setShowSymbolBar,
             borderRadius: const BorderRadius.vertical(
@@ -423,10 +498,10 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
             icon: FontAwesomeIcons.keyboard),
 
         // ── Behavior ──────────────────────────────────────────────────────
-        _sectionHeader('Behavior'),
+        _sectionHeader(s.secBehavior),
         _switchTile(context,
-            title: 'Word Wrap',
-            subtitle: 'Wrap long lines to the editor width',
+            title: s.wordWrap,
+            subtitle: s.wordWrapSub,
             value: vm.wordWrap,
             onChanged: vm.setWordWrap,
             borderRadius: const BorderRadius.vertical(
@@ -434,8 +509,8 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
             iconBg: Colors.teal,
             icon: FontAwesomeIcons.alignJustify),
         _switchTile(context,
-            title: 'Auto-Indent',
-            subtitle: 'Maintain indentation automatically',
+            title: s.autoIndent,
+            subtitle: s.autoIndentSub,
             value: vm.autoIndent,
             onChanged: vm.setAutoIndent,
             borderRadius: const BorderRadius.vertical(
@@ -443,8 +518,8 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
             iconBg: Colors.green,
             icon: FontAwesomeIcons.indent),
         _switchTile(context,
-            title: 'Auto-Close Pairs',
-            subtitle: 'Auto-close ( { [ " \' brackets',
+            title: s.autoClosePairs,
+            subtitle: s.autoClosePairsSub,
             value: vm.symbolPairAutoClose,
             onChanged: vm.setSymbolPairAutoClose,
             borderRadius: const BorderRadius.vertical(
@@ -452,8 +527,8 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
             iconBg: Colors.orange,
             icon: FontAwesomeIcons.braille),
         _switchTile(context,
-            title: 'Auto-Completion',
-            subtitle: 'Code suggestion popup while typing',
+            title: s.autoCompletion,
+            subtitle: s.autoCompletionSub,
             value: vm.autoCompletion,
             onChanged: vm.setAutoCompletion,
             borderRadius: const BorderRadius.vertical(
@@ -461,8 +536,8 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
             iconBg: Colors.amber,
             icon: FontAwesomeIcons.wandMagicSparkles),
         _switchTile(context,
-            title: 'Format on Save',
-            subtitle: 'Apply DartFormatter on Ctrl+S',
+            title: s.formatOnSave,
+            subtitle: s.formatOnSaveSub,
             value: vm.formatOnSave,
             onChanged: vm.setFormatOnSave,
             borderRadius: const BorderRadius.vertical(
@@ -470,8 +545,8 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
             iconBg: Colors.cyan,
             icon: FontAwesomeIcons.wandMagic),
         _switchTile(context,
-            title: 'Sticky Scroll',
-            subtitle: 'Keep the current scope visible at the top',
+            title: s.stickyScroll,
+            subtitle: s.stickyScrollSub,
             value: vm.stickyScroll,
             onChanged: vm.setStickyScroll,
             borderRadius: const BorderRadius.vertical(
@@ -480,10 +555,10 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
             icon: FontAwesomeIcons.thumbtack),
 
         // ── Indentation ───────────────────────────────────────────────────
-        _sectionHeader('Indentation'),
+        _sectionHeader(s.secIndentation),
         _pickerTile(context,
-            title: 'Tab Size',
-            subtitle: 'Number of spaces per indent level',
+            title: s.tabSize,
+            subtitle: s.tabSizeSub,
             value: vm.tabSize.toString(),
             options: const ['2', '4', '8'],
             onChanged: (v) => vm.setTabSize(int.parse(v)),
@@ -492,8 +567,8 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
             iconBg: Colors.cyan,
             icon: FontAwesomeIcons.alignLeft),
         _switchTile(context,
-            title: 'Use Spaces',
-            subtitle: 'Insert spaces instead of tab characters',
+            title: s.useSpaces,
+            subtitle: s.useSpacesSub,
             value: vm.useSpaces,
             onChanged: vm.setUseSpaces,
             borderRadius: const BorderRadius.vertical(
@@ -502,9 +577,9 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
             icon: FontAwesomeIcons.rulerHorizontal),
 
         // ── Cursor ────────────────────────────────────────────────────────
-        _sectionHeader('Cursor'),
+        _sectionHeader(s.secCursor),
         _sliderTile(context,
-            title: 'Cursor Blink Speed',
+            title: s.cursorBlinkSpeed,
             value: vm.cursorBlinkMs.toDouble(),
             min: 200,
             max: 1000,
@@ -516,10 +591,10 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
             divisions: 8),
 
         // ── Code Structure ────────────────────────────────────────────────
-        _sectionHeader('Code Structure'),
+        _sectionHeader(s.secCodeStructure),
         _switchTile(context,
-            title: 'Lightbulb Actions',
-            subtitle: 'Quick-action icon when code is selected',
+            title: s.lightbulbActions,
+            subtitle: s.lightbulbActionsSub,
             value: vm.showLightbulb,
             onChanged: vm.setShowLightbulb,
             borderRadius: const BorderRadius.vertical(
@@ -527,8 +602,8 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
             iconBg: Colors.yellow.shade700,
             icon: FontAwesomeIcons.lightbulb),
         _switchTile(context,
-            title: 'Fold Arrows',
-            subtitle: 'Arrows to collapse code blocks',
+            title: s.foldArrows,
+            subtitle: s.foldArrowsSub,
             value: vm.showFoldArrows,
             onChanged: vm.setShowFoldArrows,
             borderRadius: const BorderRadius.vertical(
@@ -536,8 +611,8 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
             iconBg: Colors.deepPurple,
             icon: FontAwesomeIcons.angleDown),
         _switchTile(context,
-            title: 'Block Lines',
-            subtitle: 'Vertical indentation guide lines',
+            title: s.blockLines,
+            subtitle: s.blockLinesSub,
             value: vm.showBlockLines,
             onChanged: vm.setShowBlockLines,
             borderRadius: const BorderRadius.vertical(
@@ -545,8 +620,8 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
             iconBg: Colors.deepPurple,
             icon: FontAwesomeIcons.gripLinesVertical),
         _switchTile(context,
-            title: 'Indent Dots',
-            subtitle: 'Dots before first character (VS Code style)',
+            title: s.indentDots,
+            subtitle: s.indentDotsSub,
             value: vm.showIndentDots,
             onChanged: vm.setShowIndentDots,
             borderRadius: const BorderRadius.vertical(
@@ -555,10 +630,10 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
             icon: FontAwesomeIcons.ellipsis),
 
         // ── Highlight ─────────────────────────────────────────────────────
-        _sectionHeader('Highlight'),
+        _sectionHeader(s.secHighlight),
         _switchTile(context,
-            title: 'Highlight Current Line',
-            subtitle: 'Tint the line where the cursor is',
+            title: s.highlightCurrentLine,
+            subtitle: s.highlightCurrentLineSub,
             value: vm.highlightCurrentLine,
             onChanged: vm.setHighlightCurrentLine,
             borderRadius: const BorderRadius.vertical(
@@ -566,8 +641,8 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
             iconBg: Colors.pinkAccent,
             icon: FontAwesomeIcons.highlighter),
         _switchTile(context,
-            title: 'Highlight Active Block',
-            subtitle: 'Change color inside the active scope',
+            title: s.highlightActiveBlock,
+            subtitle: s.highlightActiveBlockSub,
             value: vm.highlightActiveBlock,
             onChanged: vm.setHighlightActiveBlock,
             borderRadius: const BorderRadius.vertical(
@@ -575,8 +650,8 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
             iconBg: Colors.pinkAccent,
             icon: FontAwesomeIcons.borderAll),
         _pickerTile(context,
-            title: 'Highlight Style',
-            subtitle: 'How the current line is highlighted',
+            title: s.highlightStyle,
+            subtitle: s.highlightStyleSub,
             value: vm.lineHighlightStyle,
             options: const ['fill', 'stroke', 'accentBar', 'none'],
             onChanged: vm.setLineHighlightStyle,
@@ -586,10 +661,10 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
             icon: FontAwesomeIcons.fillDrip),
 
         // ── Advanced ──────────────────────────────────────────────────────
-        _sectionHeader('Advanced'),
+        _sectionHeader(s.secAdvanced),
         _switchTile(context,
-            title: 'Diagnostic Indicators',
-            subtitle: 'Error and warning squiggles',
+            title: s.diagnosticIndicators,
+            subtitle: s.diagnosticIndicatorsSub,
             value: vm.showDiagnosticIndicators,
             onChanged: vm.setShowDiagnosticIndicators,
             borderRadius: const BorderRadius.vertical(
@@ -597,8 +672,8 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
             iconBg: Colors.red,
             icon: FontAwesomeIcons.triangleExclamation),
         _switchTile(context,
-            title: 'Read Only',
-            subtitle: 'Disable all editing in the editor',
+            title: s.readOnly,
+            subtitle: s.readOnlySub,
             value: vm.readOnly,
             onChanged: vm.setReadOnly,
             borderRadius: const BorderRadius.vertical(
@@ -639,9 +714,9 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
           backgroundColor: Colors.deepOrange,
           child: FaIcon(FontAwesomeIcons.font, size: 16, color: Colors.white),
         ),
-        title: const Padding(
-          padding: EdgeInsets.symmetric(vertical: 6),
-          child: Text('Font Family', style: TextStyle(color: Colors.white, fontSize: 14)),
+        title: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Text(AppStrings.of(context).fontFamily, style: TextStyle(color: colors.onSurface, fontSize: 14)),
         ),
         subtitle: Padding(
           padding: const EdgeInsets.only(bottom: 6),
@@ -653,7 +728,7 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
             context: context,
             builder: (ctx) {
               return AlertDialog(
-                title: const Text('Font Family'),
+                title: Text(AppStrings.of(context).fontFamily),
                 contentPadding: const EdgeInsets.symmetric(vertical: 8),
                 content: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -713,7 +788,7 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
         leading: CircleAvatar(backgroundColor: iconBg, child: FaIcon(icon, size: 16, color: Colors.white)),
         title: Padding(
           padding: const EdgeInsets.symmetric(vertical: 6),
-          child: Text(title, style: const TextStyle(color: Colors.white, fontSize: 14)),
+          child: Text(title, style: TextStyle(color: colors.onSurface, fontSize: 14)),
         ),
         subtitle: Padding(
           padding: const EdgeInsets.only(bottom: 6),
@@ -797,7 +872,7 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
                     children: [
                       Expanded(
                         child: Text(title,
-                            style: const TextStyle(fontSize: 14, color: Colors.white)),
+                            style: TextStyle(fontSize: 14, color: colors.onSurface)),
                       ),
                       Container(
                         padding: const EdgeInsets.symmetric(
@@ -841,14 +916,15 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
 
   // ── File explorer settings ────────────────────────────────────────────────
   Widget _buildFileExplorer(BuildContext context) {
+    final s = AppStrings.of(context);
     return ListView(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       children: [
-        _sectionHeader('File Explorer'),
+        _sectionHeader(s.showHiddenFiles),
         _buildOption(context,
-            title: 'Show Hidden Files',
-            subtitle: 'Display files starting with .',
+            title: s.showHiddenFiles,
+            subtitle: s.showHiddenFilesSub,
             onTap: () {},
             borderRadius: const BorderRadius.vertical(
                 top: Radius.circular(30), bottom: Radius.circular(30)),
@@ -861,22 +937,23 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
 
   // ── Terminal settings ─────────────────────────────────────────────────────
   Widget _buildTerminal(BuildContext context) {
+    final s = AppStrings.of(context);
     return ListView(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       children: [
-        _sectionHeader('Terminal'),
+        _sectionHeader(s.terminal),
         _buildOption(context,
-            title: 'Font Size',
-            subtitle: 'Terminal font size',
+            title: s.terminalFontSize,
+            subtitle: s.colorSchemeSub,
             onTap: () {},
             borderRadius: const BorderRadius.vertical(
                 top: Radius.circular(30), bottom: Radius.circular(10)),
             iconBg: Colors.black,
             icon: FontAwesomeIcons.terminal),
         _buildOption(context,
-            title: 'Color Scheme',
-            subtitle: 'Terminal color theme',
+            title: s.colorScheme,
+            subtitle: s.colorSchemeSub,
             onTap: () {},
             borderRadius: const BorderRadius.vertical(
                 top: Radius.circular(10), bottom: Radius.circular(30)),
@@ -891,39 +968,40 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
   Widget _buildRunDebug(BuildContext context) {
     return Consumer<SdkManagerProvider>(
       builder: (context, sdk, _) {
+        final s = AppStrings.of(context);
         final installed = sdk.installedSdks;
         return ListView(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           children: [
-            _sectionHeader('Environment'),
+            _sectionHeader(s.environment),
             _infoTile(context,
-                title: 'RootFS Path',
+                title: s.rootfsPath,
                 subtitle: RuntimeEnvir.usrPath,
                 borderRadius: const BorderRadius.vertical(
                     top: Radius.circular(30), bottom: Radius.circular(10)),
                 iconBg: Colors.brown,
                 icon: FontAwesomeIcons.folder),
             _infoTile(context,
-                title: 'Home Path',
+                title: s.homePath,
                 subtitle: RuntimeEnvir.homePath,
                 borderRadius: const BorderRadius.vertical(
                     top: Radius.circular(10), bottom: Radius.circular(10)),
                 iconBg: Colors.brown,
                 icon: FontAwesomeIcons.house),
             _infoTile(context,
-                title: 'Projects Path',
+                title: s.projectsPath,
                 subtitle: RuntimeEnvir.projectsPath,
                 borderRadius: const BorderRadius.vertical(
                     top: Radius.circular(10), bottom: Radius.circular(10)),
                 iconBg: Colors.brown,
                 icon: FontAwesomeIcons.folderOpen),
             const SizedBox(height: 16),
-            _sectionHeader('Installed SDKs'),
+            _sectionHeader(s.installedSdks),
             if (installed.isEmpty)
               _infoTile(context,
-                  title: 'No SDKs installed',
-                  subtitle: 'Install SDKs from the workspace',
+                  title: s.noSdksInstalled,
+                  subtitle: s.installSdksSub,
                   borderRadius: const BorderRadius.vertical(
                       top: Radius.circular(30), bottom: Radius.circular(30)),
                   iconBg: Colors.grey,
@@ -935,7 +1013,7 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
                 final isLast = e.key == installed.length - 1;
                 return _infoTile(context,
                     title: t.displayName,
-                    subtitle: sdk.version(t) ?? 'Installed',
+                    subtitle: sdk.version(t) ?? s.installed,
                     borderRadius: BorderRadius.vertical(
                       top: isFirst ? const Radius.circular(30) : const Radius.circular(10),
                       bottom: isLast ? const Radius.circular(30) : const Radius.circular(10),
@@ -943,6 +1021,41 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
                     iconBg: Colors.orange,
                     icon: FontAwesomeIcons.wrench);
               }),
+            const SizedBox(height: 16),
+            _sectionHeader(s.lspPaths),
+            Consumer<SettingsProvider>(
+              builder: (context, settings, _) {
+                final lspItems = [
+                  ('dart', 'Dart LSP', FontAwesomeIcons.code, Colors.blue),
+                  ('ts', 'TypeScript LSP', FontAwesomeIcons.code, Colors.yellow.shade700),
+                  ('py', 'Python LSP', FontAwesomeIcons.python, Colors.green),
+                  ('kt', 'Kotlin LSP', FontAwesomeIcons.code, Colors.purple),
+                ];
+                return Column(
+                  children: lspItems.asMap().entries.map((e) {
+                    final idx = e.key;
+                    final (ext, label, icon, color) = e.value;
+                    final isFirst = idx == 0;
+                    final isLast = idx == lspItems.length - 1;
+                    return _pathInputTile(context,
+                        label: label,
+                        iconBg: color,
+                        icon: icon,
+                        value: settings.lspPathFor(ext),
+                        hint: 'e.g. /data/data/com.termux/files/usr/bin/...',
+                        onSave: (v) => settings.setLspPath(ext, v),
+                        borderRadius: BorderRadius.vertical(
+                          top: isFirst
+                              ? const Radius.circular(30)
+                              : const Radius.circular(10),
+                          bottom: isLast
+                              ? const Radius.circular(30)
+                              : const Radius.circular(10),
+                        ));
+                  }).toList(),
+                );
+              },
+            ),
             const SizedBox(height: 32),
           ],
         );
@@ -950,8 +1063,88 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
     );
   }
 
+  Widget _pathInputTile(
+    BuildContext context, {
+    required String label,
+    required Color iconBg,
+    required IconData icon,
+    required String value,
+    required String hint,
+    required Future<void> Function(String) onSave,
+    BorderRadiusGeometry borderRadius = BorderRadius.zero,
+  }) {
+    final colors = Theme.of(context).colorScheme;
+    return Card(
+      elevation: 0,
+      color: colors.surfaceTint.withValues(alpha: 0.1),
+      shape: RoundedRectangleBorder(borderRadius: borderRadius),
+      margin: const EdgeInsets.symmetric(vertical: 2),
+      child: ListTile(
+        leading: CircleAvatar(
+            backgroundColor: iconBg,
+            child: FaIcon(icon, size: 16, color: Colors.white)),
+        title: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          child: Text(label, style: TextStyle(color: colors.onSurface)),
+        ),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: Text(
+            value.isEmpty ? 'Default (auto-detect)' : value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () => _showPathInputDialog(context,
+            label: label, current: value, hint: hint, onSave: onSave),
+      ),
+    );
+  }
+
+  void _showPathInputDialog(
+    BuildContext context, {
+    required String label,
+    required String current,
+    required String hint,
+    required Future<void> Function(String) onSave,
+  }) {
+    final s = AppStrings.of(context);
+    final ctrl = TextEditingController(text: current);
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(label),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+          decoration: InputDecoration(
+            hintText: hint,
+            labelText: s.binaryPath,
+            border: const OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(s.cancel),
+          ),
+          TextButton(
+            onPressed: () {
+              onSave(ctrl.text);
+              Navigator.pop(ctx);
+            },
+            child: Text(s.save),
+          ),
+        ],
+      ),
+    );
+  }
+
   // ── AI settings ───────────────────────────────────────────────────────────
   Widget _buildAi(BuildContext context) {
+    final s = AppStrings.of(context);
     final ai = context.watch<AiProvider>();
 
     return ListView(
@@ -959,7 +1152,7 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
       physics: const NeverScrollableScrollPhysics(),
       children: [
         // ── API Keys ──────────────────────────────────────────────────────
-        _sectionHeader('API Keys'),
+        _sectionHeader(s.apiKeys),
         _apiKeyTile(context,
             label: 'Gemini API Key',
             iconBg: const Color(0xFF1A73E8),
@@ -992,7 +1185,7 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
         const SizedBox(height: 24),
 
         // ── Models ────────────────────────────────────────────────────────
-        _sectionHeader('Models'),
+        _sectionHeader(s.models),
         _modelPickerTile(context,
             label: 'Gemini Model',
             iconBg: const Color(0xFF1A73E8),
@@ -1031,13 +1224,13 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
         // ── Agents ────────────────────────────────────────────────────────
         Row(
           children: [
-            Expanded(child: _sectionHeader('Agents')),
+            Expanded(child: _sectionHeader(s.agents)),
             Padding(
               padding: const EdgeInsets.only(right: 4, bottom: 8),
               child: TextButton.icon(
                 onPressed: () => _showAgentDialog(context, null),
                 icon: const Icon(Icons.add, size: 18),
-                label: const Text('New agent'),
+                label: Text(s.newAgent),
               ),
             ),
           ],
@@ -1080,11 +1273,11 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
         leading: CircleAvatar(backgroundColor: iconBg, child: FaIcon(icon, size: 16, color: Colors.white)),
         title: Padding(
           padding: const EdgeInsets.symmetric(vertical: 10),
-          child: Text(label, style: const TextStyle(color: Colors.white)),
+          child: Text(label, style: TextStyle(color: colors.onSurface)),
         ),
         subtitle: Padding(
           padding: const EdgeInsets.only(bottom: 10),
-          child: Text(value.isEmpty ? 'Not configured' : masked, maxLines: 1),
+          child: Text(value.isEmpty ? AppStrings.of(context).notConfigured : masked, maxLines: 1),
         ),
         trailing: const Icon(Icons.chevron_right),
         onTap: () => _showApiKeyDialog(context, label: label, current: value, onSave: onSave),
@@ -1112,7 +1305,7 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
         leading: CircleAvatar(backgroundColor: iconBg, child: FaIcon(icon, size: 16, color: Colors.white)),
         title: Padding(
           padding: const EdgeInsets.symmetric(vertical: 10),
-          child: Text(label, style: const TextStyle(color: Colors.white)),
+          child: Text(label, style: TextStyle(color: colors.onSurface)),
         ),
         subtitle: Padding(
           padding: const EdgeInsets.only(bottom: 10),
@@ -1130,6 +1323,7 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
     required String current,
     required Future<void> Function(String) onSave,
   }) {
+    final s = AppStrings.of(context);
     final ctrl = TextEditingController(text: current);
     bool obscure = true;
     showDialog<void>(
@@ -1142,7 +1336,7 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
               controller: ctrl,
               obscureText: obscure,
               decoration: InputDecoration(
-                hintText: 'Paste your API key here',
+                hintText: s.pasteApiKey,
                 suffixIcon: IconButton(
                   icon: Icon(obscure ? Icons.visibility : Icons.visibility_off),
                   onPressed: () => setState(() => obscure = !obscure),
@@ -1150,13 +1344,13 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
               ),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+              TextButton(onPressed: () => Navigator.pop(ctx), child: Text(s.cancel)),
               FilledButton(
                 onPressed: () {
                   onSave(ctrl.text.trim());
                   Navigator.pop(ctx);
                 },
-                child: const Text('Save'),
+                child: Text(s.save),
               ),
             ],
           );
@@ -1185,7 +1379,7 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
           padding: const EdgeInsets.symmetric(vertical: 6),
           child: Row(
             children: [
-              Expanded(child: Text(agent.name, style: const TextStyle(color: Colors.white))),
+              Expanded(child: Text(agent.name, style: TextStyle(color: colors.onSurface))),
               if (agent.isDefault)
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -1194,7 +1388,7 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
-                    'Default',
+                    AppStrings.of(context).defaultLabel,
                     style: TextStyle(fontSize: 11, color: colors.primary),
                   ),
                 ),
@@ -1210,13 +1404,13 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
           children: [
             IconButton(
               icon: const Icon(Icons.edit_outlined),
-              tooltip: 'Edit',
+              tooltip: AppStrings.of(context).edit,
               onPressed: () => _showAgentDialog(context, agent),
             ),
             if (!agent.isDefault)
               IconButton(
                 icon: const Icon(Icons.delete_outline, color: Colors.red),
-                tooltip: 'Delete',
+                tooltip: AppStrings.of(context).delete,
                 onPressed: () => _confirmDeleteAgent(context, agent),
               ),
           ],
@@ -1227,20 +1421,21 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
   }
 
   void _confirmDeleteAgent(BuildContext context, AiAgent agent) {
+    final s = AppStrings.of(context);
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete agent'),
-        content: Text('Delete "${agent.name}"? This cannot be undone.'),
+        title: Text(s.deleteAgent),
+        content: Text(s.deleteAgentConfirm(agent.name)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(s.cancel)),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () {
               context.read<AiProvider>().deleteAgent(agent.id);
               Navigator.pop(ctx);
             },
-            child: const Text('Delete'),
+            child: Text(s.delete),
           ),
         ],
       ),
@@ -1248,6 +1443,7 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
   }
 
   void _showAgentDialog(BuildContext context, AiAgent? existing) {
+    final s = AppStrings.of(context);
     final isNew = existing == null;
     final namectrl  = TextEditingController(text: existing?.name ?? '');
     final focusctrl = TextEditingController(text: existing?.focus ?? '');
@@ -1259,7 +1455,7 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
       builder: (ctx) {
         return StatefulBuilder(builder: (ctx, setState) {
           return AlertDialog(
-            title: Text(isNew ? 'New Agent' : 'Edit Agent'),
+            title: Text(isNew ? s.newAgentTitle : s.editAgentTitle),
             content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -1304,22 +1500,22 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
                   const SizedBox(height: 16),
                   TextField(
                     controller: namectrl,
-                    decoration: const InputDecoration(labelText: 'Name', border: OutlineInputBorder()),
+                    decoration: InputDecoration(labelText: s.agentName, border: const OutlineInputBorder()),
                     onChanged: (_) => setState(() {}),
                   ),
                   const SizedBox(height: 12),
                   TextField(
                     controller: focusctrl,
-                    decoration: const InputDecoration(labelText: 'Focus area', border: OutlineInputBorder()),
+                    decoration: InputDecoration(labelText: s.agentFocus, border: const OutlineInputBorder()),
                     maxLines: 2,
                   ),
                   const SizedBox(height: 12),
                   TextField(
                     controller: instrctrl,
-                    decoration: const InputDecoration(
-                      labelText: 'System instructions',
+                    decoration: InputDecoration(
+                      labelText: s.agentInstructions,
                       alignLabelWithHint: true,
-                      border: OutlineInputBorder(),
+                      border: const OutlineInputBorder(),
                     ),
                     maxLines: 6,
                   ),
@@ -1327,7 +1523,7 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
               ),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+              TextButton(onPressed: () => Navigator.pop(ctx), child: Text(s.cancel)),
               FilledButton(
                 onPressed: () {
                   final name = namectrl.text.trim();
@@ -1351,7 +1547,7 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
                   }
                   Navigator.pop(ctx);
                 },
-                child: Text(isNew ? 'Create' : 'Save'),
+                child: Text(isNew ? s.create : s.save),
               ),
             ],
           );
@@ -1377,6 +1573,7 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
 
   // ── About settings ────────────────────────────────────────────────────────
   Widget _buildAbout(BuildContext context) {
+    final s = AppStrings.of(context);
     final colors = Theme.of(context).colorScheme;
 
     return ListView(
@@ -1396,7 +1593,7 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
             children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(20),
-                child: Image.asset('assets/logo.png', width: 80, height: 80, fit: BoxFit.contain),
+                child: Image.asset('assets/logo.png', width: 80, height: 80, fit: BoxFit.contain, color: Theme.of(context).textTheme.bodyLarge?.color,),
               ),
               const SizedBox(height: 16),
               const Text(
@@ -1404,13 +1601,13 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
                 style: TextStyle(
                   fontSize: 26,
                   fontWeight: FontWeight.bold,
-                  color: Colors.white,
+             
                   letterSpacing: 1.2,
                 ),
               ),
               const SizedBox(height: 4),
               Text(
-                'Mobile Development Environment',
+                s.mobileDevEnv,
                 style: TextStyle(fontSize: 13, color: colors.onSurface.withValues(alpha: 0.6)),
               ),
               const SizedBox(height: 12),
@@ -1435,17 +1632,17 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
         ),
 
         // ── Developer ─────────────────────────────────────────────────────
-        _sectionHeader('Developer'),
+        _sectionHeader(s.developer),
         _aboutCard(context,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(20), bottom: Radius.circular(6)),
           child: ListTile(
-            leading: CircleAvatar(
-              backgroundColor: const Color(0xFF1565C0),
-              child: const FaIcon(FontAwesomeIcons.code, size: 16, color: Colors.white),
+            leading: const CircleAvatar(
+              backgroundColor: Color(0xFF1565C0),
+              child: FaIcon(FontAwesomeIcons.code, size: 16, color: Colors.white),
             ),
-            title: const Padding(
-              padding: EdgeInsets.symmetric(vertical: 6),
-              child: Text('Desenvolvedor', style: TextStyle(color: Colors.white)),
+            title: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Text(s.developer),
             ),
             subtitle: const Padding(
               padding: EdgeInsets.only(bottom: 6),
@@ -1462,7 +1659,7 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
             ),
             title: const Padding(
               padding: EdgeInsets.symmetric(vertical: 6),
-              child: Text('GitHub', style: TextStyle(color: Colors.white)),
+              child: Text('GitHub', ),
             ),
             subtitle: const Padding(
               padding: EdgeInsets.only(bottom: 6),
@@ -1479,7 +1676,7 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
         const SizedBox(height: 20),
 
         // ── SDKs suportados ───────────────────────────────────────────────
-        _sectionHeader('SDKs Suportados'),
+        _sectionHeader(s.supportedSdks),
         _aboutCard(context,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           borderRadius: BorderRadius.circular(20),
@@ -1509,7 +1706,7 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
         const SizedBox(height: 20),
 
         // ── Licença ───────────────────────────────────────────────────────
-        _sectionHeader('Licença'),
+        _sectionHeader(s.licenseLabel),
         _aboutCard(context,
           padding: const EdgeInsets.all(20),
           borderRadius: BorderRadius.circular(20),
@@ -1525,7 +1722,7 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
                   const SizedBox(width: 12),
                   const Text(
                     'MIT License',
-                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 15),
+                    style: TextStyle( fontWeight: FontWeight.w600, fontSize: 15),
                   ),
                   const Spacer(),
                   Container(
@@ -1598,7 +1795,7 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
           ),
           const SizedBox(width: 14),
           Expanded(
-            child: Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500)),
+            child: Text(label, style: const TextStyle( fontWeight: FontWeight.w500)),
           ),
           Text(detail, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.55))),
         ],
@@ -1647,7 +1844,7 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
         leading: CircleAvatar(backgroundColor: iconBg, child: FaIcon(icon, size: 16, color: Colors.white)),
         title: Padding(
           padding: const EdgeInsets.symmetric(vertical: 10),
-          child: Text(title, style: const TextStyle(color: Colors.white)),
+          child: Text(title),
         ),
         subtitle: subtitle != null
             ? Padding(
@@ -1679,7 +1876,7 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
         leading: CircleAvatar(backgroundColor: iconBg, child: FaIcon(icon, size: 16, color: Colors.white)),
         title: Padding(
           padding: const EdgeInsets.symmetric(vertical: 10),
-          child: Text(title, style: const TextStyle(color: Colors.white)),
+          child: Text(title, style: TextStyle(color: colors.onSurface)),
         ),
         subtitle: Padding(
           padding: const EdgeInsets.only(bottom: 10),
@@ -1715,7 +1912,7 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
             leading: CircleAvatar(backgroundColor: iconBg, child: FaIcon(icon, size: 16, color: Colors.white)),
             title: Padding(
               padding: const EdgeInsets.symmetric(vertical: 10),
-              child: Text(title, style: const TextStyle(color: Colors.white)),
+              child: Text(title, ),
             ),
             subtitle: Padding(
               padding: const EdgeInsets.only(bottom: 10),

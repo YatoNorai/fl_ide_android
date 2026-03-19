@@ -1,7 +1,7 @@
 name: fl_ide
 description: "FL IDE — Mobile VS Code powered by Flutter"
 publish_to: none
-version: 1.0.0+1
+version: 0.0.1+1
 
 environment:
   sdk: ^3.5.0
@@ -57,6 +57,10 @@ dependencies:
       url: https://github.com/YatoNorai/quill_code.git
       ref: main
   url_launcher: ^6.3.2
+  permission_handler: ^11.3.1
+  flutter_localizations:
+    sdk: flutter
+  intl: ^0.20.0
 
 dev_dependencies:
   flutter_test:

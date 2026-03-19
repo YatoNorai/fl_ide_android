@@ -16,5 +16,8 @@ void main() async {
   // Full screen immersive
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
+  // Lock all screens to portrait by default
+  await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+
   runApp(const FlIdeApp());
 }

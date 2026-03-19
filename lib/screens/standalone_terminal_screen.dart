@@ -303,12 +303,7 @@ class _TerminalAppBar extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 4),
         child: Row(
           children: [
-            // Back
-            IconButton(
-              icon: Icon(Icons.arrow_back_ios_new_rounded,
-                  size: 20, color: colors.onSurface),
-              onPressed: () => Navigator.of(context).pop(),
-            ),
+          
             // Sessions drawer button
             IconButton(
               icon: Icon(Icons.menu_rounded,

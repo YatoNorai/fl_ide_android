@@ -8,9 +8,15 @@ class OpenFile {
   final String path;
   final String name;
   bool isDirty;
+  bool inBottomPanel;
   QuillCodeController? controller;
 
-  OpenFile({required this.path, required this.name, this.isDirty = false});
+  OpenFile({
+    required this.path,
+    required this.name,
+    this.isDirty = false,
+    this.inBottomPanel = false,
+  });
 
   String get extension {
     final dot = name.lastIndexOf('.');
@@ -24,6 +30,10 @@ class EditorProvider extends ChangeNotifier {
   FileNode? _rootNode;
 
   List<OpenFile> get openFiles => List.unmodifiable(_openFiles);
+  List<OpenFile> get topFiles =>
+      List.unmodifiable(_openFiles.where((f) => !f.inBottomPanel));
+  List<OpenFile> get bottomPanelFiles =>
+      List.unmodifiable(_openFiles.where((f) => f.inBottomPanel));
   int get activeIndex => _activeIndex;
   OpenFile? get activeFile =>
       _activeIndex >= 0 && _activeIndex < _openFiles.length
@@ -87,6 +97,68 @@ class EditorProvider extends ChangeNotifier {
   void closeFile(int index) {
     if (index < 0 || index >= _openFiles.length) return;
     _openFiles.removeAt(index);
+    if (_activeIndex >= _openFiles.length) {
+      _activeIndex = _openFiles.isEmpty ? -1 : _openFiles.length - 1;
+    }
+    notifyListeners();
+  }
+
+  void closeOthers(int index) {
+    if (index < 0 || index >= _openFiles.length) return;
+    final keep = _openFiles[index];
+    _openFiles.clear();
+    _openFiles.add(keep);
+    _activeIndex = 0;
+    notifyListeners();
+  }
+
+  void closeAll() {
+    _openFiles.clear();
+    _activeIndex = -1;
+    notifyListeners();
+  }
+
+  void reorderFile(int oldIndex, int newIndex) {
+    if (oldIndex < newIndex) newIndex -= 1;
+    final file = _openFiles.removeAt(oldIndex);
+    _openFiles.insert(newIndex, file);
+    if (_activeIndex == oldIndex) {
+      _activeIndex = newIndex;
+    } else if (_activeIndex > oldIndex && _activeIndex <= newIndex) {
+      _activeIndex--;
+    } else if (_activeIndex < oldIndex && _activeIndex >= newIndex) {
+      _activeIndex++;
+    }
+    notifyListeners();
+  }
+
+  bool get canUndo => activeFile?.controller?.content.canUndo ?? false;
+  bool get canRedo => activeFile?.controller?.content.canRedo ?? false;
+
+  void undo() {
+    activeFile?.controller?.undo();
+    notifyListeners();
+  }
+
+  void redo() {
+    activeFile?.controller?.redo();
+    notifyListeners();
+  }
+
+  void moveToPanel(int globalIndex, {required bool bottom}) {
+    if (globalIndex < 0 || globalIndex >= _openFiles.length) return;
+    _openFiles[globalIndex].inBottomPanel = bottom;
+    notifyListeners();
+  }
+
+  Future<void> refreshTree() async {
+    if (_rootNode == null) return;
+    _rootNode = await FileNode.fromPath(_rootNode!.path);
+    notifyListeners();
+  }
+
+  void closeFilesUnderPath(String dirPath) {
+    _openFiles.removeWhere((f) => f.path.startsWith(dirPath));
     if (_activeIndex >= _openFiles.length) {
       _activeIndex = _openFiles.isEmpty ? -1 : _openFiles.length - 1;
     }

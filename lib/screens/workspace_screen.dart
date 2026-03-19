@@ -1,24 +1,31 @@
 import 'package:app_installer/app_installer.dart';
-import 'settings_screen.dart' show SettingsScreen;
 import 'package:build_runner_pkg/build_runner_pkg.dart';
 import 'package:code_editor/code_editor.dart';
 import 'package:core/core.dart';
+import 'package:fl_ide/screens/standalone_terminal_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:lsp_client/lsp_client.dart';
 import 'package:project_manager/project_manager.dart';
 import 'package:provider/provider.dart';
-import 'package:quill_code/quill_code.dart' show DiagnosticSeverity;
+import 'package:quill_code/quill_code.dart'
+    show DiagnosticSeverity, QuillActionsMenu, QuillThemeDark, SearchOptions;
 import 'package:sdk_manager/sdk_manager.dart';
 import 'package:terminal_pkg/terminal_pkg.dart';
 
 import '../providers/extensions_provider.dart';
 import '../providers/settings_provider.dart';
+import 'settings_screen.dart' show SettingsScreen;
 
-/// AndroidIDE-style workspace:
-/// - Narrow left icon rail (always visible)
-/// - File tree slides in as an overlay from the left
-/// - Editor takes the main space
-/// - Bottom draggable sheet for Terminal/Build/Logs/Problems
+const _kDrawerWidth = 300.0;
+const _kRailWidth = 64.0;
+const _kSpecialChars = [
+  '(', ')', '{', '}', '[', ']', ';', ':',
+  '.', ',', '<', '>', '=', '!', '&', '|',
+  '+', '-', '*', '/', r'\', '_', '"', "'",
+  '#', '@', r'$', '%', '^', '~', '?', '\t',
+];
+
 class WorkspaceScreen extends StatefulWidget {
   final Project project;
   const WorkspaceScreen({super.key, required this.project});
@@ -29,14 +36,30 @@ class WorkspaceScreen extends StatefulWidget {
 
 class _WorkspaceScreenState extends State<WorkspaceScreen>
     with TickerProviderStateMixin {
-  bool _fileTreeOpen = false;
+  late final AnimationController _drawerCtrl;
+  late final Animation<double> _drawerAnim;
   late final TabController _bottomTabCtrl;
-  final _sheetController = DraggableScrollableController();
+  final _sheetKey = GlobalKey<_BottomSheetPanelState>();
 
   @override
   void initState() {
     super.initState();
     _bottomTabCtrl = TabController(length: 4, vsync: this);
+    _drawerCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 280),
+    );
+    _drawerAnim = CurvedAnimation(
+      parent: _drawerCtrl,
+      curve: Curves.easeInOut,
+    );
+
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
@@ -49,9 +72,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
       await editor.openFile(entryFile);
       if (!mounted) return;
 
+      final settings = context.read<SettingsProvider>();
       context.read<LspProvider>().startForExtension(
             def.defaultEntryFile.split('.').last,
             widget.project.path,
+            customPaths: settings.lspPaths,
           );
 
       await context.read<TerminalProvider>().createSession(
@@ -63,287 +88,519 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
 
   @override
   void dispose() {
+    _drawerCtrl.dispose();
     _bottomTabCtrl.dispose();
-    _sheetController.dispose();
+    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     super.dispose();
   }
 
-  void _toggleFileTree() => setState(() => _fileTreeOpen = !_fileTreeOpen);
-
-  void _closeFileTree() {
-    if (_fileTreeOpen) setState(() => _fileTreeOpen = false);
+  void _closeDrawer() => _drawerCtrl.reverse();
+  void _toggleDrawer() {
+    if (_drawerCtrl.isCompleted) {
+      _drawerCtrl.reverse();
+    } else {
+      _drawerCtrl.forward();
+    }
   }
 
   void _expandBottomSheet() {
-    if (_sheetController.isAttached) {
-      _sheetController.animateTo(
-        0.55,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
-    }
+    _sheetKey.currentState?.expandToMid();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppTheme.darkBg,
-      appBar: _WorkspaceAppBar(
-        project: widget.project,
-        onMenuTap: _toggleFileTree,
-      ),
-      body: Stack(
-        children: [
-          // ── Main: icon rail + editor + bottom sheet ──────────────────────
-          Row(
-            children: [
-              // Left icon rail (always visible)
-              _IconRail(
-                project: widget.project,
-                fileTreeOpen: _fileTreeOpen,
-                onToggleFileTree: _toggleFileTree,
-                onTabChange: (i) {
-                  setState(() {
-                    _bottomTabCtrl.index = i;
-                    _expandBottomSheet();
-                  });
-                },
-              ),
-              // Editor + bottom sheet
-              Expanded(
-                child: GestureDetector(
-                  // Swipe left to open file tree
-                  onHorizontalDragEnd: (d) {
-                    if ((d.primaryVelocity ?? 0) > 300) {
-                      setState(() => _fileTreeOpen = true);
-                    } else if ((d.primaryVelocity ?? 0) < -300) {
-                      _closeFileTree();
-                    }
-                  },
-                  child: Stack(
-                    children: [
-                      // Editor takes full area
-                      Positioned.fill(
-                        child: Builder(builder: (context) {
-                          final settings = context.watch<SettingsProvider>();
-                          return EditorArea(
-                            editorTheme: context
-                                .watch<ExtensionsProvider>()
-                                .activeEditorTheme,
-                            showSymbolBar: settings.showSymbolBar,
-                            fontSize: settings.fontSize,
-                            fontFamily: settings.fontFamily,
-                            configureProps: settings.applyToProps,
-                          );
-                        }),
-                      ),
-                      // Bottom draggable sheet
-                      DraggableScrollableSheet(
-                        controller: _sheetController,
-                        initialChildSize: 0.11,
-                        minChildSize: 0.09,
-                        maxChildSize: 0.75,
-                        snap: true,
-                        snapSizes: const [0.11, 0.40, 0.75],
-                        builder: (context, scrollController) =>
-                            _BottomOutputSheet(
-                          project: widget.project,
-                          tabCtrl: _bottomTabCtrl,
-                          scrollController: scrollController,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
+    final keyboardVisible = MediaQuery.of(context).viewInsets.bottom > 150;
 
-          // ── File tree overlay (slides from left) ─────────────────────────
-          AnimatedPositioned(
-            duration: const Duration(milliseconds: 250),
-            curve: Curves.easeInOut,
-            left: _fileTreeOpen ? 0 : -300,
-            top: 0,
-            bottom: 0,
-            width: 300,
-            child: Material(
-              color: AppTheme.darkSidebar,
-              elevation: 8,
-              child: Column(
-                children: [
-                  // File tree header
-                  Container(
-                    height: 48,
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    decoration: const BoxDecoration(
-                      color: AppTheme.darkSidebar,
-                      border: Border(
-                          bottom: BorderSide(color: AppTheme.darkDivider)),
-                    ),
-                    child: Row(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (_, __) {
+        if (_drawerCtrl.isCompleted) _closeDrawer();
+      },
+      child: Scaffold(
+        body: AnimatedBuilder(
+          animation: _drawerAnim,
+          builder: (context, _) {
+            final cs = Theme.of(context).colorScheme;
+            final v = _drawerAnim.value;
+            return Stack(
+              children: [
+                // ── Main content (AppBar + editor) slides right ────────────
+                Transform.translate(
+                  offset: Offset(v * _kDrawerWidth, 0),
+                  child: ColoredBox(
+                    color: cs.surface,
+                    child: SafeArea(
+                    child: Column(
                       children: [
-                        const Text('File list',
-                            style: TextStyle(
-                                color: AppTheme.darkText,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600)),
-                        const Spacer(),
-                        IconButton(
-                          icon: const Icon(Icons.arrow_back,
-                              color: AppTheme.darkText, size: 20),
-                          onPressed: _closeFileTree,
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
+                        _WorkspaceAppBar(
+                          project: widget.project,
+                          drawerAnim: _drawerAnim,
+                          onMenuTap: _toggleDrawer,
+                        ),
+                        Expanded(
+                          child: _MainContent(
+                            project: widget.project,
+                            bottomTabCtrl: _bottomTabCtrl,
+                            sheetKey: _sheetKey,
+                            keyboardVisible: keyboardVisible,
+                          ),
                         ),
                       ],
                     ),
                   ),
-                  const Expanded(child: FileTreePanel()),
-                ],
-              ),
-            ),
-          ),
+                  ),
+                ),
 
-          // Tap outside file tree to close
-          if (_fileTreeOpen)
-            Positioned(
-              left: 300,
-              right: 0,
-              top: 0,
-              bottom: 0,
-              child: GestureDetector(
-                onTap: _closeFileTree,
-                child: Container(color: Colors.transparent),
-              ),
-            ),
-        ],
+                // ── Drawer ────────────────────────────────────────────────
+                Positioned(
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
+                  width: _kDrawerWidth,
+                  child: Transform.translate(
+                    offset: Offset((v - 1) * _kDrawerWidth, 0),
+                    child: ColoredBox(
+                      color: cs.surfaceContainerLow,
+                      child: Builder(builder: (context) {
+                        final pad = MediaQuery.of(context).padding;
+                        return Padding(
+                          padding: EdgeInsets.only(
+                              top: pad.top, bottom: pad.bottom),
+                          child: _DrawerContent(
+                            project: widget.project,
+                            onClose: _closeDrawer,
+                            onTabChange: (i) {
+                              setState(() => _bottomTabCtrl.index = i);
+                              _closeDrawer();
+                              _expandBottomSheet();
+                            },
+                          ),
+                        );
+                      }),
+                    ),
+                  ),
+                ),
+
+                // ── Scrim ──────────────────────────────────────────────────
+                if (v > 0)
+                  Positioned.fill(
+                    left: _kDrawerWidth * v,
+                    child: GestureDetector(
+                      onTap: _closeDrawer,
+                      child: ColoredBox(
+                        color:
+                            Colors.black.withValues(alpha: v * 0.38),
+                      ),
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
       ),
     );
   }
 }
 
-// ── AppBar ────────────────────────────────────────────────────────────────────
+// ── AppBar (fixed-height custom widget — AppBar widget cannot be used outside
+//    Scaffold.appBar because it uses Expanded internally, causing unbounded
+//    height errors in a Column) ───────────────────────────────────────────────
 
-class _WorkspaceAppBar extends StatelessWidget implements PreferredSizeWidget {
+class _WorkspaceAppBar extends StatefulWidget {
   final Project project;
+  final Animation<double> drawerAnim;
   final VoidCallback onMenuTap;
 
-  const _WorkspaceAppBar({required this.project, required this.onMenuTap});
+  const _WorkspaceAppBar({
+    required this.project,
+    required this.drawerAnim,
+    required this.onMenuTap,
+  });
 
   @override
-  Size get preferredSize => const Size.fromHeight(kToolbarHeight + 3);
+  State<_WorkspaceAppBar> createState() => _WorkspaceAppBarState();
+}
+
+class _WorkspaceAppBarState extends State<_WorkspaceAppBar> {
+  bool _searchMode = false;
+  final _searchCtrl = TextEditingController();
+  final _searchFocus = FocusNode();
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    _searchFocus.dispose();
+    super.dispose();
+  }
+
+  void _enterSearch() {
+    setState(() => _searchMode = true);
+    WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _searchFocus.requestFocus());
+  }
+
+  void _exitSearch() {
+    final ctrl = context.read<EditorProvider>().activeFile?.controller;
+    ctrl?.searcher.stopSearch();
+    setState(() {
+      _searchMode = false;
+      _searchCtrl.clear();
+    });
+  }
+
+  void _onSearchChanged(String q) {
+    final ctrl = context.read<EditorProvider>().activeFile?.controller;
+    if (ctrl == null) return;
+    if (q.isEmpty) {
+      ctrl.searcher.stopSearch();
+    } else {
+      ctrl.searcher.search(q, const SearchOptions());
+    }
+  }
+
+  void _searchNext() {
+    final ctrl = context.read<EditorProvider>().activeFile?.controller;
+    if (ctrl == null) return;
+    final result = ctrl.searcher.gotoNext(ctrl.cursor.position);
+    if (result != null) ctrl.setCursor(result.start);
+  }
+
+  void _searchPrev() {
+    final ctrl = context.read<EditorProvider>().activeFile?.controller;
+    if (ctrl == null) return;
+    final result = ctrl.searcher.gotoPrevious(ctrl.cursor.position);
+    if (result != null) ctrl.setCursor(result.start);
+  }
 
   @override
   Widget build(BuildContext context) {
-    return AppBar(
-      backgroundColor: AppTheme.darkBg,
-      elevation: 0,
-      leading: IconButton(
-        icon: const Icon(Icons.menu, color: AppTheme.darkText, size: 24),
-        onPressed: onMenuTap,
-        tooltip: 'File Explorer',
+    final cs = Theme.of(context).colorScheme;
+    return Material(
+      color: cs.surface,
+      
+      child: SizedBox(
+        height: kToolbarHeight + 3,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              height: kToolbarHeight,
+              child: _searchMode
+                  ? _buildSearchBar(cs)
+                  : _buildNormalBar(cs),
+            ),
+            Consumer<BuildProvider>(
+              builder: (context, build, _) => build.isBuilding
+                  ? LinearProgressIndicator(
+                      color: cs.primary,
+                      backgroundColor: Colors.transparent,
+                      minHeight: 3,
+                    )
+                  : const SizedBox(height: 3),
+            ),
+          ],
+        ),
+        
       ),
-      title: Text(
-        project.name,
-        style: const TextStyle(
-            color: AppTheme.darkText,
-            fontSize: 20,
-            fontWeight: FontWeight.w700),
-      ),
-      actions: [
-        // Stop/cancel build
+    
+    );
+  }
+
+  Widget _buildSearchBar(ColorScheme cs) {
+    return Row(
+      children: [
+        IconButton(
+          icon: Icon(Icons.arrow_back, color: cs.onSurface, size: 22),
+          onPressed: _exitSearch,
+          tooltip: 'Close search',
+        ),
+        Expanded(
+          child: TextField(
+            controller: _searchCtrl,
+            focusNode: _searchFocus,
+            onChanged: _onSearchChanged,
+            onSubmitted: (_) => _searchNext(),
+            decoration: InputDecoration(
+              hintText: 'Search in file…',
+              hintStyle: TextStyle(color: cs.onSurfaceVariant, fontSize: 14),
+              border: InputBorder.none,
+              contentPadding: const EdgeInsets.symmetric(vertical: 8),
+            ),
+            style: TextStyle(color: cs.onSurface, fontSize: 14),
+          ),
+        ),
+        IconButton(
+          icon: Icon(Icons.keyboard_arrow_up, color: cs.onSurface),
+          onPressed: _searchPrev,
+          tooltip: 'Previous match',
+        ),
+        IconButton(
+          icon: Icon(Icons.keyboard_arrow_down, color: cs.onSurface),
+          onPressed: _searchNext,
+          tooltip: 'Next match',
+        ),
+      ],
+    );
+  }
+
+  Widget _buildNormalBar(ColorScheme cs) {
+    return Consumer<EditorProvider>(
+      builder: (context, editor, _) {
+        final ctrl = editor.activeFile?.controller;
+        if (ctrl == null) return _buildToolbar(context, cs, false, false);
+        return ListenableBuilder(
+          listenable: ctrl,
+          builder: (context, _) =>
+              _buildToolbar(context, cs, ctrl.content.canUndo, ctrl.content.canRedo),
+        );
+      },
+    );
+  }
+
+  Widget _buildToolbar(
+      BuildContext context, ColorScheme cs, bool canUndo, bool canRedo) {
+    return Row(
+      children: [
+        // ── Menu / back-arrow button ──────────────────────────────
+        AnimatedBuilder(
+          animation: widget.drawerAnim,
+          builder: (_, __) => IconButton(
+            icon: AnimatedIcon(
+              icon: AnimatedIcons.menu_arrow,
+              progress: widget.drawerAnim,
+              size: 24,
+            ),
+            onPressed: widget.onMenuTap,
+            tooltip: 'File Explorer',
+          ),
+        ),
+        // ── Left label: FL IDE + project name ─────────────────────
+        Expanded(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'FL IDE',
+                style: TextStyle(
+                  color: cs.onSurface,
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                  height: 1.1,
+                ),
+              ),
+              Text(
+                widget.project.name,
+                style: TextStyle(
+                  color: cs.onSurfaceVariant,
+                  fontSize: 11,
+                  height: 1.2,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
+        // ── Right buttons (state-dependent) ───────────────────────
+        if (canUndo)
+          IconButton(
+            icon: Icon(Icons.undo_rounded, color: cs.onSurface, size: 22),
+            onPressed: () => context.read<EditorProvider>().undo(),
+            tooltip: 'Undo',
+            constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+          ),
+        if (canRedo)
+          IconButton(
+            icon: Icon(Icons.redo_rounded, color: cs.onSurface, size: 22),
+            onPressed: () => context.read<EditorProvider>().redo(),
+            tooltip: 'Redo',
+            constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+          ),
+        // ── Hot reload (if available) ──────────────────────────────
+        Consumer<AppInstallerProvider>(
+          builder: (_, installer, __) => installer.hotReloadAvailable
+              ? IconButton(
+                  icon: Icon(Icons.refresh_rounded,
+                      color: cs.primary, size: 22),
+                  onPressed: installer.hotReload,
+                  tooltip: 'Hot Reload',
+                  constraints:
+                      const BoxConstraints(minWidth: 40, minHeight: 40),
+                )
+              : const SizedBox.shrink(),
+        ),
+        // ── Build / Stop button ────────────────────────────────────
         Consumer<BuildProvider>(
           builder: (context, build, _) => build.isBuilding
               ? IconButton(
                   icon: Container(
-                    width: 22,
-                    height: 22,
+                    width: 20,
+                    height: 20,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      border: Border.all(color: AppTheme.darkError, width: 2),
+                      border: Border.all(color: cs.error, width: 2),
                     ),
-                    child: const Icon(Icons.stop,
-                        color: AppTheme.darkError, size: 12),
+                    child: Icon(Icons.stop, color: cs.error, size: 11),
                   ),
                   onPressed: build.cancel,
                   tooltip: 'Stop build',
+                  constraints:
+                      const BoxConstraints(minWidth: 40, minHeight: 40),
                 )
-              : const SizedBox.shrink(),
+              : IconButton(
+                  icon: Icon(Icons.play_arrow_rounded,
+                      color: cs.primary, size: 24),
+                  onPressed: () =>
+                      context.read<BuildProvider>().build(widget.project),
+                  tooltip: 'Build project',
+                  constraints:
+                      const BoxConstraints(minWidth: 40, minHeight: 40),
+                ),
         ),
-        // Hot reload
-        Consumer<AppInstallerProvider>(
-          builder: (context, installer, _) {
-            if (!installer.hotReloadAvailable) return const SizedBox.shrink();
-            return IconButton(
-              icon: const Icon(Icons.refresh_rounded,
-                  color: AppTheme.darkText, size: 24),
-              onPressed: installer.hotReload,
-              tooltip: 'Hot Reload',
-            );
-          },
-        ),
-        // More options
+        // ── Type commands (only when not at max buttons) ───────────
+        if (!canRedo)
+          IconButton(
+            icon: Icon(Icons.terminal_outlined, color: cs.onSurface, size: 20),
+            onPressed: () {
+              final editor = context.read<EditorProvider>();
+              final ctrl = editor.activeFile?.controller;
+              if (ctrl == null) return;
+              final theme =
+                  context.read<ExtensionsProvider>().activeEditorTheme ??
+                      QuillThemeDark.build();
+              QuillActionsMenu.show(context, ctrl, theme);
+            },
+            tooltip: 'Commands',
+            constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+          ),
+        // ── Search (only in normal state) ──────────────────────────
+        if (!canUndo)
+          IconButton(
+            icon: Icon(Icons.search_rounded, color: cs.onSurface, size: 22),
+            onPressed: _enterSearch,
+            tooltip: 'Search',
+            constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+          ),
+        // ── 3-dot overflow menu ────────────────────────────────────
         PopupMenuButton<String>(
-          icon: const Icon(Icons.more_vert, color: AppTheme.darkText, size: 24),
-          color: AppTheme.darkSurface,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          icon: Icon(Icons.more_vert, color: cs.onSurface, size: 22),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12)),
+          constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
           onSelected: (val) {
+            final editor = context.read<EditorProvider>();
             switch (val) {
-              case 'build':
-                context.read<BuildProvider>().build(project);
+              case 'undo':
+                editor.undo();
+              case 'redo':
+                editor.redo();
               case 'save':
-                context.read<EditorProvider>().saveActiveFile();
+                editor.saveActiveFile();
+              case 'sync':
+                editor.loadProject(widget.project.path);
+              case 'search':
+                _enterSearch();
+              case 'commands':
+                final ctrl = editor.activeFile?.controller;
+                if (ctrl == null) return;
+                final theme =
+                    context.read<ExtensionsProvider>().activeEditorTheme ??
+                        QuillThemeDark.build();
+                QuillActionsMenu.show(context, ctrl, theme);
               case 'close':
-                context.read<ProjectManagerProvider>().closeProject();
+                _confirmCloseProject(context);
             }
           },
           itemBuilder: (_) => [
-            PopupMenuItem(
-              value: 'build',
-              child: _PopupItem(
-                  icon: Icons.play_arrow_rounded, label: 'Build project'),
+            const PopupMenuItem(
+              value: 'undo',
+              height: 40,
+              child: _PopupItem(icon: Icons.undo_rounded, label: 'Undo'),
             ),
-            PopupMenuItem(
+            const PopupMenuItem(
+              value: 'redo',
+              height: 40,
+              child: _PopupItem(icon: Icons.redo_rounded, label: 'Redo'),
+            ),
+            const PopupMenuItem(
               value: 'save',
-              child: _PopupItem(icon: Icons.save_outlined, label: 'Save file'),
+              height: 40,
+              child: _PopupItem(icon: Icons.save_outlined, label: 'Save'),
             ),
-            const PopupMenuDivider(),
-            PopupMenuItem(
-              value: 'close',
+            const PopupMenuItem(
+              value: 'sync',
+              height: 40,
               child: _PopupItem(
-                  icon: Icons.close, label: 'Close project',
-                  color: AppTheme.darkError),
+                  icon: Icons.sync_rounded, label: 'Sync project'),
+            ),
+            if (canUndo)
+              const PopupMenuItem(
+                value: 'search',
+                height: 40,
+                child:
+                    _PopupItem(icon: Icons.search_rounded, label: 'Search'),
+              ),
+            if (canRedo)
+              const PopupMenuItem(
+                value: 'commands',
+                height: 40,
+                child: _PopupItem(
+                    icon: Icons.terminal_outlined, label: 'Commands'),
+              ),
+            const PopupMenuDivider(),
+            const PopupMenuItem(
+              value: 'close',
+              height: 40,
+              child: _PopupItem(
+                  icon: Icons.close,
+                  label: 'Close project',
+                  isDestructive: true),
             ),
           ],
         ),
-        const SizedBox(width: 4),
+        const SizedBox(width: 2),
       ],
-      bottom: PreferredSize(
-        preferredSize: const Size.fromHeight(3),
-        child: Consumer<BuildProvider>(
-          builder: (context, build, _) => build.isBuilding
-              ? const LinearProgressIndicator(
-                  color: AppTheme.darkAccent,
-                  backgroundColor: Colors.transparent,
-                  minHeight: 3,
-                )
-              : const SizedBox(height: 3),
-        ),
-      ),
     );
+  }
+}
+
+Future<void> _confirmCloseProject(BuildContext context) async {
+  final cs = Theme.of(context).colorScheme;
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: const Text('Close project'),
+      content: const Text('Are you sure you want to close the current project? Any unsaved changes will be lost.'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, false),
+          child: Text('No', style: TextStyle(color: cs.onSurfaceVariant)),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: cs.error),
+          onPressed: () => Navigator.pop(ctx, true),
+          child: const Text('Yes, close'),
+        ),
+      ],
+    ),
+  );
+  if (confirmed == true && context.mounted) {
+    context.read<ProjectManagerProvider>().closeProject();
   }
 }
 
 class _PopupItem extends StatelessWidget {
   final IconData icon;
   final String label;
-  final Color? color;
-  const _PopupItem({required this.icon, required this.label, this.color});
+  final bool isDestructive;
+  const _PopupItem(
+      {required this.icon, required this.label, this.isDestructive = false});
 
   @override
   Widget build(BuildContext context) {
-    final c = color ?? AppTheme.darkText;
+    final cs = Theme.of(context).colorScheme;
+    final c = isDestructive ? cs.error : cs.onSurface;
     return Row(
       children: [
         Icon(icon, size: 18, color: c),
@@ -354,126 +611,223 @@ class _PopupItem extends StatelessWidget {
   }
 }
 
-// ── Left icon rail ────────────────────────────────────────────────────────────
+// ── Main content ──────────────────────────────────────────────────────────────
 
-class _IconRail extends StatelessWidget {
+class _MainContent extends StatelessWidget {
   final Project project;
-  final bool fileTreeOpen;
-  final VoidCallback onToggleFileTree;
-  final ValueChanged<int> onTabChange;
+  final TabController bottomTabCtrl;
+  final GlobalKey<_BottomSheetPanelState> sheetKey;
+  final bool keyboardVisible;
 
-  const _IconRail({
+  const _MainContent({
     required this.project,
-    required this.fileTreeOpen,
-    required this.onToggleFileTree,
-    required this.onTabChange,
+    required this.bottomTabCtrl,
+    required this.sheetKey,
+    required this.keyboardVisible,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 60,
-      color: AppTheme.darkSideRail,
-      child: Column(
+    final settings = context.watch<SettingsProvider>();
+    return LayoutBuilder(
+      builder: (context, constraints) => Stack(
         children: [
-          const SizedBox(height: 8),
-          // App logo
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Container(
-              width: 40,
-              height: 40,
-              decoration: const BoxDecoration(
-                color: AppTheme.darkSurface,
-                shape: BoxShape.circle,
-              ),
-              child: const Center(
-                child: Text('FL',
-                    style: TextStyle(
-                        color: AppTheme.darkText,
-                        fontSize: 13,
-                        fontWeight: FontWeight.bold)),
-              ),
+          Positioned.fill(
+            child: EditorArea(
+              editorTheme:
+                  context.watch<ExtensionsProvider>().activeEditorTheme,
+              showSymbolBar: false,
+              fontSize: settings.fontSize,
+              fontFamily: settings.fontFamily,
+              configureProps: settings.applyToProps,
             ),
           ),
-          const SizedBox(height: 8),
-          // File tree icon
-          _RailIcon(
-            icon: Icons.folder_outlined,
-            active: fileTreeOpen,
-            onTap: onToggleFileTree,
-            tooltip: 'File Explorer',
-          ),
-          // Android/Build icon
-          _RailIcon(
-            icon: Icons.android,
-            onTap: () => onTabChange(1),
-            tooltip: 'Build',
-          ),
-          // Terminal icon
-          _RailIcon(
-            icon: Icons.terminal,
-            onTap: () => onTabChange(0),
-            tooltip: 'Terminal',
-          ),
-          // Settings
-          _RailIcon(
-            icon: Icons.settings_outlined,
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const SettingsScreen()),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: _BottomSheetPanel(
+              key: sheetKey,
+              availableHeight: constraints.maxHeight,
+              project: project,
+              tabCtrl: bottomTabCtrl,
+              keyboardVisible: keyboardVisible,
             ),
-            tooltip: 'Settings',
           ),
-          const Spacer(),
-          // Close project
-          _RailIcon(
-            icon: Icons.close,
-            onTap: () => context.read<ProjectManagerProvider>().closeProject(),
-            tooltip: 'Close project',
-          ),
-          const SizedBox(height: 12),
         ],
       ),
     );
   }
 }
 
-class _RailIcon extends StatelessWidget {
-  final IconData icon;
-  final bool active;
-  final VoidCallback onTap;
-  final String tooltip;
+// ── Drawer content ────────────────────────────────────────────────────────────
 
-  const _RailIcon({
+class _DrawerContent extends StatelessWidget {
+  final Project project;
+  final VoidCallback onClose;
+  final ValueChanged<int> onTabChange;
+
+  const _DrawerContent({
+    required this.project,
+    required this.onClose,
+    required this.onTabChange,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Row(
+      children: [
+        // Icon rail — 64px
+        _DrawerRail(
+          project: project,
+          onClose: onClose,
+          onTabChange: onTabChange,
+        ),
+        // Divider
+        VerticalDivider(width: 1, thickness: 1, color: cs.outlineVariant),
+        // File tree with 2D scroll
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                height: 48,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  project.name,
+                  style: TextStyle(
+                    color: cs.onSurface,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              Divider(height: 1, color: cs.outlineVariant),
+              Expanded(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: SizedBox(
+                    width: 600,
+                    child: FileTreePanel(onFileSelected: onClose),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _DrawerRail extends StatelessWidget {
+  final Project project;
+  final VoidCallback onClose;
+  final ValueChanged<int> onTabChange;
+
+  const _DrawerRail({
+    required this.project,
+    required this.onClose,
+    required this.onTabChange,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return SizedBox(
+      width: _kRailWidth,
+      child: Container(
+        color: cs.surfaceContainerLow,
+        child: Column(
+          children: [
+            const SizedBox(height: 16),
+            // ── App logo at top ──────────────────────────────────────────
+            Tooltip(
+              message: 'FL IDE',
+              child: CircleAvatar(
+                backgroundColor: cs.primary,
+                radius: 22,
+              child:Image.asset("assets/logo.png",width: 200, height: 200, fit: BoxFit.cover, ),
+              ),
+            ),
+            const Spacer(),
+            // ── Action buttons at bottom (colored circles) ───────────────
+            _CircleRailBtn(
+              icon: Icons.terminal,
+              tooltip: 'Terminal',
+              bg: cs.primaryContainer,
+              fg: cs.onPrimaryContainer,
+              onTap: () =>  Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const StandaloneTerminalScreen()),
+    ),
+            ),
+            _CircleRailBtn(
+              icon: Icons.android,
+              tooltip: 'Build',
+              bg: cs.primaryContainer,
+              fg: cs.onPrimaryContainer,
+              onTap: () => onTabChange(1),
+            ),
+            _CircleRailBtn(
+              icon: Icons.settings_outlined,
+              tooltip: 'Settings',
+              bg: cs.primaryContainer,
+              fg: cs.onPrimaryContainer,
+              onTap: () {
+                onClose();
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                );
+              },
+            ),
+            _CircleRailBtn(
+              icon: Icons.close,
+              tooltip: 'Close project',
+              bg: cs.errorContainer,
+              fg: cs.onErrorContainer,
+              onTap: () => _confirmCloseProject(context),
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CircleRailBtn extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final Color bg;
+  final Color fg;
+  final VoidCallback onTap;
+
+  const _CircleRailBtn({
     required this.icon,
-    this.active = false,
-    required this.onTap,
     required this.tooltip,
+    required this.bg,
+    required this.fg,
+    required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: 6),
       child: Tooltip(
         message: tooltip,
-        preferBelow: false,
-        child: GestureDetector(
+        child: InkWell(
           onTap: onTap,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: active ? AppTheme.darkSurface : Colors.transparent,
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              icon,
-              size: 22,
-              color: active ? AppTheme.darkText : AppTheme.darkTextMuted,
-            ),
+          borderRadius: BorderRadius.circular(22),
+          child: CircleAvatar(
+            backgroundColor: bg,
+            radius: 22,
+            child: Icon(icon, color: fg, size: 20),
           ),
         ),
       ),
@@ -481,122 +835,263 @@ class _RailIcon extends StatelessWidget {
   }
 }
 
-// ── Bottom output sheet ───────────────────────────────────────────────────────
+// ── Bottom sheet panel (persistent, draggable, snapping) ─────────────────────
 
-class _BottomOutputSheet extends StatelessWidget {
+class _BottomSheetPanel extends StatefulWidget {
+  final double availableHeight;
   final Project project;
   final TabController tabCtrl;
-  final ScrollController scrollController;
+  final bool keyboardVisible;
 
-  const _BottomOutputSheet({
+  const _BottomSheetPanel({
+    super.key,
+    required this.availableHeight,
     required this.project,
     required this.tabCtrl,
-    required this.scrollController,
+    required this.keyboardVisible,
   });
 
   @override
+  State<_BottomSheetPanel> createState() => _BottomSheetPanelState();
+}
+
+class _BottomSheetPanelState extends State<_BottomSheetPanel>
+    with SingleTickerProviderStateMixin {
+  static const double _kPeek = 60.0;
+  static const double _kMid = 400.0;
+  static const double _kPeekBarH = 64.0;
+
+  double _height = _kPeek;
+  late AnimationController _animCtrl;
+  late Animation<double> _anim;
+
+  @override
+  void initState() {
+    super.initState();
+    _animCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 280),
+    );
+    _animCtrl.addListener(() => setState(() => _height = _anim.value));
+  }
+
+  @override
+  void didUpdateWidget(_BottomSheetPanel old) {
+    super.didUpdateWidget(old);
+    if (_height > widget.availableHeight) {
+      _height = widget.availableHeight;
+    }
+  }
+
+  @override
+  void dispose() {
+    _animCtrl.dispose();
+    super.dispose();
+  }
+
+  /// Called externally (e.g. from drawer rail) to expand to mid stage.
+  void expandToMid() => _snapTo(_kMid);
+
+  List<double> get _snapPoints => [_kPeek, _kMid, widget.availableHeight];
+
+  // 0.0 while in stages 1 & 2, ramps to 1.0 as stage 3 is entered
+  double get _stage3Progress {
+    if (_height <= _kMid) return 0.0;
+    final full = widget.availableHeight;
+    if (_height >= full) return 1.0;
+    return (_height - _kMid) / (full - _kMid);
+  }
+
+  void _snapTo(double target) {
+    final end = target.clamp(_kPeek, widget.availableHeight);
+    _anim = Tween<double>(begin: _height, end: end)
+        .animate(CurvedAnimation(parent: _animCtrl, curve: Curves.easeOut));
+    _animCtrl.forward(from: 0);
+  }
+
+  void _onDragUpdate(DragUpdateDetails d) {
+    _animCtrl.stop();
+    setState(() {
+      _height =
+          (_height - d.delta.dy).clamp(_kPeek, widget.availableHeight);
+    });
+  }
+
+  void _onDragEnd(DragEndDetails d) {
+    final v = d.primaryVelocity ?? 0;
+    final snaps = _snapPoints;
+    double target;
+    if (v < -600) {
+      final higher = snaps.where((s) => s > _height + 10).toList();
+      target = higher.isNotEmpty ? higher.first : snaps.last;
+    } else if (v > 600) {
+      final lower = snaps.where((s) => s < _height - 10).toList();
+      target = lower.isNotEmpty ? lower.last : snaps.first;
+    } else {
+      target = snaps.reduce((a, b) =>
+          (a - _height).abs() < (b - _height).abs() ? a : b);
+    }
+    _snapTo(target);
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        color: AppTheme.darkPanel,
-        border: Border(top: BorderSide(color: AppTheme.darkDivider)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Drag handle area (collapsed state hint)
-          SingleChildScrollView(
-            controller: scrollController,
-            physics: const NeverScrollableScrollPhysics(),
-            child: Consumer<BuildProvider>(
-              builder: (context, build, _) => Container(
-                height: 70,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    // Handle bar
-                    Container(
-                      width: 36,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: AppTheme.darkBorder,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
+    final cs = Theme.of(context).colorScheme;
+    return DragTarget<OpenFile>(
+      onAcceptWithDetails: (details) {
+        final editor = context.read<EditorProvider>();
+        final idx = editor.openFiles.indexOf(details.data);
+        if (idx != -1) editor.moveToPanel(idx, bottom: true);
+      },
+      builder: (context, candidates, _) {
+        final isDragOver = candidates.isNotEmpty;
+        return SizedBox(
+          height: _height,
+          child: ClipRect(
+            child: Material(
+              color: isDragOver
+                  ? cs.primaryContainer.withValues(alpha: 0.15)
+                  : cs.surfaceContainerLow,
+              child: Column(
+                children: [
+                  // ── Draggable header (drag anywhere here to resize) ──
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onVerticalDragUpdate: _onDragUpdate,
+                    onVerticalDragEnd: _onDragEnd,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Consumer<LspProvider>(
+                          builder: (ctx, lsp, _) {
+                            if (lsp.status == LspStatus.starting) {
+                              return LinearProgressIndicator(
+                                minHeight: 2,
+                                backgroundColor: cs.outlineVariant,
+                              );
+                            }
+                            return Divider(
+                                height: 1,
+                                thickness: 1,
+                                color: cs.outlineVariant);
+                          },
+                        ),
+
+                        // ── Stage 1: peek bar (or symbol bar when keyboard up)
+                        // When stage 3 begins the peek bar slides downward
+                        // behind the tab bar and the SizedBox collapses it.  ─
+                        if (widget.keyboardVisible)
+                          const _SpecialCharsBar()
+                        else
+                          Builder(builder: (context) {
+                            final p3 = _stage3Progress;
+                            if (p3 >= 1.0) return const SizedBox.shrink();
+                            return ClipRect(
+                              child: SizedBox(
+                                height: _kPeekBarH * (1.0 - p3),
+                                width: double.infinity,
+                                child: Transform.translate(
+                                  offset: Offset(0, _kPeekBarH * p3),
+                                  child: const _PeekBar(),
+                                ),
+                              ),
+                            );
+                          }),
+
+                        // ── Stage 2: tab bar — always rendered below ─────────
+                        ...[
+                          Consumer<EditorProvider>(
+                            builder: (ctx, editor, _) {
+                              final bf = editor.bottomPanelFiles;
+                              if (bf.isEmpty) return const SizedBox.shrink();
+                              return _BottomFileTabs(
+                                  files: bf, editor: editor);
+                            },
+                          ),
+                          ColoredBox(
+                            color: cs.surfaceContainerHigh,
+                            child: TabBar(
+                              controller: widget.tabCtrl,
+                              isScrollable: true,
+                              tabAlignment: TabAlignment.start,
+                              padding: EdgeInsets.zero,
+                              dividerColor: Colors.transparent,
+                              labelStyle: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: 0.5),
+                              unselectedLabelStyle:
+                                  const TextStyle(fontSize: 11),
+                              tabs: const [
+                                Tab(text: 'TERMINAL', height: 40),
+                                Tab(text: 'BUILD', height: 40),
+                                Tab(text: 'LOGS', height: 40),
+                                Tab(text: 'PROBLEMS', height: 40),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      build.isBuilding
-                          ? 'Building...'
-                          : build.result.isSuccess
-                              ? 'Build successful'
-                              : build.result.isError
-                                  ? 'Build failed'
-                                  : 'Ready',
-                      style: const TextStyle(
-                          color: AppTheme.darkText,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500),
+                  ),
+                  // ── Content ──────────────────────────────────────────
+                  Divider(height: 1, color: cs.outlineVariant),
+                  Expanded(
+                    child: TabBarView(
+                      controller: widget.tabCtrl,
+                      physics: const NeverScrollableScrollPhysics(),
+                      children: [
+                        const TerminalTabs(),
+                        BuildPanel(project: widget.project),
+                        LogsPanel(
+                          packageName:
+                              widget.project.sdk == SdkType.flutter
+                                  ? 'com.example.${widget.project.name}'
+                                  : null,
+                        ),
+                        _ProblemsPanel(),
+                      ],
                     ),
-                    const SizedBox(height: 2),
-                    const Text(
-                      'Swipe up to view build output, logs and more.',
-                      style: TextStyle(
-                          color: AppTheme.darkTextMuted, fontSize: 11),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),
-          // Expanded: tab bar + content
-          Expanded(
-            child: Column(
-              children: [
-                // Tab bar
-                Container(
-                  height: 40,
-                  color: AppTheme.darkSideRail,
-                  child: TabBar(
-                    controller: tabCtrl,
-                    isScrollable: true,
-                    tabAlignment: TabAlignment.start,
-                    padding: EdgeInsets.zero,
-                    labelColor: AppTheme.darkAccent,
-                    unselectedLabelColor: AppTheme.darkTextMuted,
-                    indicatorColor: AppTheme.darkAccent,
-                    indicatorSize: TabBarIndicatorSize.label,
-                    dividerColor: Colors.transparent,
-                    labelStyle: const TextStyle(
-                        fontSize: 11, fontWeight: FontWeight.w600,
-                        letterSpacing: 0.5),
-                    unselectedLabelStyle: const TextStyle(fontSize: 11),
-                    tabs: const [
-                      Tab(text: 'TERMINAL', height: 40),
-                      Tab(text: 'BUILD', height: 40),
-                      Tab(text: 'LOGS', height: 40),
-                      Tab(text: 'PROBLEMS', height: 40),
-                    ],
-                  ),
-                ),
-                const Divider(height: 1, color: AppTheme.darkDivider),
-                Expanded(
-                  child: TabBarView(
-                    controller: tabCtrl,
-                    physics: const NeverScrollableScrollPhysics(),
-                    children: [
-                      const TerminalTabs(),
-                      BuildPanel(project: project),
-                      LogsPanel(
-                          packageName: project.sdk == SdkType.flutter
-                              ? 'com.example.${project.name}'
-                              : null),
-                      _ProblemsPanel(),
-                    ],
-                  ),
-                ),
-              ],
+        );
+      },
+    );
+  }
+}
+
+// ── Peek bar shown at the collapsed (60 dp) stage ────────────────────────────
+
+class _PeekBar extends StatelessWidget {
+  const _PeekBar();
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final lsp = context.watch<LspProvider>();
+    final isStarting = lsp.status == LspStatus.starting;
+    return SizedBox(
+      height: _BottomSheetPanelState._kPeekBarH,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            isStarting ? 'Inicializando projeto...' : 'Projeto inicializado',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: cs.onSurface,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
             ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            'Deslize para cima para ter acesso ao terminal',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: cs.onSurfaceVariant, fontSize: 10),
           ),
         ],
       ),
@@ -604,16 +1099,168 @@ class _BottomOutputSheet extends StatelessWidget {
   }
 }
 
-// ── Problems ──────────────────────────────────────────────────────────────────
+// ── Bottom-panel file tabs ────────────────────────────────────────────────────
+
+class _BottomFileTabs extends StatelessWidget {
+  final List<OpenFile> files;
+  final EditorProvider editor;
+
+  const _BottomFileTabs({required this.files, required this.editor});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return ColoredBox(
+      color: cs.surfaceContainer,
+      child: SizedBox(
+        height: 36,
+        child: ListView.builder(
+          scrollDirection: Axis.horizontal,
+          itemCount: files.length,
+          itemBuilder: (context, i) {
+            final f = files[i];
+            final globalIndex = editor.openFiles.indexOf(f);
+            final isActive = editor.activeFile?.path == f.path;
+            return LongPressDraggable<OpenFile>(
+              data: f,
+              feedback: Material(
+                elevation: 4,
+                borderRadius: BorderRadius.circular(8),
+                color: cs.primaryContainer,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 4),
+                  child: Text(f.name,
+                      style: TextStyle(
+                          color: cs.onPrimaryContainer,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600)),
+                ),
+              ),
+              onDragEnd: (details) {
+                // If dragged upward far enough, move back to top bar
+                if (details.velocity.pixelsPerSecond.dy < -200) {
+                  editor.moveToPanel(globalIndex, bottom: false);
+                }
+              },
+              child: GestureDetector(
+                onTap: () => editor.switchTo(globalIndex),
+                child: Container(
+                  height: 36,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10),
+                  decoration: BoxDecoration(
+                    border: Border(
+                      bottom: BorderSide(
+                        color:
+                            isActive ? cs.primary : Colors.transparent,
+                        width: 2,
+                      ),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        f.name,
+                        style: TextStyle(
+                          color: isActive
+                              ? cs.primary
+                              : cs.onSurfaceVariant,
+                          fontSize: 11,
+                          fontWeight: isActive
+                              ? FontWeight.w600
+                              : FontWeight.w400,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      // Move back to top bar
+                      GestureDetector(
+                        onTap: () => editor.moveToPanel(globalIndex,
+                            bottom: false),
+                        child: Icon(Icons.arrow_upward_rounded,
+                            size: 12, color: cs.onSurfaceVariant),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+// ── Sheet header: special chars bar ──────────────────────────────────────────
+
+class _SpecialCharsBar extends StatelessWidget {
+  const _SpecialCharsBar();
+
+  void _insertChar(BuildContext context, String char) {
+    final ctrl = context.read<EditorProvider>().activeFile?.controller;
+    if (ctrl == null) return;
+    if (char == '\t') {
+      ctrl.insertTab();
+    } else {
+      ctrl.insertText(char);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      height: 44,
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerLow,
+        border: Border(top: BorderSide(color: cs.outlineVariant)),
+      ),
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+        itemCount: _kSpecialChars.length,
+        itemBuilder: (context, i) {
+          final char = _kSpecialChars[i];
+          return InkWell(
+            onTap: () => _insertChar(context, char),
+            borderRadius: BorderRadius.circular(6),
+            child: Container(
+              width: 36,
+              alignment: Alignment.center,
+              margin: const EdgeInsets.symmetric(horizontal: 2),
+              decoration: BoxDecoration(
+                color: cs.surfaceContainerHigh,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                char == '\t' ? '⇥' : char,
+                style: TextStyle(
+                  color: cs.onSurface,
+                  fontSize: 14,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ── Problems panel ────────────────────────────────────────────────────────────
 
 class _ProblemsPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Consumer<EditorProvider>(
       builder: (context, editor, _) {
         final ctrl = editor.activeFile?.controller;
         if (ctrl == null) {
-          return const _PanelPlaceholder(
+          return _PanelPlaceholder(
               icon: Icons.info_outline, text: 'No file open');
         }
         return ListenableBuilder(
@@ -621,31 +1268,33 @@ class _ProblemsPanel extends StatelessWidget {
           builder: (context, _) {
             final diagnostics = ctrl.diagnostics.all;
             if (diagnostics.isEmpty) {
-              return const _PanelPlaceholder(
-                  icon: Icons.check_circle_outline,
-                  iconColor: AppTheme.darkSuccess,
-                  text: 'No problems');
+              return _PanelPlaceholder(
+                icon: Icons.check_circle_outline,
+                iconColor: cs.primary,
+                text: 'No problems',
+              );
             }
             return ListView.separated(
               itemCount: diagnostics.length,
               separatorBuilder: (_, __) =>
-                  const Divider(color: AppTheme.darkDivider, height: 1),
+                  Divider(color: cs.outlineVariant, height: 1),
               itemBuilder: (context, i) {
                 final d = diagnostics[i];
                 final isError = d.severity == DiagnosticSeverity.error;
                 return ListTile(
                   dense: true,
                   leading: Icon(
-                    isError ? Icons.error_outline : Icons.warning_amber_outlined,
+                    isError
+                        ? Icons.error_outline
+                        : Icons.warning_amber_outlined,
                     size: 16,
-                    color: isError ? AppTheme.darkError : AppTheme.darkWarning,
+                    color: isError ? cs.error : cs.tertiary,
                   ),
                   title: Text(d.message,
-                      style: const TextStyle(
-                          color: AppTheme.darkText, fontSize: 12)),
+                      style: TextStyle(color: cs.onSurface, fontSize: 12)),
                   subtitle: Text('Line ${d.range.start.line + 1}',
-                      style: const TextStyle(
-                          color: AppTheme.darkTextMuted, fontSize: 11)),
+                      style:
+                          TextStyle(color: cs.onSurfaceVariant, fontSize: 11)),
                 );
               },
             );
@@ -665,20 +1314,17 @@ class _PanelPlaceholder extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 28, color: iconColor ?? AppTheme.darkTextDim),
+          Icon(icon, size: 28, color: iconColor ?? cs.onSurfaceVariant),
           const SizedBox(height: 8),
           Text(text,
-              style: const TextStyle(
-                  color: AppTheme.darkTextMuted, fontSize: 13)),
+              style: TextStyle(color: cs.onSurfaceVariant, fontSize: 13)),
         ],
       ),
     );
   }
 }
-
-// ── Settings screen (import from home_screen) ─────────────────────────────────
-// Re-exported so workspace can navigate to it.

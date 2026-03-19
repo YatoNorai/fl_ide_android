@@ -1,4 +1,5 @@
 import 'package:core/core.dart';
+import 'package:fl_ide/l10n/app_strings.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:sdk_manager/sdk_manager.dart';
@@ -6,8 +7,7 @@ import 'package:terminal_pkg/terminal_pkg.dart';
 
 import '../providers/project_manager_provider.dart';
 
-/// AndroidIDE-style full-screen project creation form.
-/// Exported as [CreateProjectScreen] (full page) and [CreateProjectDialog] (kept for compat).
+/// Full-screen project creation form.
 class CreateProjectScreen extends StatefulWidget {
   const CreateProjectScreen({super.key});
 
@@ -15,305 +15,389 @@ class CreateProjectScreen extends StatefulWidget {
   State<CreateProjectScreen> createState() => _CreateProjectScreenState();
 }
 
-// Keep old name as alias so existing import in home_screen works
+// Keep old name for compat
 typedef CreateProjectDialog = CreateProjectScreen;
 
 class _CreateProjectScreenState extends State<CreateProjectScreen> {
-  final _nameCtrl = TextEditingController();
+  final _nameCtrl    = TextEditingController(text: 'meu_app');
+  final _packageCtrl = TextEditingController(text: 'com.example.meu_app');
   SdkType? _selectedSdk;
   bool _creating = false;
   late final TerminalProvider _termProvider;
+
+  // SDKs that use a package/bundle identifier
+  static const _pkgSdks = {SdkType.flutter, SdkType.androidSdk, SdkType.reactNative};
+
+  bool get _supportsPackage =>
+      _selectedSdk != null && _pkgSdks.contains(_selectedSdk);
+
+  bool get _canCreate =>
+      !_creating &&
+      _selectedSdk != null &&
+      _nameCtrl.text.trim().isNotEmpty;
 
   @override
   void initState() {
     super.initState();
     _termProvider = TerminalProvider();
+    _nameCtrl.addListener(_syncPackage);
+  }
+
+  void _syncPackage() {
+    final safe = _nameCtrl.text.trim().toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9_]'), '_');
+    final base = safe.isEmpty ? 'app' : safe;
+    _packageCtrl.text = 'com.example.$base';
   }
 
   @override
   void dispose() {
+    _nameCtrl.removeListener(_syncPackage);
     _nameCtrl.dispose();
+    _packageCtrl.dispose();
     _termProvider.dispose();
     super.dispose();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final sdkMgr = context.watch<SdkManagerProvider>();
-    final installedSdks = sdkMgr.installedSdks;
+  Future<void> _pickSdk() async {
+    final sdkMgr = context.read<SdkManagerProvider>();
+    final installed = sdkMgr.installedSdks;
+    if (installed.isEmpty) return;
 
-    return Scaffold(
-      backgroundColor: AppTheme.darkBg,
-      appBar: AppBar(
-        backgroundColor: AppTheme.darkBg,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: AppTheme.darkText),
-          onPressed: () => Navigator.pop(context),
-        ),
-      ),
-      body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Header
-            const Center(
-              child: Text('FL IDE',
-                  style: TextStyle(
-                      color: AppTheme.darkText,
-                      fontSize: 22,
-                      fontWeight: FontWeight.w700)),
-            ),
-            const SizedBox(height: 24),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16),
-              child: Text('New project',
-                  style: TextStyle(
-                      color: AppTheme.darkText,
-                      fontSize: 28,
-                      fontWeight: FontWeight.w700)),
-            ),
-            const SizedBox(height: 24),
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Project name field
-                    TextField(
-                      controller: _nameCtrl,
-                      style: const TextStyle(color: AppTheme.darkText, fontSize: 16),
-                      onChanged: (_) => setState(() {}),
-                      decoration: const InputDecoration(
-                        labelText: 'Application name',
-                        prefixIcon: Padding(
-                          padding: EdgeInsets.all(12),
-                          child: Icon(Icons.android_outlined,
-                              color: AppTheme.darkText, size: 20),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Save path
-                    TextField(
-                      enabled: false,
-                      style: const TextStyle(
-                          color: AppTheme.darkTextMuted, fontSize: 14),
-                      decoration: InputDecoration(
-                        labelText: 'Save location',
-                        hintText: RuntimeEnvir.projectsPath,
-                        prefixIcon: const Padding(
-                          padding: EdgeInsets.all(12),
-                          child: Icon(Icons.folder_outlined,
-                              color: AppTheme.darkTextMuted, size: 20),
-                        ),
-                        disabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide:
-                              const BorderSide(color: AppTheme.darkBorder),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // SDK selector
-                    if (installedSdks.isEmpty)
-                      Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: AppTheme.darkSurface,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: AppTheme.darkBorder),
-                        ),
-                        child: const Row(
-                          children: [
-                            Icon(Icons.warning_amber_rounded,
-                                color: AppTheme.darkWarning, size: 20),
-                            SizedBox(width: 12),
-                            Expanded(
-                              child: Text(
-                                'No SDKs installed. Install an SDK first.',
-                                style: TextStyle(
-                                    color: AppTheme.darkTextMuted, fontSize: 14),
-                              ),
-                            ),
-                          ],
-                        ),
-                      )
-                    else ...[
-                      _SdkDropdown(
-                        label: 'Project SDK',
-                        selected: _selectedSdk,
-                        options: installedSdks,
-                        onChanged: (v) => setState(() => _selectedSdk = v),
-                      ),
-                    ],
-
-                    // Terminal during creation
-                    if (_creating) ...[
-                      const SizedBox(height: 20),
-                      Container(
-                        height: 220,
-                        decoration: BoxDecoration(
-                          color: Colors.black,
-                          borderRadius: BorderRadius.circular(8),
-                          border:
-                              Border.all(color: AppTheme.darkBorder),
-                        ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: ChangeNotifierProvider.value(
-                            value: _termProvider,
-                            child: const TerminalTabs(),
-                          ),
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 32),
-                  ],
-                ),
-              ),
-            ),
-
-            // Bottom buttons — identical to AndroidIDE screenshot 3
-            Container(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: _creating ? null : () => Navigator.pop(context),
-                      child: const Text('Cancel'),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: _creating ||
-                              _selectedSdk == null ||
-                              _nameCtrl.text.trim().isEmpty
-                          ? null
-                          : _create,
-                      child: Text(_creating ? 'Creating...' : 'Create project'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
+    final result = await showDialog<SdkType>(
+      context: context,
+      builder: (ctx) => _SdkPickerDialog(
+        options: installed,
+        selected: _selectedSdk,
       ),
     );
+    if (result != null) setState(() => _selectedSdk = result);
   }
 
   Future<void> _create() async {
     final name = _nameCtrl.text.trim();
     if (name.isEmpty || _selectedSdk == null) return;
-
     setState(() => _creating = true);
 
-    await context.read<ProjectManagerProvider>().createProject(
+    final pm = context.read<ProjectManagerProvider>();
+    final project = await pm.createProject(
       name: name,
       sdk: _selectedSdk!,
       runInTerminal: (script) async {
-        await _termProvider.createSession(label: 'Creating $name');
+        await _termProvider.createSession(label: 'Criando $name');
         _termProvider.active?.writeCommand(script);
       },
     );
 
-    if (mounted) Navigator.pop(context);
+    if (!mounted) return;
+    pm.openProject(project);
+    Navigator.of(context).popUntil((route) => route.isFirst);
   }
-}
-
-// ── SDK dropdown ──────────────────────────────────────────────────────────────
-
-class _SdkDropdown extends StatelessWidget {
-  final String label;
-  final SdkType? selected;
-  final List<SdkType> options;
-  final ValueChanged<SdkType?> onChanged;
-
-  const _SdkDropdown({
-    required this.label,
-    required this.selected,
-    required this.options,
-    required this.onChanged,
-  });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.darkSurface,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppTheme.darkBorder),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<SdkType>(
-          value: selected,
-          isExpanded: true,
-          dropdownColor: AppTheme.darkSurface,
-          hint: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(label,
-                  style: const TextStyle(
-                      color: AppTheme.darkTextMuted, fontSize: 12)),
-              const Text('Select SDK',
-                  style: TextStyle(color: AppTheme.darkText, fontSize: 16)),
-            ],
+    final cs = Theme.of(context).colorScheme;
+    final s = AppStrings.of(context);
+    final sdkMgr = context.watch<SdkManagerProvider>();
+    final noSdks = sdkMgr.installedSdks.isEmpty;
+
+    return Scaffold(
+      backgroundColor: cs.surface,
+      appBar: AppBar(
+        backgroundColor: cs.surface,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        automaticallyImplyLeading: false,
+        title: Text(
+          'FL IDE',
+          style: TextStyle(
+            color: cs.onSurface,
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
           ),
-          icon: const Icon(Icons.arrow_drop_down, color: AppTheme.darkTextMuted),
-          items: options
-              .map((t) => DropdownMenuItem(
-                    value: t,
-                    child: Row(
-                      children: [
-                        Text(t.icon, style: const TextStyle(fontSize: 20)),
-                        const SizedBox(width: 12),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Text(label,
-                                style: const TextStyle(
-                                    color: AppTheme.darkTextMuted,
-                                    fontSize: 12)),
-                            Text(t.displayName,
-                                style: const TextStyle(
-                                    color: AppTheme.darkText, fontSize: 16)),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ))
-              .toList(),
-          onChanged: onChanged,
-          selectedItemBuilder: (context) => options
-              .map((t) => Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(label,
-                          style: const TextStyle(
-                              color: AppTheme.darkTextMuted, fontSize: 12)),
-                      Row(
-                        children: [
-                          Text(t.icon, style: const TextStyle(fontSize: 16)),
-                          const SizedBox(width: 8),
-                          Text(t.displayName,
-                              style: const TextStyle(
-                                  color: AppTheme.darkText, fontSize: 16)),
-                        ],
-                      ),
-                    ],
-                  ))
-              .toList(),
         ),
+        centerTitle: true,
+      ),
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Title ───────────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+            child: Text(
+              s.newProject,
+              style: TextStyle(
+                color: cs.onSurface,
+                fontSize: 28,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+
+          // ── Scrollable fields ────────────────────────────────────────────
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // SDK selector tile
+                  if (noSdks)
+                    _NoSdkWarning()
+                  else
+                    _SdkSelectorTile(
+                      selected: _selectedSdk,
+                      onTap: _creating ? null : _pickSdk,
+                    ),
+
+                  const SizedBox(height: 16),
+
+                  // Project name field
+                  TextField(
+                    controller: _nameCtrl,
+                    enabled: !_creating,
+                    style: TextStyle(color: cs.onSurface, fontSize: 15),
+                    decoration: InputDecoration(
+                      labelText: s.projectName,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: cs.outline),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide:
+                            BorderSide(color: cs.primary, width: 2),
+                      ),
+                      disabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: cs.outlineVariant),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 14),
+                    ),
+                    onChanged: (_) => setState(() {}),
+                  ),
+
+                  // Package name (Flutter / Android / React Native only)
+                  if (_supportsPackage) ...[
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: _packageCtrl,
+                      enabled: !_creating,
+                      style: TextStyle(color: cs.onSurface, fontSize: 15),
+                      decoration: InputDecoration(
+                        labelText: s.packageName,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: cs.outline),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide:
+                              BorderSide(color: cs.primary, width: 2),
+                        ),
+                        disabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: cs.outlineVariant),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 14),
+                      ),
+                    ),
+                  ],
+
+                  // Terminal output while creating
+                  if (_creating) ...[
+                    const SizedBox(height: 20),
+                    Container(
+                      height: 220,
+                      decoration: BoxDecoration(
+                        color: Colors.black,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: cs.outlineVariant),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: ChangeNotifierProvider.value(
+                          value: _termProvider,
+                          child: const TerminalTabs(),
+                        ),
+                      ),
+                    ),
+                  ],
+
+                  const SizedBox(height: 16),
+                ],
+              ),
+            ),
+          ),
+
+          // ── Bottom buttons ───────────────────────────────────────────────
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed:
+                          _creating ? null : () => Navigator.pop(context),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                      ),
+                      child: Text(s.cancel),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: _canCreate ? _create : null,
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                      ),
+                      child: Text(
+                          _creating ? s.creating : s.createProject),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── SDK selector tile ─────────────────────────────────────────────────────────
+
+class _SdkSelectorTile extends StatelessWidget {
+  final SdkType? selected;
+  final VoidCallback? onTap;
+
+  const _SdkSelectorTile({required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          border: Border.all(color: cs.outline),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'SDK',
+                    style: TextStyle(
+                      color: cs.onSurfaceVariant,
+                      fontSize: 12,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    selected == null
+                        ? AppStrings.of(context).selectSdk
+                        : '${selected!.icon}  ${selected!.displayName}',
+                    style: TextStyle(
+                      color: selected == null
+                          ? cs.onSurfaceVariant
+                          : cs.onSurface,
+                      fontSize: 15,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.arrow_drop_down_rounded,
+                color: cs.onSurfaceVariant),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── SDK picker dialog ─────────────────────────────────────────────────────────
+
+class _SdkPickerDialog extends StatelessWidget {
+  final List<SdkType> options;
+  final SdkType? selected;
+
+  const _SdkPickerDialog({required this.options, required this.selected});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return AlertDialog(
+      title: Text(AppStrings.of(context).selectSdk),
+      contentPadding: const EdgeInsets.symmetric(vertical: 8),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: options.map((sdk) {
+          final isSelected = sdk == selected;
+          return ListTile(
+            leading: Text(sdk.icon,
+                style: const TextStyle(fontSize: 22)),
+            title: Text(sdk.displayName),
+            subtitle: Text(sdk.description,
+                style: TextStyle(
+                    color: cs.onSurfaceVariant, fontSize: 12)),
+            trailing: isSelected
+                ? Icon(Icons.check_rounded, color: cs.primary)
+                : null,
+            selected: isSelected,
+            onTap: () => Navigator.pop(context, sdk),
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+// ── No SDK warning ────────────────────────────────────────────────────────────
+
+class _NoSdkWarning extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: cs.errorContainer.withValues(alpha: 0.3),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: cs.error.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.warning_amber_rounded, color: cs.error, size: 20),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              AppStrings.of(context).noSdkInstalled,
+              style: TextStyle(color: cs.onErrorContainer, fontSize: 14),
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -35,6 +35,7 @@ class _DownloadBootstrapScreenState extends State<DownloadBootstrapScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Consumer<RootfsProvider>(
       builder: (context, rootfs, _) {
         if (rootfs.state == RootfsState.ready) {
@@ -42,18 +43,18 @@ class _DownloadBootstrapScreenState extends State<DownloadBootstrapScreen> {
         }
 
         return Scaffold(
-          backgroundColor: AppTheme.darkBg,
+          backgroundColor: cs.surface,
           body: SafeArea(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // Title bar (like AndroidIDE home)
-                const Center(
+                Center(
                   child: Padding(
-                    padding: EdgeInsets.only(top: 16),
+                    padding: const EdgeInsets.only(top: 16),
                     child: Text('FL IDE',
                         style: TextStyle(
-                            color: AppTheme.darkText,
+                            color: cs.onSurface,
                             fontSize: 22,
                             fontWeight: FontWeight.w700)),
                   ),
@@ -102,6 +103,7 @@ class _NotInstalled extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -109,24 +111,24 @@ class _NotInstalled extends StatelessWidget {
         Container(
           width: 72,
           height: 72,
-          decoration: const BoxDecoration(
-            color: AppTheme.darkSurface,
+          decoration: BoxDecoration(
+            color: cs.surfaceContainerHigh,
             shape: BoxShape.circle,
           ),
-          child: const Icon(Icons.download_for_offline_outlined,
-              size: 36, color: AppTheme.darkText),
+          child: Icon(Icons.download_for_offline_outlined,
+              size: 36, color: cs.onSurface),
         ),
         const SizedBox(height: 24),
-        const Text("First-time setup",
+        Text("First-time setup",
             style: TextStyle(
-                color: AppTheme.darkText,
+                color: cs.onSurface,
                 fontSize: 22,
                 fontWeight: FontWeight.w700)),
         const SizedBox(height: 8),
-        const Text(
+        Text(
           "FL IDE needs to download a Linux environment (~70 MB). This only happens once.",
           style: TextStyle(
-              color: AppTheme.darkTextMuted, fontSize: 14, height: 1.5),
+              color: cs.onSurfaceVariant, fontSize: 14, height: 1.5),
           textAlign: TextAlign.center,
         ),
         const SizedBox(height: 40),
@@ -155,54 +157,55 @@ class _ProgressState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         Container(
           width: 72,
           height: 72,
-          decoration: const BoxDecoration(
-            color: AppTheme.darkSurface,
+          decoration: BoxDecoration(
+            color: cs.surfaceContainerHigh,
             shape: BoxShape.circle,
           ),
-          child: const Center(
+          child: Center(
             child: SizedBox(
               width: 36,
               height: 36,
               child: CircularProgressIndicator(
-                  strokeWidth: 3, color: AppTheme.darkAccent),
+                  strokeWidth: 3, color: cs.primary),
             ),
           ),
         ),
         const SizedBox(height: 24),
         Text(
           isDownloading ? 'Downloading...' : 'Extracting...',
-          style: const TextStyle(
-              color: AppTheme.darkText,
+          style: TextStyle(
+              color: cs.onSurface,
               fontSize: 22,
               fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 8),
         Text(message,
-            style: const TextStyle(
-                color: AppTheme.darkTextMuted, fontSize: 14),
+            style: TextStyle(
+                color: cs.onSurfaceVariant, fontSize: 14),
             textAlign: TextAlign.center),
         const SizedBox(height: 32),
         ClipRRect(
           borderRadius: BorderRadius.circular(4),
           child: LinearProgressIndicator(
             value: progress > 0 ? progress : null,
-            backgroundColor: AppTheme.darkSurface,
+            backgroundColor: cs.surfaceContainerHigh,
             valueColor:
-                const AlwaysStoppedAnimation(AppTheme.darkAccent),
+                AlwaysStoppedAnimation(cs.primary),
             minHeight: 4,
           ),
         ),
         const SizedBox(height: 8),
         Text(
           '${(progress * 100).toStringAsFixed(0)}%',
-          style: const TextStyle(
-              color: AppTheme.darkAccent,
+          style: TextStyle(
+              color: cs.primary,
               fontSize: 14,
               fontWeight: FontWeight.w600),
         ),
@@ -219,21 +222,22 @@ class _ErrorState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const Icon(Icons.error_outline,
-            size: 48, color: AppTheme.darkError),
+        Icon(Icons.error_outline,
+            size: 48, color: cs.error),
         const SizedBox(height: 16),
-        const Text('Installation Failed',
+        Text('Installation Failed',
             style: TextStyle(
-                color: AppTheme.darkText,
+                color: cs.onSurface,
                 fontSize: 20,
                 fontWeight: FontWeight.w600)),
         const SizedBox(height: 8),
         Text(error,
-            style: const TextStyle(
-                color: AppTheme.darkTextMuted, fontSize: 13),
+            style: TextStyle(
+                color: cs.onSurfaceVariant, fontSize: 13),
             textAlign: TextAlign.center),
         const SizedBox(height: 32),
         SizedBox(
@@ -253,20 +257,22 @@ class _ReadyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Column(
+    final cs = Theme.of(context).colorScheme;
+    final ide = Theme.of(context).extension<IdeColors>()!;
+    return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         Icon(Icons.check_circle_outline,
-            size: 48, color: AppTheme.darkSuccess),
-        SizedBox(height: 16),
+            size: 48, color: ide.success),
+        const SizedBox(height: 16),
         Text('Environment Ready',
             style: TextStyle(
-                color: AppTheme.darkText,
+                color: cs.onSurface,
                 fontSize: 20,
                 fontWeight: FontWeight.w600)),
-        SizedBox(height: 8),
+        const SizedBox(height: 8),
         Text('Linux environment is installed.',
-            style: TextStyle(color: AppTheme.darkTextMuted, fontSize: 14)),
+            style: TextStyle(color: cs.onSurfaceVariant, fontSize: 14)),
       ],
     );
   }

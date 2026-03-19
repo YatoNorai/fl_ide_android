@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:core/core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:quill_code/quill_code.dart';
@@ -16,8 +18,10 @@ class LspProvider extends ChangeNotifier {
 
   /// Build a QuillLspStdioConfig for the given file extension.
   /// The config is passed to QuillCodeEditor which manages the connection.
-  void startForExtension(String extension, String projectPath) {
-    final cmd = _lspServerCommand(extension);
+  /// [customPaths] overrides default binary paths per extension (key = ext, value = binary path).
+  void startForExtension(String extension, String projectPath,
+      {Map<String, String>? customPaths}) {
+    final cmd = _lspServerCommand(extension, customPaths: customPaths);
     if (cmd == null) {
       _status = LspStatus.stopped;
       _lspConfig = null;
@@ -42,26 +46,47 @@ class LspProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Returns [executable, ...args] for the LSP server, or null if unsupported
-  List<String>? _lspServerCommand(String ext) {
+  /// Returns [executable, ...args] for the LSP server, or null if the binary
+  /// is not installed or the extension is unsupported.
+  List<String>? _lspServerCommand(String ext,
+      {Map<String, String>? customPaths}) {
+    // Check user-supplied custom path first
+    final customExe = customPaths?[ext.toLowerCase()];
+    if (customExe != null && customExe.isNotEmpty) {
+      if (!File(customExe).existsSync()) {
+        debugPrint('[LspProvider] custom binary not found: $customExe');
+        return null;
+      }
+      return [customExe];
+    }
+
+    String? exe;
+    List<String> args = [];
+
     switch (ext.toLowerCase()) {
       case 'dart':
-        return ['${RuntimeEnvir.flutterPath}/bin/dart', 'language-server'];
+        exe = '${RuntimeEnvir.flutterPath}/bin/dart';
+        args = ['language-server'];
       case 'js':
       case 'ts':
       case 'jsx':
       case 'tsx':
-        return [
-          '${RuntimeEnvir.usrPath}/bin/typescript-language-server',
-          '--stdio',
-        ];
+        exe = '${RuntimeEnvir.usrPath}/bin/typescript-language-server';
+        args = ['--stdio'];
       case 'py':
-        return ['${RuntimeEnvir.usrPath}/bin/pylsp'];
+        exe = '${RuntimeEnvir.usrPath}/bin/pylsp';
       case 'kt':
-        return ['${RuntimeEnvir.usrPath}/bin/kotlin-language-server'];
+        exe = '${RuntimeEnvir.usrPath}/bin/kotlin-language-server';
       default:
         return null;
     }
+
+    if (!File(exe).existsSync()) {
+      debugPrint('[LspProvider] binary not found, skipping LSP: $exe');
+      return null;
+    }
+
+    return [exe, ...args];
   }
 
   String _languageId(String ext) {

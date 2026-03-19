@@ -6,6 +6,7 @@ import 'package:core/core.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:lsp_client/lsp_client.dart';
 import 'package:project_manager/project_manager.dart';
 import 'package:provider/provider.dart';
@@ -17,6 +18,7 @@ import 'providers/ai_provider.dart';
 import 'providers/extensions_provider.dart';
 import 'providers/settings_provider.dart';
 import 'screens/home_screen.dart';
+import 'screens/onboarding_screen.dart';
 import 'screens/workspace_screen.dart';
 
 class FlIdeApp extends StatelessWidget {
@@ -38,6 +40,21 @@ class FlIdeApp extends StatelessWidget {
           final activeEditorTheme = extensions.activeEditorTheme;
           final activeMeta = extensions.activeMeta;
 
+          const _locDelegates = [
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ];
+          const _supportedLocales = [
+            Locale('pt', 'BR'),
+            Locale('pt'),
+            Locale('en'),
+            Locale('es'),
+            Locale('fr'),
+            Locale('de'),
+          ];
+          final locale = settings.languageLocale;
+
           if (activeEditorTheme != null && activeMeta != null) {
             final extTheme = _buildThemeFromEditorTheme(
                 activeEditorTheme, activeMeta.dark);
@@ -47,6 +64,9 @@ class FlIdeApp extends StatelessWidget {
               themeMode: activeMeta.dark ? ThemeMode.dark : ThemeMode.light,
               theme: extTheme,
               darkTheme: extTheme,
+              locale: locale,
+              localizationsDelegates: _locDelegates,
+              supportedLocales: _supportedLocales,
               builder: _systemBarsBuilder,
               home: const _AppShell(),
             );
@@ -76,6 +96,9 @@ class FlIdeApp extends StatelessWidget {
                 themeMode: themeMode,
                 theme: _buildLightTheme(lightScheme),
                 darkTheme: _buildDarkTheme(darkScheme, amoled: settings.useAmoled),
+                locale: locale,
+                localizationsDelegates: _locDelegates,
+                supportedLocales: _supportedLocales,
                 builder: _systemBarsBuilder,
                 home: const _AppShell(),
               );
@@ -238,35 +261,46 @@ class _AppShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<RootfsProvider>(
-      builder: (context, rootfs, _) {
-        if (!rootfs.isReady) {
-          return DownloadBootstrapScreen(
-            onReady: () {},
-          );
-        }
+    return Consumer<SettingsProvider>(
+      builder: (context, settings, _) {
+        // Wait until SharedPreferences are loaded to avoid a false onboarding flash.
+        if (!settings.isLoaded) return const Scaffold(body: SizedBox.shrink());
 
-        return Consumer<ProjectManagerProvider>(
-          builder: (context, pm, _) {
-            final activeProject = pm.activeProject;
+        if (!settings.onboardingDone) return const OnboardingScreen();
 
-            if (activeProject != null) {
-              return MultiProvider(
-                providers: [
-                  ChangeNotifierProvider(create: (_) => EditorProvider()),
-                  ChangeNotifierProvider(create: (_) => TerminalProvider()),
-                  ChangeNotifierProvider(create: (_) => BuildProvider()),
-                  ChangeNotifierProvider(create: (_) => LspProvider()),
-                  ChangeNotifierProvider(create: (_) => AppInstallerProvider()),
-                  ChangeNotifierProvider<ExtensionsProvider>.value(
-                    value: context.read<ExtensionsProvider>(),
-                  ),
-                ],
-                child: WorkspaceScreen(project: activeProject),
-              );
+        return Consumer<RootfsProvider>(
+          builder: (context, rootfs, _) {
+            if (rootfs.state == RootfsState.checking) {
+              return const Scaffold(body: SizedBox.shrink());
+            }
+            if (!rootfs.isReady) {
+              return DownloadBootstrapScreen(onReady: () {});
             }
 
-            return const HomeScreen();
+            return Consumer<ProjectManagerProvider>(
+              builder: (context, pm, _) {
+                final activeProject = pm.activeProject;
+
+                if (activeProject != null) {
+                  return MultiProvider(
+                    providers: [
+                      ChangeNotifierProvider(create: (_) => EditorProvider()),
+                      ChangeNotifierProvider(create: (_) => TerminalProvider()),
+                      ChangeNotifierProvider(create: (_) => BuildProvider()),
+                      ChangeNotifierProvider(create: (_) => LspProvider()),
+                      ChangeNotifierProvider(
+                          create: (_) => AppInstallerProvider()),
+                      ChangeNotifierProvider<ExtensionsProvider>.value(
+                        value: context.read<ExtensionsProvider>(),
+                      ),
+                    ],
+                    child: WorkspaceScreen(project: activeProject),
+                  );
+                }
+
+                return const HomeScreen();
+              },
+            );
           },
         );
       },

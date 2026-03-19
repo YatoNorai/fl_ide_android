@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:quill_code/quill_code.dart' show EditorProps, LineHighlightStyle;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -77,6 +79,20 @@ class SettingsProvider extends ChangeNotifier {
   bool   _readOnly              = false;
   String _fontFamily            = 'monospace';
 
+  // ── Run & Debug ───────────────────────────────────────────────────────────
+  static const _kLspPaths = 'rd_lspPaths';
+  Map<String, String> _lspPaths = {};
+
+  // ── Language ──────────────────────────────────────────────────────────────
+  static const _kLanguage = 'language';
+  /// Empty string means follow device locale.
+  String _language = '';
+
+  // ── Onboarding ────────────────────────────────────────────────────────────
+  static const _kOnboardingDone = 'onboardingDone';
+  bool _onboardingDone = false;
+  bool _loaded = false;
+
   // ── Navigation ────────────────────────────────────────────────────────────
   SettingsPage _currentPage = SettingsPage.main;
 
@@ -111,6 +127,20 @@ class SettingsProvider extends ChangeNotifier {
   bool   get showDiagnosticIndicators => _showDiagnosticIndicators;
   bool   get readOnly              => _readOnly;
   String get fontFamily            => _fontFamily;
+
+  // ── Getters: Run & Debug ──────────────────────────────────────────────────
+  Map<String, String> get lspPaths => Map.unmodifiable(_lspPaths);
+  String lspPathFor(String ext) => _lspPaths[ext.toLowerCase()] ?? '';
+
+  // ── Getters: Language ─────────────────────────────────────────────────────
+  /// Empty string = device locale. Otherwise a language code like 'en', 'pt'.
+  String get language => _language;
+  Locale? get languageLocale =>
+      _language.isEmpty ? null : Locale(_language);
+
+  // ── Getters: Onboarding ───────────────────────────────────────────────────
+  bool get onboardingDone => _onboardingDone;
+  bool get isLoaded => _loaded;
 
   // ── Navigation getter ─────────────────────────────────────────────────────
   SettingsPage get currentPage => _currentPage;
@@ -150,6 +180,34 @@ class SettingsProvider extends ChangeNotifier {
     _showDiagnosticIndicators = p.getBool(_kShowDiagnosticIndicators) ?? true;
     _readOnly              = p.getBool(_kReadOnly)                   ?? false;
     _fontFamily            = p.getString(_kFontFamily)               ?? 'monospace';
+
+    final lspJson = p.getString(_kLspPaths);
+    if (lspJson != null) {
+      try {
+        final m = jsonDecode(lspJson) as Map<String, dynamic>;
+        _lspPaths = m.map((k, v) => MapEntry(k, v as String));
+      } catch (_) {}
+    }
+
+    _language       = p.getString(_kLanguage)       ?? '';
+    _onboardingDone = p.getBool(_kOnboardingDone)   ?? false;
+    _loaded = true;
+    notifyListeners();
+  }
+
+  // ── Language setters ──────────────────────────────────────────────────────
+  Future<void> setLanguage(String langCode) async {
+    _language = langCode;
+    final p = await SharedPreferences.getInstance();
+    await p.setString(_kLanguage, langCode);
+    notifyListeners();
+  }
+
+  // ── Onboarding setters ────────────────────────────────────────────────────
+  Future<void> setOnboardingDone() async {
+    _onboardingDone = true;
+    final p = await SharedPreferences.getInstance();
+    await p.setBool(_kOnboardingDone, true);
     notifyListeners();
   }
 
@@ -361,6 +419,18 @@ class SettingsProvider extends ChangeNotifier {
     _fontFamily = val;
     final p = await SharedPreferences.getInstance();
     await p.setString(_kFontFamily, val);
+    notifyListeners();
+  }
+
+  // ── Run & Debug setters ───────────────────────────────────────────────────
+  Future<void> setLspPath(String ext, String path) async {
+    if (path.trim().isEmpty) {
+      _lspPaths.remove(ext.toLowerCase());
+    } else {
+      _lspPaths[ext.toLowerCase()] = path.trim();
+    }
+    final p = await SharedPreferences.getInstance();
+    await p.setString(_kLspPaths, jsonEncode(_lspPaths));
     notifyListeners();
   }
 

@@ -1,4 +1,3 @@
-import 'package:core/core.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:terminal_pkg/terminal_pkg.dart';
@@ -37,13 +36,14 @@ class _LogsPanelState extends State<LogsPanel> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Column(
       children: [
         _LogsToolbar(packageName: widget.packageName),
         Expanded(
           child: _session == null
-              ? const Center(
-                  child: CircularProgressIndicator(color: AppTheme.darkAccent))
+              ? Center(
+                  child: CircularProgressIndicator(color: cs.primary))
               : PtyTerminalWidget(session: _session!),
         ),
       ],
@@ -58,21 +58,22 @@ class _LogsToolbar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Consumer<AppInstallerProvider>(
       builder: (context, installer, _) => Container(
         height: 40,
         padding: const EdgeInsets.symmetric(horizontal: 12),
-        decoration: const BoxDecoration(
-          color: AppTheme.darkTabBar,
-          border: Border(bottom: BorderSide(color: AppTheme.darkBorder)),
+        decoration: BoxDecoration(
+          color: cs.surfaceContainerHigh,
+          border: Border(bottom: BorderSide(color: cs.outlineVariant)),
         ),
         child: Row(
           children: [
-            const Icon(Icons.phone_android, size: 14, color: AppTheme.darkTextMuted),
+            Icon(Icons.phone_android, size: 14, color: cs.onSurfaceVariant),
             const SizedBox(width: 8),
             Text(
               packageName != null ? 'Logcat: $packageName' : 'Logcat',
-              style: const TextStyle(color: AppTheme.darkTextMuted, fontSize: 12),
+              style: TextStyle(color: cs.onSurfaceVariant, fontSize: 12),
             ),
             const Spacer(),
             // Hot reload button
@@ -102,6 +103,7 @@ class _HotReloadButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Tooltip(
       message: 'Hot Reload (⚡)',
       child: InkWell(
@@ -111,7 +113,7 @@ class _HotReloadButton extends StatelessWidget {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text(ok ? '⚡ Hot Reload done' : 'Hot Reload failed'),
-                backgroundColor: AppTheme.darkSidebar,
+                backgroundColor: cs.surfaceContainerLow,
                 duration: const Duration(seconds: 2),
               ),
             );
@@ -146,6 +148,7 @@ class _HotRestartButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Tooltip(
       message: 'Hot Restart',
       child: InkWell(
@@ -155,7 +158,7 @@ class _HotRestartButton extends StatelessWidget {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text(ok ? '🔄 Hot Restart done' : 'Hot Restart failed'),
-                backgroundColor: AppTheme.darkSidebar,
+                backgroundColor: cs.surfaceContainerLow,
                 duration: const Duration(seconds: 2),
               ),
             );
@@ -164,16 +167,16 @@ class _HotRestartButton extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           decoration: BoxDecoration(
-            color: AppTheme.darkBorder.withValues(alpha: 0.5),
+            color: cs.outlineVariant.withValues(alpha: 0.5),
             borderRadius: BorderRadius.circular(4),
           ),
-          child: const Row(
+          child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.restart_alt, size: 13, color: AppTheme.darkTextMuted),
-              SizedBox(width: 4),
+              Icon(Icons.restart_alt, size: 13, color: cs.onSurfaceVariant),
+              const SizedBox(width: 4),
               Text('Restart',
-                  style: TextStyle(color: AppTheme.darkTextMuted, fontSize: 11)),
+                  style: TextStyle(color: cs.onSurfaceVariant, fontSize: 11)),
             ],
           ),
         ),
@@ -181,4 +184,3 @@ class _HotRestartButton extends StatelessWidget {
     );
   }
 }
-

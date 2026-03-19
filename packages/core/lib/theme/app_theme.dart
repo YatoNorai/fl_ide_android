@@ -220,6 +220,83 @@ class AppTheme {
           seedColor: lightAccent,
           brightness: Brightness.light,
         ),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFFF2F2F7),
+          foregroundColor: Color(0xFF000000),
+          elevation: 0,
+          scrolledUnderElevation: 0,
+          centerTitle: false,
+          titleTextStyle: TextStyle(
+              color: Color(0xFF000000), fontSize: 20, fontWeight: FontWeight.w700),
+          iconTheme: IconThemeData(color: Color(0xFF000000), size: 24),
+          actionsIconTheme: IconThemeData(color: Color(0xFF000000), size: 24),
+        ),
+        tabBarTheme: const TabBarThemeData(
+          labelColor: Color(0xFF007AFF),
+          unselectedLabelColor: Color(0xFF6E6E73),
+          indicatorColor: Color(0xFF007AFF),
+          labelStyle: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+          unselectedLabelStyle: TextStyle(fontSize: 12),
+          dividerColor: Colors.transparent,
+        ),
+        dividerTheme: const DividerThemeData(
+          color: Color(0xFFD1D1D6),
+          thickness: 0.5,
+          space: 0.5,
+        ),
+        listTileTheme: const ListTileThemeData(
+          textColor: Color(0xFF000000),
+          iconColor: Color(0xFF000000),
+          contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        ),
+        popupMenuTheme: const PopupMenuThemeData(
+          color: Color(0xFFFFFFFF),
+          elevation: 8,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.all(Radius.circular(12)),
+          ),
+        ),
+        snackBarTheme: const SnackBarThemeData(
+          backgroundColor: Color(0xFFFFFFFF),
+          contentTextStyle: TextStyle(color: Color(0xFF000000)),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.all(Radius.circular(12))),
+          behavior: SnackBarBehavior.floating,
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: false,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: Color(0xFFD1D1D6)),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: Color(0xFFD1D1D6)),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: Color(0xFF007AFF), width: 2),
+          ),
+          labelStyle: const TextStyle(color: Color(0xFF6E6E73)),
+          hintStyle: const TextStyle(color: Color(0xFF6E6E73)),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        ),
+        iconTheme: const IconThemeData(color: Color(0xFF000000), size: 24),
+        textTheme: const TextTheme(
+          titleLarge: TextStyle(
+              color: Color(0xFF000000), fontSize: 20, fontWeight: FontWeight.w700),
+          titleMedium: TextStyle(
+              color: Color(0xFF000000), fontSize: 16, fontWeight: FontWeight.w600),
+          titleSmall: TextStyle(
+              color: Color(0xFF000000), fontSize: 14, fontWeight: FontWeight.w500),
+          bodyLarge: TextStyle(color: Color(0xFF000000), fontSize: 16),
+          bodyMedium: TextStyle(color: Color(0xFF000000), fontSize: 14),
+          bodySmall: TextStyle(color: Color(0xFF6E6E73), fontSize: 12),
+          labelLarge: TextStyle(
+              color: Color(0xFF000000), fontSize: 14, fontWeight: FontWeight.w500),
+          labelMedium: TextStyle(color: Color(0xFF6E6E73), fontSize: 12),
+          labelSmall: TextStyle(color: Color(0xFF6E6E73), fontSize: 11),
+        ),
         extensions: const [IdeColors.light],
       );
 }

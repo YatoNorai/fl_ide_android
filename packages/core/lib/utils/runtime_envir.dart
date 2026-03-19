@@ -23,19 +23,33 @@ class RuntimeEnvir {
   // Projects dir
   static String get projectsPath => '$homePath/projects';
 
-  /// Base environment variables, same approach as termare
-  static Map<String, String> get baseEnv => {
-        'HOME': homePath,
-        'TERM': 'xterm-256color',
-        'TERMUX_PREFIX': usrPath,
-        'PATH':
-            '$usrPath/bin:$usrPath/bin/applets:${Platform.environment['PATH'] ?? ''}',
-        'LD_PRELOAD': '$usrPath/lib/libtermux-exec.so',
-        'LANG': 'en_US.UTF-8',
-        'ANDROID_HOME': androidSdkPath,
-        'FLUTTER_ROOT': flutterPath,
-        'PUB_CACHE': '$homePath/.pub-cache',
-      };
+  /// Base environment variables, same approach as termare.
+  /// LD_PRELOAD is only set when libtermux-exec.so is present and readable.
+  /// If set unconditionally and the file is missing/unreadable, the dynamic
+  /// linker returns EACCES before execvp can replace the child process, which
+  /// leaves the forked child alive with inherited binder FDs → libbinder abort
+  /// (SIGABRT / exit code -6).
+  static Map<String, String> get baseEnv {
+    final env = <String, String>{
+      'HOME': homePath,
+      'TERM': 'xterm-256color',
+      'TERMUX_PREFIX': usrPath,
+      'PATH':
+          '$usrPath/bin:$usrPath/bin/applets:${Platform.environment['PATH'] ?? ''}',
+      'LANG': 'en_US.UTF-8',
+      'ANDROID_HOME': androidSdkPath,
+      'FLUTTER_ROOT': flutterPath,
+      'PUB_CACHE': '$homePath/.pub-cache',
+    };
+
+    // Only preload the exec interceptor when the .so is actually on disk.
+    final execSo = '$usrPath/lib/libtermux-exec.so';
+    if (File(execSo).existsSync()) {
+      env['LD_PRELOAD'] = execSo;
+    }
+
+    return env;
+  }
 
   /// Check if rootfs bootstrap is present
   static bool get isBootstrapped => Directory(usrPath).existsSync();
