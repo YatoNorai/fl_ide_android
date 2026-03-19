@@ -43,7 +43,6 @@ dependencies:
 
   # UI
   provider: ^6.1.2
-  
   cupertino_icons: ^1.0.8
   animated_text_kit: ^4.2.2
   dynamic_color: ^1.7.0
