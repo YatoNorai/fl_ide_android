@@ -17,6 +17,7 @@ workspace:
   - packages/lsp_client
   - packages/app_installer
 
+
 dependencies:
   flutter:
     sdk: flutter
