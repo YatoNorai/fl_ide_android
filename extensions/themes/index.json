@@ -1,7 +1,7 @@
 {
   "version": 1,
   "themes": [
-    { "id": "amoled_black",          "name": "Amoled",                  "file": "amoled_black.json",
+    
     { "id": "abyss_dark",            "name": "Abyss Dark",              "file": "abyss_dark.json",            "dark": true,  "preview": "#000C18", "accent": "#00AAFF" },
     { "id": "amber_storm",           "name": "Amber Storm",             "file": "amber_storm.json",           "dark": true,  "preview": "#1A1200", "accent": "#FFB300" },
     { "id": "arctic_ice",            "name": "Arctic Ice",              "file": "arctic_ice.json",            "dark": false, "preview": "#F0F6FF", "accent": "#1A6ECC" },
