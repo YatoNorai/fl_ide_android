@@ -1,0 +1,77 @@
+{
+  "id": "android_studio",
+  "name": "Android Studio",
+  "dark": true,
+  "colors": {
+    "background": "#1E1F22",
+    "lineNumberBackground": "#1B1C1F",
+    "textNormal": "#A9B7C6",
+    "lineNumber": "#606366",
+    "lineNumberCurrent": "#A9B7C6",
+    "cursor": "#A9B7C6",
+    "selectionHandle": "#3D7EFF",
+    "selectionColor": "#21428366",
+    "keyword": "#CC7832",
+    "string": "#6A8759",
+    "comment": "#808080",
+    "number": "#6897BB",
+    "operator": "#A9B7C6",
+    "identifier": "#A9B7C6",
+    "function": "#FFC66D",
+    "type": "#BBB529",
+    "annotation": "#BBB529",
+    "blockLine": "#2A2B2E",
+    "completionBackground": "#1E1F22",
+    "ghostTextForeground": "#606366",
+    "currentLineBackground": "#2A2D2E",
+    "searchMatchBackground": "#21428366",
+    "searchMatchBorder": "#3D7EFF",
+    "cursorWidth": 2.0
+  },
+  "lineHighlight": {
+    "style": "fill",
+    "fillColor": "#2A2D2E",
+    "strokeColor": "#3C3F41",
+    "accentColor": "#3D7EFF",
+    "activeBlockColor": "#2A2D2E99"
+  },
+  "blockLines": {
+    "color": "#60636655",
+    "activeColor": "#3D7EFFCC",
+    "width": 1.0,
+    "activeWidth": 1.5,
+    "colorMode": "rainbow",
+    "inactiveOpacity": 0.5,
+    "rainbowColors": [
+      "#CC7832",
+      "#6897BB",
+      "#6A8759",
+      "#BBB529",
+      "#A9B7C6",
+      "#9876AA"
+    ],
+    "program": [
+      { "op": "dot", "radius": 1.2 },
+      { "op": "gap", "length": 5 }
+    ],
+    "endCap": { "type": "none" },
+    "startCap": { "type": "none" },
+    "activeProgram": [
+      { "op": "line", "fill": true }
+    ],
+    "activeEndCap": { "type": "curve", "radius": 6, "tick": 6 },
+    "activeStartCap": { "type": "none" }
+  },
+  "bracketPair": {
+    "fillColor": "#3D7EFF1A",
+    "borderColor": "#3D7EFF66",
+    "borderWidth": 1.2,
+    "radius": 3.0
+  },
+  "indentDots": {
+    "visible": false,
+    "color": "#60636666",
+    "size": 1.5,
+    "mode": "indentOnly"
+  }
+}
