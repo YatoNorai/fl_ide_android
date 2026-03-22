@@ -38,7 +38,7 @@
     { "id": "rose_pine",             "name": "Rosé Pine",               "file": "rose_pine.json",             "dark": true,  "preview": "#191724", "accent": "#EBBCBA" },
     { "id": "sakura_night",          "name": "Sakura Night",            "file": "sakura_night.json",          "dark": true,  "preview": "#16101A", "accent": "#FF88AA" },
 
-    { "id": "amoled_black",          "name": "AMOLED Black",            "file": "amoled_black.json",          "dark": true,  "preview": "#000000", "accent": "#FFFFFF" },
+    { "id": "amoled_black",          "name": "AMOLED Black",            "file": "amoled_black.json",          "dark": true,  "preview": "#000000", "accent": "#BB86FC" },
     { "id": "android_studio",        "name": "Android Studio",          "file": "android_studio.json",        "dark": true,  "preview": "#1E1F22", "accent": "#3D7EFF" },
 
     { "id": "shades_of_purple",      "name": "Shades of Purple",        "file": "shades_of_purple.json",      "dark": true,  "preview": "#2D2B55", "accent": "#FAD000" },
