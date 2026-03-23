@@ -23,6 +23,18 @@ Fique por dentro das novidades e participe da nossa comunidade:
 - **Telegram:** [Acesse nosso grupo](https://t.me/+wZ8UtP62INwxY2Ix)
 
 ## Licença
-Este projeto é licenciado sob a [Licença GPL v3](https://raw.githubusercontent.com/FlutterIDEAndroid/.github/refs/heads/main/profile/LICENSE).
+
+Este projeto é licenciado sob a **Licença MIT**.
+```
+MIT License
+
+Copyright © 2025 Yato
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software.
+```
 
 Agradecemos seu interesse e esperamos que o FlutterIDEAndroid seja útil para você desenvolver com mais liberdade e mobilidade!
