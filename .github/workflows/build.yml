@@ -1,6 +1,10 @@
 name: build
 on:
   workflow_dispatch:
+
+permissions:
+  contents: write   # necessário para criar releases
+
 jobs:
   build:
     name: Build APKs
@@ -21,10 +25,6 @@ jobs:
           channel: stable
           cache: true
 
-      # ── Rust cross-compilation targets for Android ────────────────────────
-      # The quill_code package compiles a Rust crate (quill_perf) via Gradle.
-      # ubuntu-latest ships Rust but WITHOUT the Android cross-compile targets,
-      # which causes "can't find crate for `std`" at cargo build time.
       - name: Install Rust Android targets
         run: |
           rustup target add \
@@ -36,46 +36,71 @@ jobs:
         id: version
         run: |
           VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //;s/+.*//')
-          echo "name=fl_ide-${VERSION}-alpha" >> $GITHUB_OUTPUT
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "tag=v${VERSION}-alpha" >> $GITHUB_OUTPUT
+          echo "base=fl_ide-${VERSION}-alpha" >> $GITHUB_OUTPUT
 
       - name: Get dependencies
         run: flutter pub get
 
-      # ── Debug build ───────────────────────────────────────────────────────
-      - name: Build debug APK
-        run: flutter build apk --debug
+      # ── Debug build (split per ABI) ───────────────────────────────────────
+      - name: Build debug APKs
+        run: flutter build apk --debug --split-per-abi
         env:
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -Dorg.gradle.daemon=false"
           CMAKE_BUILD_PARALLEL_LEVEL: "2"
 
-      - name: Rename debug APK
+      - name: Rename debug APKs
         run: |
-          mv build/app/outputs/flutter-apk/app-debug.apk \
-             build/app/outputs/flutter-apk/${{ steps.version.outputs.name }}-debug.apk
+          BASE=${{ steps.version.outputs.base }}
+          APK_DIR=build/app/outputs/flutter-apk
+          mv "$APK_DIR/app-arm64-v8a-debug.apk"    "$APK_DIR/${BASE}-arm64-v8a-debug.apk"
+          mv "$APK_DIR/app-armeabi-v7a-debug.apk"  "$APK_DIR/${BASE}-armeabi-v7a-debug.apk"
+          mv "$APK_DIR/app-x86_64-debug.apk"       "$APK_DIR/${BASE}-x86_64-debug.apk"
 
-      # ── Release build ─────────────────────────────────────────────────────
-      - name: Build release APK
-        run: flutter build apk --release
+      # ── Release build (split per ABI) ─────────────────────────────────────
+      - name: Build release APKs
+        run: flutter build apk --release --split-per-abi
         env:
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -Dorg.gradle.daemon=false"
           CMAKE_BUILD_PARALLEL_LEVEL: "2"
 
-      - name: Rename release APK
+      - name: Rename release APKs
         run: |
-          mv build/app/outputs/flutter-apk/app-release.apk \
-             build/app/outputs/flutter-apk/${{ steps.version.outputs.name }}-release.apk
+          BASE=${{ steps.version.outputs.base }}
+          APK_DIR=build/app/outputs/flutter-apk
+          mv "$APK_DIR/app-arm64-v8a-release.apk"    "$APK_DIR/${BASE}-arm64-v8a-release.apk"
+          mv "$APK_DIR/app-armeabi-v7a-release.apk"  "$APK_DIR/${BASE}-armeabi-v7a-release.apk"
+          mv "$APK_DIR/app-x86_64-release.apk"       "$APK_DIR/${BASE}-x86_64-release.apk"
 
-      # ── Upload artifacts ──────────────────────────────────────────────────
-      - name: Upload debug APK
+      # ── Upload artifacts (cache de 30 dias) ───────────────────────────────
+      - name: Upload debug APKs as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.version.outputs.name }}-debug
-          path: build/app/outputs/flutter-apk/${{ steps.version.outputs.name }}-debug.apk
+          name: ${{ steps.version.outputs.base }}-debug
+          path: build/app/outputs/flutter-apk/${{ steps.version.outputs.base }}-*-debug.apk
           retention-days: 30
 
-      - name: Upload release APK
+      - name: Upload release APKs as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.version.outputs.name }}-release
-          path: build/app/outputs/flutter-apk/${{ steps.version.outputs.name }}-release.apk
+          name: ${{ steps.version.outputs.base }}-release
+          path: build/app/outputs/flutter-apk/${{ steps.version.outputs.base }}-*-release.apk
           retention-days: 30
+
+      # ── Publicar no GitHub Releases ───────────────────────────────────────
+      - name: Create / update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "FL IDE ${{ steps.version.outputs.version }} (alpha)"
+          draft: false
+          prerelease: true
+          generate_release_notes: true
+          files: |
+            build/app/outputs/flutter-apk/${{ steps.version.outputs.base }}-arm64-v8a-release.apk
+            build/app/outputs/flutter-apk/${{ steps.version.outputs.base }}-armeabi-v7a-release.apk
+            build/app/outputs/flutter-apk/${{ steps.version.outputs.base }}-x86_64-release.apk
+            build/app/outputs/flutter-apk/${{ steps.version.outputs.base }}-arm64-v8a-debug.apk
+            build/app/outputs/flutter-apk/${{ steps.version.outputs.base }}-armeabi-v7a-debug.apk
+            build/app/outputs/flutter-apk/${{ steps.version.outputs.base }}-x86_64-debug.apk
