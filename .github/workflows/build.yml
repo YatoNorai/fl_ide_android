@@ -30,14 +30,6 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
-      # ── Fetch tree-sitter grammars ─────────────────────────────────────────
-      - name: Fetch tree-sitter grammars (quill_code)
-        run: |
-          QUILL_DIR=$(find ~/.pub-cache/git -maxdepth 1 -name "quill_code-*" -type d | head -n 1)
-          echo "Found quill_code at: $QUILL_DIR"
-          chmod +x "$QUILL_DIR/scripts/fetch_grammars.sh"
-          bash "$QUILL_DIR/scripts/fetch_grammars.sh"
-
       # ── Debug build ───────────────────────────────────────────────────────
       - name: Build debug APK
         run: flutter build apk --debug
