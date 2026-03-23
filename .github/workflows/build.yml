@@ -1,16 +1,10 @@
 name: build
-
 on:
-  push:
-    branches: ['**']
-  pull_request:
-    branches: ['**']
-
+  workflow_dispatch:
 jobs:
   build:
     name: Build APKs
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -36,25 +30,39 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
-      # ── Debug build ──────────────────────────────────────────────────────────
+      # ── Fetch tree-sitter grammars ─────────────────────────────────────────
+      - name: Fetch tree-sitter grammars (quill_code)
+        run: |
+          QUILL_DIR=$(find ~/.pub-cache/git -maxdepth 1 -name "quill_code-*" -type d | head -n 1)
+          echo "Found quill_code at: $QUILL_DIR"
+          chmod +x "$QUILL_DIR/scripts/fetch_grammars.sh"
+          bash "$QUILL_DIR/scripts/fetch_grammars.sh"
+
+      # ── Debug build ───────────────────────────────────────────────────────
       - name: Build debug APK
         run: flutter build apk --debug
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -Dorg.gradle.daemon=false"
+          CMAKE_BUILD_PARALLEL_LEVEL: "2"
 
       - name: Rename debug APK
         run: |
           mv build/app/outputs/flutter-apk/app-debug.apk \
              build/app/outputs/flutter-apk/${{ steps.version.outputs.name }}-debug.apk
 
-      # ── Release build ────────────────────────────────────────────────────────
+      # ── Release build ─────────────────────────────────────────────────────
       - name: Build release APK
         run: flutter build apk --release
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -Dorg.gradle.daemon=false"
+          CMAKE_BUILD_PARALLEL_LEVEL: "2"
 
       - name: Rename release APK
         run: |
           mv build/app/outputs/flutter-apk/app-release.apk \
              build/app/outputs/flutter-apk/${{ steps.version.outputs.name }}-release.apk
 
-      # ── Upload artifacts ─────────────────────────────────────────────────────
+      # ── Upload artifacts ──────────────────────────────────────────────────
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:

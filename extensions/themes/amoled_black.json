@@ -1,0 +1,77 @@
+{
+  "id": "amoled_black",
+  "name": "AMOLED Black",
+  "dark": true,
+  "colors": {
+    "background": "#000000",
+    "lineNumberBackground": "#000000",
+    "textNormal": "#E0E0E0",
+    "lineNumber": "#3A3A3A",
+    "lineNumberCurrent": "#FFFFFF",
+    "cursor": "#EAEAEA",
+    "selectionHandle": "#BBBBBB",
+    "selectionColor": "#FFFFFF22",
+    "keyword": "#BB86FC",
+    "string": "#A5D6A7",
+    "comment": "#7A7A7A",
+    "number": "#FFAB91",
+    "operator": "#80CBC4",
+    "identifier": "#E0E0E0",
+    "function": "#82B1FF",
+    "type": "#FFD54F",
+    "annotation": "#FF8A80",
+    "blockLine": "#121212",
+    "completionBackground": "#000000",
+    "ghostTextForeground": "#3A3A3A",
+    "currentLineBackground": "#0F0F0F",
+    "searchMatchBackground": "#FFFFFF1A",
+    "searchMatchBorder": "#BBBBBB",
+    "cursorWidth": 2.0
+  },
+  "lineHighlight": {
+    "style": "fill",
+    "fillColor": "#0F0F0F",
+    "strokeColor": "#1C1C1C",
+    "accentColor": "#BBBBBB",
+    "activeBlockColor": "#0F0F0F88"
+  },
+  "blockLines": {
+    "color": "#3A3A3A44",
+    "activeColor": "#BBBBBB99",
+    "width": 1.0,
+    "activeWidth": 1.5,
+    "colorMode": "rainbow",
+    "inactiveOpacity": 0.4,
+    "rainbowColors": [
+      "#BB86FC",
+      "#82B1FF",
+      "#A5D6A7",
+      "#FFD54F",
+      "#FFAB91",
+      "#80CBC4"
+    ],
+    "program": [
+      { "op": "dot", "radius": 1.2 },
+      { "op": "gap", "length": 5 }
+    ],
+    "endCap": { "type": "none" },
+    "startCap": { "type": "none" },
+    "activeProgram": [
+      { "op": "line", "fill": true }
+    ],
+    "activeEndCap": { "type": "curve", "radius": 6, "tick": 6 },
+    "activeStartCap": { "type": "none" }
+  },
+  "bracketPair": {
+    "fillColor": "#FFFFFF10",
+    "borderColor": "#FFFFFF44",
+    "borderWidth": 1.2,
+    "radius": 3.0
+  },
+  "indentDots": {
+    "visible": false,
+    "color": "#3A3A3A55",
+    "size": 1.5,
+    "mode": "indentOnly"
+  }
+}
