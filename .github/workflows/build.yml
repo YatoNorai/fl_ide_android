@@ -21,6 +21,17 @@ jobs:
           channel: stable
           cache: true
 
+      # ── Rust cross-compilation targets for Android ────────────────────────
+      # The quill_code package compiles a Rust crate (quill_perf) via Gradle.
+      # ubuntu-latest ships Rust but WITHOUT the Android cross-compile targets,
+      # which causes "can't find crate for `std`" at cargo build time.
+      - name: Install Rust Android targets
+        run: |
+          rustup target add \
+            aarch64-linux-android \
+            armv7-linux-androideabi \
+            x86_64-linux-android
+
       - name: Read app version from pubspec.yaml
         id: version
         run: |
