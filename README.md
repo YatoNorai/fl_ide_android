@@ -1,4 +1,4 @@
-<img src="https://raw.githubusercontent.com/FlutterIDEAndroid/.github/refs/heads/main/profile/45310d81-82fc-42cc-9089-88382d850e66%20(1).png" alt="Texto Alternativo" width="600" height="600" />
+<img src="https://raw.githubusercontent.com/FlutterIDEAndroid/.github/refs/heads/main/profile/45310d81-82fc-42cc-9089-88382d850e66%20(1).png" alt="Texto Alternativo" width="400" height="400" />
 
 
 # FlutterIDEAndroid
