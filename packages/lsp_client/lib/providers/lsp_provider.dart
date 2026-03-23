@@ -19,8 +19,8 @@ class LspProvider extends ChangeNotifier {
   /// Build a QuillLspStdioConfig for the given file extension.
   /// The config is passed to QuillCodeEditor which manages the connection.
   /// [customPaths] overrides default binary paths per extension (key = ext, value = binary path).
-  void startForExtension(String extension, String projectPath,
-      {Map<String, String>? customPaths}) {
+  Future<void> startForExtension(String extension, String projectPath,
+      {Map<String, String>? customPaths}) async {
     final cmd = _lspServerCommand(extension, customPaths: customPaths);
     if (cmd == null) {
       _status = LspStatus.stopped;
@@ -30,6 +30,11 @@ class LspProvider extends ChangeNotifier {
     }
 
     _status = LspStatus.starting;
+    notifyListeners();
+
+    // Let the UI render the "starting" state before switching to running.
+    await Future.microtask(() {});
+
     _lspConfig = QuillLspStdioConfig(
       executable: cmd.first,
       args: cmd.sublist(1),
@@ -57,6 +62,15 @@ class LspProvider extends ChangeNotifier {
         debugPrint('[LspProvider] custom binary not found: $customExe');
         return null;
       }
+      // .dart.snapshot files must be run through the Dart VM, not directly.
+      if (customExe.endsWith('.dart.snapshot')) {
+        final dartVm = _dartVmPath;
+        if (dartVm == null) {
+          debugPrint('[LspProvider] dart VM not found, cannot run snapshot');
+          return null;
+        }
+        return [dartVm, customExe, '--lsp'];
+      }
       return [customExe];
     }
 
@@ -65,7 +79,9 @@ class LspProvider extends ChangeNotifier {
 
     switch (ext.toLowerCase()) {
       case 'dart':
-        exe = '${RuntimeEnvir.flutterPath}/bin/dart';
+        // Use the dart VM binary directly (not the shell wrapper flutter/bin/dart)
+        // so it can be exec'd from Android without a shell interpreter.
+        exe = _dartVmPath;
         args = ['language-server'];
       case 'js':
       case 'ts':
@@ -81,12 +97,18 @@ class LspProvider extends ChangeNotifier {
         return null;
     }
 
-    if (!File(exe).existsSync()) {
+    if (exe == null || !File(exe).existsSync()) {
       debugPrint('[LspProvider] binary not found, skipping LSP: $exe');
       return null;
     }
 
     return [exe, ...args];
+  }
+
+  /// Path to the Dart VM binary (the ELF executable, not the shell wrapper).
+  String? get _dartVmPath {
+    final path = '${RuntimeEnvir.flutterPath}/bin/cache/dart-sdk/bin/dart';
+    return File(path).existsSync() ? path : null;
   }
 
   String _languageId(String ext) {

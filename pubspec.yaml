@@ -55,7 +55,7 @@ dependencies:
   quill_code:
     git:
       url: https://github.com/YatoNorai/quill_code.git
-      ref: main
+      ref: rust-impl
   url_launcher: ^6.3.2
   permission_handler: ^11.3.1
   flutter_localizations:
@@ -65,7 +65,7 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^4.0.0
+  flutter_lints: ^6.0.0
 
 flutter:
   uses-material-design: true

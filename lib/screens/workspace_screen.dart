@@ -73,7 +73,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
       if (!mounted) return;
 
       final settings = context.read<SettingsProvider>();
-      context.read<LspProvider>().startForExtension(
+      await context.read<LspProvider>().startForExtension(
             def.defaultEntryFile.split('.').last,
             widget.project.path,
             customPaths: settings.lspPaths,

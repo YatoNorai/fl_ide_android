@@ -14,7 +14,7 @@ class RuntimeEnvir {
   static String get zshPath => '$usrPath/bin/zsh';
 
   // SDK paths inside rootfs
-  static String get flutterPath => '$usrPath/flutter';
+  static String get flutterPath => '$usrPath/opt/flutter';
   static String get androidSdkPath => '$usrPath/android-sdk';
   static String get nodePath => '$usrPath/bin/node';
   static String get npmPath => '$usrPath/bin/npm';

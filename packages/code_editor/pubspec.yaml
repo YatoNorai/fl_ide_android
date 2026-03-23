@@ -22,9 +22,9 @@ dependencies:
   quill_code:
     git:
       url: https://github.com/YatoNorai/quill_code.git
-      ref: main
+      ref: rust-impl
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^4.0.0
+  flutter_lints: ^6.0.0
