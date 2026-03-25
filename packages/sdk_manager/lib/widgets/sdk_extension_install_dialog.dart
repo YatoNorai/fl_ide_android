@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui';
 
 import 'package:core/core.dart';
 import 'package:dio/dio.dart';
@@ -15,7 +16,11 @@ Future<void> showSdkExtensionInstallDialog(
   return showDialog<void>(
     context: context,
     barrierDismissible: false,
-    builder: (_) => _SdkInstallDialog(ext: ext, uninstall: false),
+    builder: (_) => RepaintBoundary(
+        child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                child:
+    _SdkInstallDialog(ext: ext, uninstall: false))),
   );
 }
 
@@ -26,7 +31,10 @@ Future<void> showSdkExtensionUninstallDialog(
   return showDialog<void>(
     context: context,
     barrierDismissible: false,
-    builder: (_) => _SdkInstallDialog(ext: ext, uninstall: true),
+    builder: (_) => RepaintBoundary(
+        child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                child: _SdkInstallDialog(ext: ext, uninstall: true))),
   );
 }
 

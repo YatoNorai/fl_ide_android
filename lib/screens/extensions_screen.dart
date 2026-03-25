@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:provider/provider.dart';
@@ -331,27 +333,32 @@ class _ThemeCard extends StatelessWidget {
       ExtensionThemeMeta meta, AppStrings s) {
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('${s.extInstallQ} "${meta.name}"'),
-        content: Text(s.extInstallBody),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: Text(s.cancel)),
-          FilledButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              prov.downloadTheme(meta).then((_) {
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                      content: Text('"${meta.name}" ${s.extInstalled2.toLowerCase()}!'),
-                      behavior: SnackBarBehavior.floating));
-                }
-              });
-            },
-            child: Text(s.extInstall),
+      builder: (ctx) => RepaintBoundary(
+                  child: BackdropFilter(
+                      filter: ImageFilter.blur(sigmaX: 8, sigmaY: 10),
+                      child: AlertDialog(
+            title: Text('${s.extInstallQ} "${meta.name}"'),
+            content: Text(s.extInstallBody),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: Text(s.cancel)),
+              FilledButton(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  prov.downloadTheme(meta).then((_) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                          content: Text('"${meta.name}" ${s.extInstalled2.toLowerCase()}!'),
+                          behavior: SnackBarBehavior.floating));
+                    }
+                  });
+                },
+                child: Text(s.extInstall),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -464,22 +471,27 @@ class _InstalledCard extends StatelessWidget {
       ExtensionThemeMeta meta, AppStrings s) {
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('${s.extDeleteQ.replaceAll('?', '')} "${meta.name}"?'),
-        content: Text(s.extDeleteBody),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: Text(s.cancel)),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () {
-              Navigator.pop(ctx);
-              prov.deleteTheme(meta.id);
-            },
-            child: Text(s.delete),
+      builder: (ctx) => RepaintBoundary(
+                  child: BackdropFilter(
+                      filter: ImageFilter.blur(sigmaX: 8, sigmaY: 10),
+                      child: AlertDialog(
+            title: Text('${s.extDeleteQ.replaceAll('?', '')} "${meta.name}"?'),
+            content: Text(s.extDeleteBody),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: Text(s.cancel)),
+              FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  prov.deleteTheme(meta.id);
+                },
+                child: Text(s.delete),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }

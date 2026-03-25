@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:core/core.dart';
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
@@ -409,30 +411,35 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
     final s = AppStrings.of(context);
     showDialog<void>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(s.language),
-        contentPadding: const EdgeInsets.symmetric(vertical: 8),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: kSupportedLanguages.map((lang) {
-            final selected = lang.code == vm.language;
-            return ListTile(
-              title: Text(lang.native),
-              subtitle: Text(lang.name,
-                  style: TextStyle(
-                      color: Theme.of(ctx).colorScheme.onSurfaceVariant,
-                      fontSize: 12)),
-              trailing: selected
-                  ? Icon(Icons.check_rounded,
-                      color: Theme.of(ctx).colorScheme.primary)
-                  : null,
-              selected: selected,
-              onTap: () {
-                vm.setLanguage(lang.code);
-                Navigator.pop(ctx);
-              },
-            );
-          }).toList(),
+      builder: (ctx) => RepaintBoundary(
+        child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 8, sigmaY: 10),
+                child: AlertDialog(
+            title: Text(s.language),
+            contentPadding: const EdgeInsets.symmetric(vertical: 8),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: kSupportedLanguages.map((lang) {
+                final selected = lang.code == vm.language;
+                return ListTile(
+                  title: Text(lang.native),
+                  subtitle: Text(lang.name,
+                      style: TextStyle(
+                          color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                          fontSize: 12)),
+                  trailing: selected
+                      ? Icon(Icons.check_rounded,
+                          color: Theme.of(ctx).colorScheme.primary)
+                      : null,
+                  selected: selected,
+                  onTap: () {
+                    vm.setLanguage(lang.code);
+                    Navigator.pop(ctx);
+                  },
+                );
+              }).toList(),
+            ),
+          ),
         ),
       ),
     );
@@ -727,35 +734,40 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
           showDialog<void>(
             context: context,
             builder: (ctx) {
-              return AlertDialog(
-                title: Text(AppStrings.of(context).fontFamily),
-                contentPadding: const EdgeInsets.symmetric(vertical: 8),
-                content: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: fonts.map((f) {
-                    return RadioListTile<String>(
-                      value: f.$1,
-                      groupValue: vm.fontFamily,
-                      title: Text(
-                        f.$2,
-                        style: TextStyle(fontFamily: f.$1 == 'monospace' ? null : f.$1),
-                      ),
-                      subtitle: Text(
-                        'The quick brown fox',
-                        style: TextStyle(
-                          fontFamily: f.$1 == 'monospace' ? null : f.$1,
-                          fontSize: 11,
-                          color: Colors.grey,
-                        ),
-                      ),
-                      onChanged: (v) {
-                        if (v != null) {
-                          vm.setFontFamily(v);
-                          Navigator.pop(ctx);
-                        }
-                      },
-                    );
-                  }).toList(),
+              return RepaintBoundary(
+                  child: BackdropFilter(
+                      filter: ImageFilter.blur(sigmaX: 8, sigmaY: 10),
+                      child: AlertDialog(
+                    title: Text(AppStrings.of(context).fontFamily),
+                    contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                    content: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: fonts.map((f) {
+                        return RadioListTile<String>(
+                          value: f.$1,
+                          groupValue: vm.fontFamily,
+                          title: Text(
+                            f.$2,
+                            style: TextStyle(fontFamily: f.$1 == 'monospace' ? null : f.$1),
+                          ),
+                          subtitle: Text(
+                            'The quick brown fox',
+                            style: TextStyle(
+                              fontFamily: f.$1 == 'monospace' ? null : f.$1,
+                              fontSize: 11,
+                              color: Colors.grey,
+                            ),
+                          ),
+                          onChanged: (v) {
+                            if (v != null) {
+                              vm.setFontFamily(v);
+                              Navigator.pop(ctx);
+                            }
+                          },
+                        );
+                      }).toList(),
+                    ),
+                  ),
                 ),
               );
             },
@@ -810,24 +822,29 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
     showDialog<void>(
       context: context,
       builder: (ctx) {
-        return AlertDialog(
-          title: Text(title),
-          contentPadding: const EdgeInsets.symmetric(vertical: 8),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: options.map((o) {
-              return RadioListTile<String>(
-                value: o,
-                groupValue: current,
-                title: Text(o),
-                onChanged: (v) {
-                  if (v != null) {
-                    onChanged(v);
-                    Navigator.pop(ctx);
-                  }
-                },
-              );
-            }).toList(),
+        return RepaintBoundary(
+                  child: BackdropFilter(
+                      filter: ImageFilter.blur(sigmaX: 8, sigmaY: 10),
+                      child: AlertDialog(
+              title: Text(title),
+              contentPadding: const EdgeInsets.symmetric(vertical: 8),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: options.map((o) {
+                  return RadioListTile<String>(
+                    value: o,
+                    groupValue: current,
+                    title: Text(o),
+                    onChanged: (v) {
+                      if (v != null) {
+                        onChanged(v);
+                        Navigator.pop(ctx);
+                      }
+                    },
+                  );
+                }).toList(),
+              ),
+            ),
           ),
         );
       },
@@ -1113,31 +1130,36 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
     final ctrl = TextEditingController(text: current);
     showDialog<void>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(label),
-        content: TextField(
-          controller: ctrl,
-          autofocus: true,
-          style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
-          decoration: InputDecoration(
-            hintText: hint,
-            labelText: s.binaryPath,
-            border: const OutlineInputBorder(),
+      builder: (ctx) => RepaintBoundary(
+                  child: BackdropFilter(
+                      filter: ImageFilter.blur(sigmaX: 8, sigmaY: 10),
+                      child: AlertDialog(
+            title: Text(label),
+            content: TextField(
+              controller: ctrl,
+              autofocus: true,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+              decoration: InputDecoration(
+                hintText: hint,
+                labelText: s.binaryPath,
+                border: const OutlineInputBorder(),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: Text(s.cancel),
+              ),
+              TextButton(
+                onPressed: () {
+                  onSave(ctrl.text);
+                  Navigator.pop(ctx);
+                },
+                child: Text(s.save),
+              ),
+            ],
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(s.cancel),
-          ),
-          TextButton(
-            onPressed: () {
-              onSave(ctrl.text);
-              Navigator.pop(ctx);
-            },
-            child: Text(s.save),
-          ),
-        ],
       ),
     );
   }
@@ -1330,29 +1352,34 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
       context: context,
       builder: (ctx) {
         return StatefulBuilder(builder: (ctx, setState) {
-          return AlertDialog(
-            title: Text(label),
-            content: TextField(
-              controller: ctrl,
-              obscureText: obscure,
-              decoration: InputDecoration(
-                hintText: s.pasteApiKey,
-                suffixIcon: IconButton(
-                  icon: Icon(obscure ? Icons.visibility : Icons.visibility_off),
-                  onPressed: () => setState(() => obscure = !obscure),
+          return RepaintBoundary(
+                  child: BackdropFilter(
+                      filter: ImageFilter.blur(sigmaX: 8, sigmaY: 10),
+                      child: AlertDialog(
+                title: Text(label),
+                content: TextField(
+                  controller: ctrl,
+                  obscureText: obscure,
+                  decoration: InputDecoration(
+                    hintText: s.pasteApiKey,
+                    suffixIcon: IconButton(
+                      icon: Icon(obscure ? Icons.visibility : Icons.visibility_off),
+                      onPressed: () => setState(() => obscure = !obscure),
+                    ),
+                  ),
                 ),
+                actions: [
+                  TextButton(onPressed: () => Navigator.pop(ctx), child: Text(s.cancel)),
+                  FilledButton(
+                    onPressed: () {
+                      onSave(ctrl.text.trim());
+                      Navigator.pop(ctx);
+                    },
+                    child: Text(s.save),
+                  ),
+                ],
               ),
             ),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx), child: Text(s.cancel)),
-              FilledButton(
-                onPressed: () {
-                  onSave(ctrl.text.trim());
-                  Navigator.pop(ctx);
-                },
-                child: Text(s.save),
-              ),
-            ],
           );
         });
       },
@@ -1424,20 +1451,25 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
     final s = AppStrings.of(context);
     showDialog<void>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(s.deleteAgent),
-        content: Text(s.deleteAgentConfirm(agent.name)),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(s.cancel)),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () {
-              context.read<AiProvider>().deleteAgent(agent.id);
-              Navigator.pop(ctx);
-            },
-            child: Text(s.delete),
+      builder: (ctx) => RepaintBoundary(
+                  child: BackdropFilter(
+                      filter: ImageFilter.blur(sigmaX: 8, sigmaY: 10),
+                      child: AlertDialog(
+            title: Text(s.deleteAgent),
+            content: Text(s.deleteAgentConfirm(agent.name)),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: Text(s.cancel)),
+              FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                onPressed: () {
+                  context.read<AiProvider>().deleteAgent(agent.id);
+                  Navigator.pop(ctx);
+                },
+                child: Text(s.delete),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -1454,102 +1486,107 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
       context: context,
       builder: (ctx) {
         return StatefulBuilder(builder: (ctx, setState) {
-          return AlertDialog(
-            title: Text(isNew ? s.newAgentTitle : s.editAgentTitle),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Avatar color picker row
-                  Row(
+          return RepaintBoundary(
+                  child: BackdropFilter(
+                      filter: ImageFilter.blur(sigmaX: 8, sigmaY: 10),
+                      child: AlertDialog(
+                title: Text(isNew ? s.newAgentTitle : s.editAgentTitle),
+                content: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      CircleAvatar(
-                        backgroundColor: avatarColor,
-                        radius: 22,
-                        child: Text(
-                          namectrl.text.isNotEmpty ? namectrl.text[0].toUpperCase() : 'A',
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
-                        ),
+                      // Avatar color picker row
+                      Row(
+                        children: [
+                          CircleAvatar(
+                            backgroundColor: avatarColor,
+                            radius: 22,
+                            child: Text(
+                              namectrl.text.isNotEmpty ? namectrl.text[0].toUpperCase() : 'A',
+                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: _kAgentColors.map((c) {
+                                final selected = c.toARGB32() == avatarColor.toARGB32();
+                                return GestureDetector(
+                                  onTap: () => setState(() => avatarColor = c),
+                                  child: Container(
+                                    width: 26,
+                                    height: 26,
+                                    decoration: BoxDecoration(
+                                      color: c,
+                                      shape: BoxShape.circle,
+                                      border: selected ? Border.all(color: Colors.white, width: 2.5) : null,
+                                      boxShadow: selected ? [BoxShadow(color: c.withValues(alpha: 0.6), blurRadius: 6)] : null,
+                                    ),
+                                  ),
+                                );
+                              }).toList(),
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: _kAgentColors.map((c) {
-                            final selected = c.toARGB32() == avatarColor.toARGB32();
-                            return GestureDetector(
-                              onTap: () => setState(() => avatarColor = c),
-                              child: Container(
-                                width: 26,
-                                height: 26,
-                                decoration: BoxDecoration(
-                                  color: c,
-                                  shape: BoxShape.circle,
-                                  border: selected ? Border.all(color: Colors.white, width: 2.5) : null,
-                                  boxShadow: selected ? [BoxShadow(color: c.withValues(alpha: 0.6), blurRadius: 6)] : null,
-                                ),
-                              ),
-                            );
-                          }).toList(),
+                      const SizedBox(height: 16),
+                      TextField(
+                        controller: namectrl,
+                        decoration: InputDecoration(labelText: s.agentName, border: const OutlineInputBorder()),
+                        onChanged: (_) => setState(() {}),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: focusctrl,
+                        decoration: InputDecoration(labelText: s.agentFocus, border: const OutlineInputBorder()),
+                        maxLines: 2,
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: instrctrl,
+                        decoration: InputDecoration(
+                          labelText: s.agentInstructions,
+                          alignLabelWithHint: true,
+                          border: const OutlineInputBorder(),
                         ),
+                        maxLines: 6,
                       ),
                     ],
                   ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: namectrl,
-                    decoration: InputDecoration(labelText: s.agentName, border: const OutlineInputBorder()),
-                    onChanged: (_) => setState(() {}),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: focusctrl,
-                    decoration: InputDecoration(labelText: s.agentFocus, border: const OutlineInputBorder()),
-                    maxLines: 2,
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: instrctrl,
-                    decoration: InputDecoration(
-                      labelText: s.agentInstructions,
-                      alignLabelWithHint: true,
-                      border: const OutlineInputBorder(),
-                    ),
-                    maxLines: 6,
+                ),
+                actions: [
+                  TextButton(onPressed: () => Navigator.pop(ctx), child: Text(s.cancel)),
+                  FilledButton(
+                    onPressed: () {
+                      final name = namectrl.text.trim();
+                      if (name.isEmpty) return;
+                      final aiProv = context.read<AiProvider>();
+                      if (isNew) {
+                        aiProv.addAgent(AiAgent(
+                          id: 'custom_${DateTime.now().millisecondsSinceEpoch}',
+                          name: name,
+                          focus: focusctrl.text.trim(),
+                          instructions: instrctrl.text.trim(),
+                          colorValue: avatarColor.toARGB32(),
+                        ));
+                      } else {
+                        aiProv.updateAgent(existing.copyWith(
+                          name: name,
+                          focus: focusctrl.text.trim(),
+                          instructions: instrctrl.text.trim(),
+                          colorValue: avatarColor.toARGB32(),
+                        ));
+                      }
+                      Navigator.pop(ctx);
+                    },
+                    child: Text(isNew ? s.create : s.save),
                   ),
                 ],
               ),
             ),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx), child: Text(s.cancel)),
-              FilledButton(
-                onPressed: () {
-                  final name = namectrl.text.trim();
-                  if (name.isEmpty) return;
-                  final aiProv = context.read<AiProvider>();
-                  if (isNew) {
-                    aiProv.addAgent(AiAgent(
-                      id: 'custom_${DateTime.now().millisecondsSinceEpoch}',
-                      name: name,
-                      focus: focusctrl.text.trim(),
-                      instructions: instrctrl.text.trim(),
-                      colorValue: avatarColor.toARGB32(),
-                    ));
-                  } else {
-                    aiProv.updateAgent(existing.copyWith(
-                      name: name,
-                      focus: focusctrl.text.trim(),
-                      instructions: instrctrl.text.trim(),
-                      colorValue: avatarColor.toARGB32(),
-                    ));
-                  }
-                  Navigator.pop(ctx);
-                },
-                child: Text(isNew ? s.create : s.save),
-              ),
-            ],
           );
         });
       },

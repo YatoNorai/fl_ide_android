@@ -106,14 +106,17 @@ class _ActiveEditor extends StatelessWidget {
         autofocus: true,
         child: Stack(
           children: [
-            QuillCodeEditor(
-              controller: file.controller!,
-              onChanged: (_) =>
-                  context.read<EditorProvider>().markDirty(),
-              lspConfig: lspProvider.lspConfig,
-              fileUri: Uri.file(file.path).toString(),
-              theme: effectiveTheme,
-              showSymbolBar: showSymbolBar,
+            Padding(
+              padding: const EdgeInsets.only(bottom: 60),
+              child: QuillCodeEditor(
+                controller: file.controller!,
+                onChanged: (_) =>
+                    context.read<EditorProvider>().markDirty(),
+                lspConfig: lspProvider.lspConfig,
+                fileUri: Uri.file(file.path).toString(),
+                theme: effectiveTheme,
+                showSymbolBar: showSymbolBar,
+              ),
             ),
             Positioned(
               bottom: 0,
@@ -184,11 +187,14 @@ class _WelcomePane extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('FL IDE',
-                style: TextStyle(
-                    color: cs.onSurface,
-                    fontSize: 26,
-                    fontWeight: FontWeight.w700)),
+                Image.asset('assets/logo.png',
+                    width: 100,
+                    height: 100,
+                    fit: BoxFit.cover,
+                    color: Theme.of(context)
+                        .textTheme
+                        .bodyLarge
+                        ?.color),
             const SizedBox(height: 16),
             RichText(
               textAlign: TextAlign.center,
