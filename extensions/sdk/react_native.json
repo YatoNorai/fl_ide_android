@@ -6,8 +6,6 @@
   "description": "React Native via Node.js LTS from the official Termux repository. Supports ARM64. Includes npm and the React Native CLI.",
   "package": {
     "type": "pkg",
-    "url": "",
-    "filename": "",
     "arch": "arm64",
     "size_mb": 80
   },
