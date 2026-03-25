@@ -58,6 +58,30 @@
       "description": "Running Flutter doctor"
     }
   ],
+  "cleanup_steps": [
+    {
+      "type": "shell",
+      "command": "dpkg --purge flutter 2>&1 || true",
+      "description": "Removing Flutter .deb package on error"
+    }
+  ],
+  "uninstall_steps": [
+    {
+      "type": "shell",
+      "command": "dpkg --purge flutter 2>&1 || true",
+      "description": "Uninstalling Flutter"
+    },
+    {
+      "type": "shell",
+      "command": "rm -rf \"$PREFIX/opt/flutter\" 2>&1 || true",
+      "description": "Removing Flutter directory"
+    },
+    {
+      "type": "shell",
+      "command": "sed -i '/flutter\\/bin/d' $HOME/.bashrc 2>&1 || true",
+      "description": "Cleaning Flutter from .bashrc"
+    }
+  ],
   "verify_binary": "flutter",
   "verify_command": "flutter --version",
   "run_config": {

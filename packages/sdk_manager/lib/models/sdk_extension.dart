@@ -81,6 +81,8 @@ class SdkExtension {
   final SdkExtJsonAuthor jsonAuthor;
   final List<SdkExtStep> installSteps;
   final List<SdkExtStep> configSteps;
+  final List<SdkExtStep> cleanupSteps;
+  final List<SdkExtStep> uninstallSteps;
   final String verifyBinary;
   final String verifyCommand;
 
@@ -95,6 +97,8 @@ class SdkExtension {
     required this.jsonAuthor,
     required this.installSteps,
     required this.configSteps,
+    this.cleanupSteps = const [],
+    this.uninstallSteps = const [],
     required this.verifyBinary,
     required this.verifyCommand,
   });
@@ -114,6 +118,12 @@ class SdkExtension {
             .map((s) => SdkExtStep.fromJson(s as Map<String, dynamic>))
             .toList(),
         configSteps: (j['config_steps'] as List)
+            .map((s) => SdkExtStep.fromJson(s as Map<String, dynamic>))
+            .toList(),
+        cleanupSteps: ((j['cleanup_steps'] as List?) ?? [])
+            .map((s) => SdkExtStep.fromJson(s as Map<String, dynamic>))
+            .toList(),
+        uninstallSteps: ((j['uninstall_steps'] as List?) ?? [])
             .map((s) => SdkExtStep.fromJson(s as Map<String, dynamic>))
             .toList(),
         verifyBinary: j['verify_binary'] as String,

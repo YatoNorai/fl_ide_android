@@ -3,6 +3,7 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:provider/provider.dart';
 import 'package:sdk_manager/sdk_manager.dart';
 
+import '../l10n/app_strings.dart';
 import '../models/extension_theme_meta.dart';
 import '../providers/extensions_provider.dart';
 
@@ -37,6 +38,7 @@ class _ExtensionsPageContentState extends State<ExtensionsPageContent>
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
+    final s = AppStrings.of(context);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -51,7 +53,6 @@ class _ExtensionsPageContentState extends State<ExtensionsPageContent>
           child: TabBar(
             controller: _tab,
             labelColor: Colors.white,
-            /* unselectedLabelColor: Colors.white, */
             dividerColor: Colors.transparent,
             indicatorSize: TabBarIndicatorSize.tab,
             indicator: BoxDecoration(
@@ -59,12 +60,13 @@ class _ExtensionsPageContentState extends State<ExtensionsPageContent>
               borderRadius: BorderRadius.circular(20),
             ),
             splashBorderRadius: BorderRadius.circular(20),
-            labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            labelStyle:
+                const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
             unselectedLabelStyle: const TextStyle(fontSize: 13),
-            tabs: const [
-              Tab(icon: Icon(Icons.store_outlined, size: 18), text: 'Store'),
-              Tab(icon: Icon(Icons.extension_outlined, size: 18), text: 'SDKs'),
-              Tab(icon: Icon(Icons.download_done_outlined, size: 18), text: 'Installed'),
+            tabs: [
+              Tab(icon: const Icon(Icons.store_outlined, size: 18), text: s.extStore),
+              Tab(icon: const Icon(Icons.extension_outlined, size: 18), text: s.extSdks),
+              Tab(icon: const Icon(Icons.download_done_outlined, size: 18), text: s.extInstalledTab),
             ],
           ),
         ),
@@ -91,6 +93,7 @@ class _StoreContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final s = AppStrings.of(context);
     return Consumer<ExtensionsProvider>(
       builder: (context, prov, _) {
         if (prov.loadingIndex && prov.availableThemes.isEmpty) {
@@ -116,7 +119,7 @@ class _StoreContent extends StatelessWidget {
                   ElevatedButton.icon(
                     onPressed: prov.fetchIndex,
                     icon: const Icon(Icons.refresh),
-                    label: const Text('Retry'),
+                    label: Text(s.retry),
                   ),
                 ],
               ),
@@ -125,9 +128,9 @@ class _StoreContent extends StatelessWidget {
         }
 
         if (prov.availableThemes.isEmpty) {
-          return const Padding(
-            padding: EdgeInsets.symmetric(vertical: 32),
-            child: Center(child: Text('No themes available.')),
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 32),
+            child: Center(child: Text(s.extNoThemes)),
           );
         }
 
@@ -137,10 +140,10 @@ class _StoreContent extends StatelessWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _sectionLabel(context, 'Dark Themes'),
+            _sectionLabel(context, s.extDarkThemes),
             ..._group(context, prov, dark),
             const SizedBox(height: 8),
-            _sectionLabel(context, 'Light Themes'),
+            _sectionLabel(context, s.extLightThemes),
             ..._group(context, prov, light),
           ],
         );
@@ -152,14 +155,13 @@ class _StoreContent extends StatelessWidget {
       List<ExtensionThemeMeta> themes) {
     return themes.asMap().entries.map((e) {
       final i = e.key;
-      final isFirst = i == 0;
-      final isLast = i == themes.length - 1;
       return _ThemeCard(
         meta: e.value,
         borderRadius: BorderRadius.vertical(
-          top: isFirst ? const Radius.circular(30) : const Radius.circular(10),
-          bottom:
-              isLast ? const Radius.circular(30) : const Radius.circular(10),
+          top: i == 0 ? const Radius.circular(30) : const Radius.circular(10),
+          bottom: i == themes.length - 1
+              ? const Radius.circular(30)
+              : const Radius.circular(10),
         ),
       );
     }).toList();
@@ -173,22 +175,25 @@ class _InstalledContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final s = AppStrings.of(context);
     return Consumer<ExtensionsProvider>(
       builder: (context, prov, _) {
         if (prov.installedThemes.isEmpty) {
-          return const Padding(
-            padding: EdgeInsets.symmetric(vertical: 32),
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 32),
             child: Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.extension_outlined, size: 40, color: Colors.grey),
-                  SizedBox(height: 12),
-                  Text('No extensions installed yet.',
-                      style: TextStyle(color: Colors.grey)),
-                  SizedBox(height: 4),
-                  Text('Go to Store to install themes.',
-                      style: TextStyle(color: Colors.grey, fontSize: 12)),
+                  const Icon(Icons.extension_outlined,
+                      size: 40, color: Colors.grey),
+                  const SizedBox(height: 12),
+                  Text(s.extNoExtensions,
+                      style: const TextStyle(color: Colors.grey)),
+                  const SizedBox(height: 4),
+                  Text(s.extGoToStore,
+                      style: const TextStyle(
+                          color: Colors.grey, fontSize: 12)),
                 ],
               ),
             ),
@@ -204,7 +209,7 @@ class _InstalledContent extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (activeMeta != null) ...[
-              _sectionLabel(context, 'Active Theme'),
+              _sectionLabel(context, s.extActiveTheme),
               _InstalledCard(
                 meta: activeMeta,
                 borderRadius: const BorderRadius.all(Radius.circular(30)),
@@ -213,24 +218,22 @@ class _InstalledContent extends StatelessWidget {
               const Divider(),
             ],
             if (inactive.isNotEmpty) ...[
-              _sectionLabel(context, 'Installed'),
+              _sectionLabel(context, s.extInstalledSection),
               ...inactive.asMap().entries.map((e) {
                 final i = e.key;
-                final isFirst = i == 0;
-                final isLast = i == inactive.length - 1;
                 return _InstalledCard(
                   meta: e.value,
                   borderRadius: BorderRadius.vertical(
-                    top: isFirst
+                    top: i == 0
                         ? const Radius.circular(30)
                         : const Radius.circular(10),
-                    bottom: isLast
+                    bottom: i == inactive.length - 1
                         ? const Radius.circular(30)
                         : const Radius.circular(10),
                   ),
                 );
               }),
-                 const SizedBox(height: 32),
+              const SizedBox(height: 32),
             ],
           ],
         );
@@ -248,6 +251,7 @@ class _ThemeCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final s = AppStrings.of(context);
     return Consumer<ExtensionsProvider>(
       builder: (context, prov, _) {
         final installed = prov.isInstalled(meta.id);
@@ -270,8 +274,7 @@ class _ThemeCard extends StatelessWidget {
                 children: [
                   Flexible(
                     child: Text(meta.name,
-                        style:
-                            const TextStyle(fontWeight: FontWeight.w500)),
+                        style: const TextStyle(fontWeight: FontWeight.w500)),
                   ),
                   if (active) ...[
                     const SizedBox(width: 8),
@@ -282,7 +285,7 @@ class _ThemeCard extends StatelessWidget {
                         color: colors.primaryContainer,
                         borderRadius: BorderRadius.circular(8),
                       ),
-                      child: Text('Active',
+                      child: Text(s.extActive,
                           style: TextStyle(
                               fontSize: 10,
                               color: colors.onPrimaryContainer)),
@@ -294,7 +297,7 @@ class _ThemeCard extends StatelessWidget {
             subtitle: Padding(
               padding: const EdgeInsets.only(bottom: 6),
               child: Text(
-                meta.dark ? 'Dark theme' : 'Light theme',
+                meta.dark ? s.extDarkThemeLabel : s.extLightThemeLabel,
                 style: const TextStyle(fontSize: 12, color: Colors.grey),
               ),
             ),
@@ -308,15 +311,15 @@ class _ThemeCard extends StatelessWidget {
                     ? IconButton(
                         icon: Icon(Icons.check_circle,
                             color: colors.primary),
-                        tooltip: 'Installed',
+                        tooltip: s.extInstalled2,
                         onPressed: () =>
-                            _showOptions(context, prov, meta, active),
+                            _showOptions(context, prov, meta, active, s),
                       )
                     : IconButton(
                         icon: const Icon(Icons.download_outlined),
-                        tooltip: 'Install',
+                        tooltip: s.extInstall,
                         onPressed: () =>
-                            _confirmInstall(context, prov, meta),
+                            _confirmInstall(context, prov, meta, s),
                       ),
           ),
         );
@@ -325,28 +328,28 @@ class _ThemeCard extends StatelessWidget {
   }
 
   void _confirmInstall(BuildContext context, ExtensionsProvider prov,
-      ExtensionThemeMeta meta) {
+      ExtensionThemeMeta meta, AppStrings s) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('Install "${meta.name}"?'),
-        content: const Text('The theme will be saved to your device.'),
+        title: Text('${s.extInstallQ} "${meta.name}"'),
+        content: Text(s.extInstallBody),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel')),
+              child: Text(s.cancel)),
           FilledButton(
             onPressed: () {
               Navigator.pop(ctx);
               prov.downloadTheme(meta).then((_) {
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                      content: Text('"${meta.name}" installed!'),
+                      content: Text('"${meta.name}" ${s.extInstalled2.toLowerCase()}!'),
                       behavior: SnackBarBehavior.floating));
                 }
               });
             },
-            child: const Text('Install'),
+            child: Text(s.extInstall),
           ),
         ],
       ),
@@ -354,7 +357,7 @@ class _ThemeCard extends StatelessWidget {
   }
 
   void _showOptions(BuildContext context, ExtensionsProvider prov,
-      ExtensionThemeMeta meta, bool active) {
+      ExtensionThemeMeta meta, bool active, AppStrings s) {
     final colors = Theme.of(context).colorScheme;
     showModalBottomSheet(
       context: context,
@@ -371,8 +374,7 @@ class _ThemeCard extends StatelessWidget {
                   : Icons.radio_button_off,
               color: active ? colors.primary : null,
             ),
-            title:
-                Text(active ? 'Deactivate theme' : 'Activate theme'),
+            title: Text(active ? s.extDeactivate : s.extActivate),
             onTap: () {
               Navigator.pop(ctx);
               if (active) {
@@ -383,10 +385,8 @@ class _ThemeCard extends StatelessWidget {
             },
           ),
           ListTile(
-            leading:
-                const Icon(Icons.delete_outline, color: Colors.red),
-            title: const Text('Delete',
-                style: TextStyle(color: Colors.red)),
+            leading: const Icon(Icons.delete_outline, color: Colors.red),
+            title: Text(s.delete, style: const TextStyle(color: Colors.red)),
             onTap: () {
               Navigator.pop(ctx);
               prov.deleteTheme(meta.id);
@@ -404,11 +404,11 @@ class _ThemeCard extends StatelessWidget {
 class _InstalledCard extends StatelessWidget {
   final ExtensionThemeMeta meta;
   final BorderRadiusGeometry borderRadius;
-  const _InstalledCard(
-      {required this.meta, required this.borderRadius});
+  const _InstalledCard({required this.meta, required this.borderRadius});
 
   @override
   Widget build(BuildContext context) {
+    final s = AppStrings.of(context);
     return Consumer<ExtensionsProvider>(
       builder: (context, prov, _) {
         final active = prov.isActive(meta.id);
@@ -433,7 +433,7 @@ class _InstalledCard extends StatelessWidget {
             subtitle: Padding(
               padding: const EdgeInsets.only(bottom: 6),
               child: Text(
-                meta.dark ? 'Dark theme' : 'Light theme',
+                meta.dark ? s.extDarkThemeLabel : s.extLightThemeLabel,
                 style: const TextStyle(fontSize: 12, color: Colors.grey),
               ),
             ),
@@ -449,9 +449,8 @@ class _InstalledCard extends StatelessWidget {
                 IconButton(
                   icon: const Icon(Icons.delete_outline,
                       color: Colors.grey, size: 20),
-                  tooltip: 'Delete',
-                  onPressed: () =>
-                      _confirmDelete(context, prov, meta),
+                  tooltip: s.delete,
+                  onPressed: () => _confirmDelete(context, prov, meta, s),
                 ),
               ],
             ),
@@ -462,23 +461,23 @@ class _InstalledCard extends StatelessWidget {
   }
 
   void _confirmDelete(BuildContext context, ExtensionsProvider prov,
-      ExtensionThemeMeta meta) {
+      ExtensionThemeMeta meta, AppStrings s) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('Delete "${meta.name}"?'),
-        content: const Text('The theme will be removed from your device.'),
+        title: Text('${s.extDeleteQ.replaceAll('?', '')} "${meta.name}"?'),
+        content: Text(s.extDeleteBody),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel')),
+              child: Text(s.cancel)),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () {
               Navigator.pop(ctx);
               prov.deleteTheme(meta.id);
             },
-            child: const Text('Delete'),
+            child: Text(s.delete),
           ),
         ],
       ),
@@ -493,6 +492,7 @@ class _SdkContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final s = AppStrings.of(context);
     return Consumer<ExtensionsProvider>(
       builder: (context, prov, _) {
         if (prov.loadingSdkIndex && prov.availableSdks.isEmpty) {
@@ -518,9 +518,8 @@ class _SdkContent extends StatelessWidget {
                   ElevatedButton.icon(
                     onPressed: prov.fetchSdkIndex,
                     icon: const Icon(Icons.refresh),
-                    label: const Text('Retry'),
+                    label: Text(s.retry),
                   ),
-                  
                 ],
               ),
             ),
@@ -528,9 +527,9 @@ class _SdkContent extends StatelessWidget {
         }
 
         if (prov.availableSdks.isEmpty) {
-          return const Padding(
-            padding: EdgeInsets.symmetric(vertical: 32),
-            child: Center(child: Text('No SDKs available.')),
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 32),
+            child: Center(child: Text(s.extNoSdks)),
           );
         }
 
@@ -539,15 +538,13 @@ class _SdkContent extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: sdks.asMap().entries.map((e) {
             final i = e.key;
-            final isFirst = i == 0;
-            final isLast = i == sdks.length - 1;
             return _SdkCard(
               ext: e.value,
               borderRadius: BorderRadius.vertical(
-                top: isFirst
+                top: i == 0
                     ? const Radius.circular(30)
                     : const Radius.circular(10),
-                bottom: isLast
+                bottom: i == sdks.length - 1
                     ? const Radius.circular(30)
                     : const Radius.circular(10),
               ),
@@ -567,6 +564,7 @@ class _SdkCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
+    final s = AppStrings.of(context);
     final installed = ext.isInstalled;
 
     return Card(
@@ -627,7 +625,7 @@ class _SdkCard extends StatelessWidget {
                         Icon(Icons.check_rounded,
                             size: 11, color: colors.primary),
                         const SizedBox(width: 3),
-                        Text('Installed',
+                        Text(s.extInstalled2,
                             style: TextStyle(
                                 fontSize: 10,
                                 fontWeight: FontWeight.w600,
@@ -666,25 +664,46 @@ class _SdkCard extends StatelessWidget {
                         fontSize: 11,
                         color: colors.onSurface.withValues(alpha: 0.5))),
                 const Spacer(),
-                FilledButton.icon(
-                  onPressed: () =>
-                      showSdkExtensionInstallDialog(context, ext),
-                  style: FilledButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 8),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    textStyle: const TextStyle(
-                        fontSize: 12, fontWeight: FontWeight.w600),
+                if (installed) ...[
+                  FilledButton.icon(
+                    onPressed: () async {
+                      await showSdkExtensionUninstallDialog(context, ext);
+                      if (context.mounted) {
+                        context.read<ExtensionsProvider>().refreshSdkStates();
+                      }
+                    },
+                    style: FilledButton.styleFrom(
+                      backgroundColor: colors.error,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 8),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      textStyle: const TextStyle(
+                          fontSize: 12, fontWeight: FontWeight.w600),
+                    ),
+                    icon: const Icon(Icons.delete_outline_rounded, size: 14),
+                    label: Text(s.extUninstall),
                   ),
-                  icon: Icon(
-                    installed
-                        ? Icons.update_rounded
-                        : Icons.download_rounded,
-                    size: 14,
+                ] else ...[
+                  FilledButton.icon(
+                    onPressed: () async {
+                      await showSdkExtensionInstallDialog(context, ext);
+                      if (context.mounted) {
+                        context.read<ExtensionsProvider>().refreshSdkStates();
+                      }
+                    },
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 8),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      textStyle: const TextStyle(
+                          fontSize: 12, fontWeight: FontWeight.w600),
+                    ),
+                    icon: const Icon(Icons.download_rounded, size: 14),
+                    label: Text(s.extInstall),
                   ),
-                  label: Text(installed ? 'Update' : 'Install'),
-                ),
+                ],
               ],
             ),
           ],
@@ -719,7 +738,6 @@ class _MiniChip extends StatelessWidget {
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
-/// CircleAvatar with theme background + accent-colored icon.
 class _ThemeAvatar extends StatelessWidget {
   final ExtensionThemeMeta meta;
   const _ThemeAvatar({required this.meta});
@@ -744,8 +762,8 @@ Widget _sectionLabel(BuildContext context, String label) {
     padding: const EdgeInsets.symmetric(vertical: 10),
     child: Text(
       label,
-      style: TextStyle(
-       color: Colors.grey,
+      style: const TextStyle(
+        color: Colors.grey,
         fontWeight: FontWeight.w600,
         fontSize: 14,
       ),

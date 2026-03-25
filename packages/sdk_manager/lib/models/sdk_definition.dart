@@ -95,6 +95,16 @@ npm install -g react-native-cli
       projectFileExtensions: ['py', 'txt', 'cfg', 'toml'],
       defaultEntryFile: 'main.py',
     ),
+    SdkDefinition(
+      type: SdkType.swift,
+      verifyBinary: 'swift',
+      verifyCmd: 'swift --version',
+      installScript: 'pkg update -y && pkg install -y swift',
+      buildCommand: 'swift build',
+      newProjectCmd: 'mkdir -p \$name && cd \$name && swift package init --type executable',
+      projectFileExtensions: ['swift', 'json', 'md'],
+      defaultEntryFile: 'Sources/main.swift',
+    ),
   ];
 
   static SdkDefinition forType(SdkType type) =>

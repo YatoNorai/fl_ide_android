@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/build_provider.dart';
+export '../providers/build_provider.dart' show BuildPlatform, supportedPlatforms;
 
 class BuildPanel extends StatelessWidget {
   final Project project;
@@ -35,6 +36,8 @@ class _BuildToolbar extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     final ide = Theme.of(context).extension<IdeColors>()!;
     final result = buildProv.result;
+    final platforms = supportedPlatforms(project.sdk);
+    final selected = buildProv.selectedPlatform(project.sdk);
 
     return Container(
       height: 44,
@@ -83,6 +86,17 @@ class _BuildToolbar extends StatelessWidget {
             _InstallButton(apkPath: result.apkPath!),
             const SizedBox(width: 8),
           ],
+          // Platform selector / label
+          if (platforms.length > 1)
+            _PlatformSelector(
+              platforms: platforms,
+              selected: selected,
+              enabled: !result.isRunning,
+              onChanged: (p) => buildProv.selectPlatform(p),
+            )
+          else
+            _PlatformBadge(platform: platforms.first),
+          const SizedBox(width: 8),
           // Build button
           if (result.isRunning)
             TextButton.icon(
@@ -108,7 +122,7 @@ class _BuildToolbar extends StatelessWidget {
                     borderRadius: BorderRadius.circular(8)),
               ),
               icon: const Icon(Icons.play_arrow_rounded, size: 14),
-              label: Text('Build ${project.sdk.displayName}'),
+              label: const Text('Build'),
               onPressed: () =>
                   context.read<BuildProvider>().build(project),
             ),
@@ -141,6 +155,117 @@ class _BuildToolbar extends StatelessWidget {
       case BuildStatus.error:
         return cs.error;
     }
+  }
+}
+
+// ── Platform widgets ──────────────────────────────────────────────────────────
+
+class _PlatformBadge extends StatelessWidget {
+  final BuildPlatform platform;
+  const _PlatformBadge({required this.platform});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: cs.secondaryContainer.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        '${platform.icon}  ${platform.label}',
+        style: TextStyle(
+          color: cs.onSecondaryContainer,
+          fontSize: 11,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+    );
+  }
+}
+
+class _PlatformSelector extends StatelessWidget {
+  final List<BuildPlatform> platforms;
+  final BuildPlatform selected;
+  final bool enabled;
+  final ValueChanged<BuildPlatform> onChanged;
+
+  const _PlatformSelector({
+    required this.platforms,
+    required this.selected,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return InkWell(
+      onTap: enabled ? () => _showPicker(context) : null,
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: cs.secondaryContainer.withValues(alpha: 0.5),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: cs.outline.withValues(alpha: 0.4)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '${selected.icon}  ${selected.label}',
+              style: TextStyle(
+                color: cs.onSecondaryContainer,
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const SizedBox(width: 2),
+            Icon(Icons.arrow_drop_down_rounded,
+                size: 14, color: cs.onSecondaryContainer),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showPicker(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    showModalBottomSheet<BuildPlatform>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+              child: Text('Target platform',
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: cs.onSurfaceVariant)),
+            ),
+            ...platforms.map((p) => ListTile(
+                  leading: Text(p.icon,
+                      style: const TextStyle(fontSize: 18)),
+                  title: Text(p.label,
+                      style: const TextStyle(fontSize: 13)),
+                  trailing: p == selected
+                      ? Icon(Icons.check_rounded, color: cs.primary, size: 16)
+                      : null,
+                  selected: p == selected,
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    onChanged(p);
+                  },
+                )),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
   }
 }
 

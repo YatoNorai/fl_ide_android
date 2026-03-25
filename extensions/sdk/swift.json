@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "sdk": "swift",
+  "sdk_version": "latest",
+  "display_name": "Swift (Termux)",
+  "description": "Swift compiler from the official Termux repository. Supports ARM64. Suitable for command-line tools and server-side Swift packages.",
+  "package": {
+    "type": "pkg",
+    "url": "",
+    "filename": "",
+    "arch": "arm64",
+    "size_mb": 150
+  },
+  "package_author": {
+    "name": "Termux / Apple",
+    "github": "https://github.com/termux/termux-packages"
+  },
+  "json_author": {
+    "name": "Yato",
+    "date": "2026-03-25"
+  },
+  "install_steps": [
+    {
+      "type": "shell",
+      "command": "pkg update -y 2>&1",
+      "description": "Updating package lists"
+    },
+    {
+      "type": "shell",
+      "command": "pkg install -y swift 2>&1",
+      "description": "Installing Swift compiler"
+    }
+  ],
+  "config_steps": [
+    {
+      "type": "shell",
+      "command": "swift --version 2>&1",
+      "description": "Verifying Swift installation"
+    }
+  ],
+  "uninstall_steps": [
+    {
+      "type": "shell",
+      "command": "pkg uninstall -y swift 2>&1 || true",
+      "description": "Removing Swift compiler"
+    }
+  ],
+  "verify_binary": "swift",
+  "verify_command": "swift --version",
+  "run_config": {
+    "run": "swift run",
+    "supports_devices": false,
+    "build_debug": "swift build",
+    "build_release": "swift build -c release"
+  }
+}

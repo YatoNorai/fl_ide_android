@@ -183,6 +183,39 @@ class AppStrings {
   String get licenseLabel      => _t('licenseLabel');
   String get mobileDevEnv      => _t('mobileDevEnv');
 
+  // ── Extensions screen ─────────────────────────────────────────────────────
+  String get extStore             => _t('extStore');
+  String get extSdks              => _t('extSdks');
+  String get extInstalledTab      => _t('extInstalledTab');
+  String get extDarkThemes        => _t('extDarkThemes');
+  String get extLightThemes       => _t('extLightThemes');
+  String get extActiveTheme       => _t('extActiveTheme');
+  String get extInstalledSection  => _t('extInstalledSection');
+  String get extNoThemes          => _t('extNoThemes');
+  String get extNoSdks            => _t('extNoSdks');
+  String get extNoExtensions      => _t('extNoExtensions');
+  String get extGoToStore         => _t('extGoToStore');
+  String get extActivate          => _t('extActivate');
+  String get extDeactivate        => _t('extDeactivate');
+  String get extInstall           => _t('extInstall');
+  String get extUninstall         => _t('extUninstall');
+  String get extUpdate            => _t('extUpdate');
+  String get extActive            => _t('extActive');
+  String get extDarkThemeLabel    => _t('extDarkThemeLabel');
+  String get extLightThemeLabel   => _t('extLightThemeLabel');
+  String get extInstallQ          => _t('extInstallQ');
+  String get extInstallBody       => _t('extInstallBody');
+  String get extDeleteQ           => _t('extDeleteQ');
+  String get extDeleteBody        => _t('extDeleteBody');
+  String get extInstalled2        => _t('extInstalled2');
+
+  // ── Workspace peek bar ────────────────────────────────────────────────────
+  String get peekCreatingProject  => _t('peekCreatingProject');
+  String get peekLoadingProject   => _t('peekLoadingProject');
+  String get peekStartingLsp      => _t('peekStartingLsp');
+  String get peekReady            => _t('peekReady');
+  String get peekSwipeUp          => _t('peekSwipeUp');
+
   // ── Settings general ──────────────────────────────────────────────────────
   String get language          => _t('language');
   String get languageSub       => _t('languageSub');
@@ -385,6 +418,37 @@ class AppStrings {
       'allow': 'Permitir',
       'installBootstrap': 'Instalar Bootstrap',
       'ready': 'Instalado',
+      // Extensions
+      'extStore': 'Loja',
+      'extSdks': 'SDKs',
+      'extInstalledTab': 'Instalados',
+      'extDarkThemes': 'Temas Escuros',
+      'extLightThemes': 'Temas Claros',
+      'extActiveTheme': 'Tema Ativo',
+      'extInstalledSection': 'Instalados',
+      'extNoThemes': 'Nenhum tema disponível.',
+      'extNoSdks': 'Nenhum SDK disponível.',
+      'extNoExtensions': 'Nenhuma extensão instalada ainda.',
+      'extGoToStore': 'Acesse a Loja para instalar temas.',
+      'extActivate': 'Ativar tema',
+      'extDeactivate': 'Desativar tema',
+      'extInstall': 'Instalar',
+      'extUninstall': 'Desinstalar',
+      'extUpdate': 'Atualizar',
+      'extActive': 'Ativo',
+      'extDarkThemeLabel': 'Tema escuro',
+      'extLightThemeLabel': 'Tema claro',
+      'extInstallQ': 'Instalar tema?',
+      'extInstallBody': 'O tema será salvo no seu dispositivo.',
+      'extDeleteQ': 'Excluir tema?',
+      'extDeleteBody': 'O tema será removido do seu dispositivo.',
+      'extInstalled2': 'Instalado',
+      // Workspace peek bar
+      'peekCreatingProject': 'Criando projeto...',
+      'peekLoadingProject': 'Carregando projeto...',
+      'peekStartingLsp': 'Carregando LSP...',
+      'peekReady': 'Projeto pronto',
+      'peekSwipeUp': 'Deslize para cima para acessar o terminal',
     },
     'en': {
       'cancel': 'Cancel',
@@ -558,6 +622,37 @@ class AppStrings {
       'allow': 'Allow',
       'installBootstrap': 'Install Bootstrap',
       'ready': 'Installed',
+      // Extensions
+      'extStore': 'Store',
+      'extSdks': 'SDKs',
+      'extInstalledTab': 'Installed',
+      'extDarkThemes': 'Dark Themes',
+      'extLightThemes': 'Light Themes',
+      'extActiveTheme': 'Active Theme',
+      'extInstalledSection': 'Installed',
+      'extNoThemes': 'No themes available.',
+      'extNoSdks': 'No SDKs available.',
+      'extNoExtensions': 'No extensions installed yet.',
+      'extGoToStore': 'Go to Store to install themes.',
+      'extActivate': 'Activate theme',
+      'extDeactivate': 'Deactivate theme',
+      'extInstall': 'Install',
+      'extUninstall': 'Uninstall',
+      'extUpdate': 'Update',
+      'extActive': 'Active',
+      'extDarkThemeLabel': 'Dark theme',
+      'extLightThemeLabel': 'Light theme',
+      'extInstallQ': 'Install theme?',
+      'extInstallBody': 'The theme will be saved to your device.',
+      'extDeleteQ': 'Delete theme?',
+      'extDeleteBody': 'The theme will be removed from your device.',
+      'extInstalled2': 'Installed',
+      // Workspace peek bar
+      'peekCreatingProject': 'Creating project...',
+      'peekLoadingProject': 'Loading project...',
+      'peekStartingLsp': 'Starting LSP...',
+      'peekReady': 'Project ready',
+      'peekSwipeUp': 'Swipe up to access the terminal',
     },
     'es': {
       'cancel': 'Cancelar',
@@ -731,6 +826,37 @@ class AppStrings {
       'allow': 'Permitir',
       'installBootstrap': 'Instalar Bootstrap',
       'ready': 'Instalado',
+      // Extensions
+      'extStore': 'Tienda',
+      'extSdks': 'SDKs',
+      'extInstalledTab': 'Instalados',
+      'extDarkThemes': 'Temas Oscuros',
+      'extLightThemes': 'Temas Claros',
+      'extActiveTheme': 'Tema Activo',
+      'extInstalledSection': 'Instalados',
+      'extNoThemes': 'No hay temas disponibles.',
+      'extNoSdks': 'No hay SDKs disponibles.',
+      'extNoExtensions': 'No hay extensiones instaladas.',
+      'extGoToStore': 'Ve a la Tienda para instalar temas.',
+      'extActivate': 'Activar tema',
+      'extDeactivate': 'Desactivar tema',
+      'extInstall': 'Instalar',
+      'extUninstall': 'Desinstalar',
+      'extUpdate': 'Actualizar',
+      'extActive': 'Activo',
+      'extDarkThemeLabel': 'Tema oscuro',
+      'extLightThemeLabel': 'Tema claro',
+      'extInstallQ': '¿Instalar tema?',
+      'extInstallBody': 'El tema se guardará en tu dispositivo.',
+      'extDeleteQ': '¿Eliminar tema?',
+      'extDeleteBody': 'El tema se eliminará de tu dispositivo.',
+      'extInstalled2': 'Instalado',
+      // Workspace peek bar
+      'peekCreatingProject': 'Creando proyecto...',
+      'peekLoadingProject': 'Cargando proyecto...',
+      'peekStartingLsp': 'Iniciando LSP...',
+      'peekReady': 'Proyecto listo',
+      'peekSwipeUp': 'Desliza hacia arriba para acceder al terminal',
     },
     'fr': {
       'cancel': 'Annuler',
@@ -904,6 +1030,37 @@ class AppStrings {
       'allow': 'Autoriser',
       'installBootstrap': 'Installer Bootstrap',
       'ready': 'Installé',
+      // Extensions
+      'extStore': 'Boutique',
+      'extSdks': 'SDKs',
+      'extInstalledTab': 'Installés',
+      'extDarkThemes': 'Thèmes Sombres',
+      'extLightThemes': 'Thèmes Clairs',
+      'extActiveTheme': 'Thème Actif',
+      'extInstalledSection': 'Installés',
+      'extNoThemes': 'Aucun thème disponible.',
+      'extNoSdks': 'Aucun SDK disponible.',
+      'extNoExtensions': 'Aucune extension installée.',
+      'extGoToStore': 'Allez dans la Boutique pour installer des thèmes.',
+      'extActivate': 'Activer le thème',
+      'extDeactivate': 'Désactiver le thème',
+      'extInstall': 'Installer',
+      'extUninstall': 'Désinstaller',
+      'extUpdate': 'Mettre à jour',
+      'extActive': 'Actif',
+      'extDarkThemeLabel': 'Thème sombre',
+      'extLightThemeLabel': 'Thème clair',
+      'extInstallQ': 'Installer le thème ?',
+      'extInstallBody': 'Le thème sera enregistré sur votre appareil.',
+      'extDeleteQ': 'Supprimer le thème ?',
+      'extDeleteBody': 'Le thème sera supprimé de votre appareil.',
+      'extInstalled2': 'Installé',
+      // Workspace peek bar
+      'peekCreatingProject': 'Création du projet...',
+      'peekLoadingProject': 'Chargement du projet...',
+      'peekStartingLsp': 'Démarrage du LSP...',
+      'peekReady': 'Projet prêt',
+      'peekSwipeUp': 'Glissez vers le haut pour accéder au terminal',
     },
     'de': {
       'cancel': 'Abbrechen',
@@ -1077,6 +1234,37 @@ class AppStrings {
       'allow': 'Erlauben',
       'installBootstrap': 'Bootstrap installieren',
       'ready': 'Installiert',
+      // Extensions
+      'extStore': 'Store',
+      'extSdks': 'SDKs',
+      'extInstalledTab': 'Installiert',
+      'extDarkThemes': 'Dunkle Themen',
+      'extLightThemes': 'Helle Themen',
+      'extActiveTheme': 'Aktives Thema',
+      'extInstalledSection': 'Installiert',
+      'extNoThemes': 'Keine Themen verfügbar.',
+      'extNoSdks': 'Keine SDKs verfügbar.',
+      'extNoExtensions': 'Noch keine Erweiterungen installiert.',
+      'extGoToStore': 'Gehen Sie zum Store, um Themen zu installieren.',
+      'extActivate': 'Thema aktivieren',
+      'extDeactivate': 'Thema deaktivieren',
+      'extInstall': 'Installieren',
+      'extUninstall': 'Deinstallieren',
+      'extUpdate': 'Aktualisieren',
+      'extActive': 'Aktiv',
+      'extDarkThemeLabel': 'Dunkles Thema',
+      'extLightThemeLabel': 'Helles Thema',
+      'extInstallQ': 'Thema installieren?',
+      'extInstallBody': 'Das Thema wird auf Ihrem Gerät gespeichert.',
+      'extDeleteQ': 'Thema löschen?',
+      'extDeleteBody': 'Das Thema wird von Ihrem Gerät entfernt.',
+      'extInstalled2': 'Installiert',
+      // Workspace peek bar
+      'peekCreatingProject': 'Projekt wird erstellt...',
+      'peekLoadingProject': 'Projekt wird geladen...',
+      'peekStartingLsp': 'LSP wird gestartet...',
+      'peekReady': 'Projekt bereit',
+      'peekSwipeUp': 'Nach oben wischen, um auf das Terminal zuzugreifen',
     },
   };
 }

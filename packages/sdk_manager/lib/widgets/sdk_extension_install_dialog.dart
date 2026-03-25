@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../models/sdk_extension.dart';
 
-// ── Public entry point ────────────────────────────────────────────────────────
+// ── Public entry points ───────────────────────────────────────────────────────
 
 Future<void> showSdkExtensionInstallDialog(
   BuildContext context,
@@ -15,13 +15,24 @@ Future<void> showSdkExtensionInstallDialog(
   return showDialog<void>(
     context: context,
     barrierDismissible: false,
-    builder: (_) => _SdkInstallDialog(ext: ext),
+    builder: (_) => _SdkInstallDialog(ext: ext, uninstall: false),
+  );
+}
+
+Future<void> showSdkExtensionUninstallDialog(
+  BuildContext context,
+  SdkExtension ext,
+) {
+  return showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => _SdkInstallDialog(ext: ext, uninstall: true),
   );
 }
 
 // ── Install phases ─────────────────────────────────────────────────────────────
 
-enum _Phase { idle, downloading, installing, configuring, done, error }
+enum _Phase { idle, downloading, installing, configuring, uninstalling, cleanup, done, error }
 
 class _StepState {
   final SdkExtStep step;
@@ -38,7 +49,8 @@ class _StepState {
 
 class _SdkInstallDialog extends StatefulWidget {
   final SdkExtension ext;
-  const _SdkInstallDialog({required this.ext});
+  final bool uninstall;
+  const _SdkInstallDialog({required this.ext, required this.uninstall});
 
   @override
   State<_SdkInstallDialog> createState() => _SdkInstallDialogState();
@@ -50,6 +62,8 @@ class _SdkInstallDialogState extends State<_SdkInstallDialog> {
   String _downloadLabel = '';
   late List<_StepState> _installStates;
   late List<_StepState> _configStates;
+  late List<_StepState> _cleanupStates;
+  late List<_StepState> _uninstallStates;
   String? _error;
   bool _cancelled = false;
 
@@ -60,6 +74,10 @@ class _SdkInstallDialogState extends State<_SdkInstallDialog> {
         widget.ext.installSteps.map((s) => _StepState(step: s)).toList();
     _configStates =
         widget.ext.configSteps.map((s) => _StepState(step: s)).toList();
+    _cleanupStates =
+        widget.ext.cleanupSteps.map((s) => _StepState(step: s)).toList();
+    _uninstallStates =
+        widget.ext.uninstallSteps.map((s) => _StepState(step: s)).toList();
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -78,7 +96,6 @@ class _SdkInstallDialogState extends State<_SdkInstallDialog> {
       ...base,
       'PREFIX': RuntimeEnvir.usrPath,
       'DOWNLOAD_PATH': downloadPath,
-      // Prepend flutter bin so config steps find the just-installed flutter
       'PATH': '${RuntimeEnvir.flutterPath}/bin:${base['PATH'] ?? ''}',
     };
   }
@@ -94,24 +111,67 @@ class _SdkInstallDialogState extends State<_SdkInstallDialog> {
     );
     final stdout = result.stdout?.toString().trim() ?? '';
     final stderr = result.stderr?.toString().trim() ?? '';
-    final exitCode = result.exitCode;
     if (stdout.isNotEmpty) debugPrint('[SdkInstall] stdout: $stdout');
     if (stderr.isNotEmpty) debugPrint('[SdkInstall] stderr: $stderr');
-    debugPrint('[SdkInstall] exit code: $exitCode');
+    debugPrint('[SdkInstall] exit: ${result.exitCode}');
     return '$stdout$stderr'.trim();
+  }
+
+  Future<void> _runSteps(List<_StepState> states, String downloadPath) async {
+    for (final state in states) {
+      if (_cancelled) return;
+      _set(() => state.active = true);
+      final cmd = state.step.command ?? '';
+      if (cmd.isNotEmpty) {
+        state.output = await _runShell(cmd, downloadPath);
+      }
+      _set(() {
+        state.active = false;
+        state.done = true;
+      });
+    }
   }
 
   String _extractCmd(SdkExtStep step, String downloadPath) {
     final dest = _resolve(step.dest ?? r'$PREFIX', downloadPath);
-    debugPrint('[SdkInstall] extract type=${widget.ext.package.type} dest=$dest');
     switch (widget.ext.package.type) {
       case 'zip':
         return 'mkdir -p "$dest" && unzip -o "$downloadPath" -d "$dest"';
       case 'tar_gz':
         return 'mkdir -p "$dest" && tar xzf "$downloadPath" -C "$dest"';
       default:
-        debugPrint('[SdkInstall] unknown package type: ${widget.ext.package.type}');
         return '';
+    }
+  }
+
+  // ── Cleanup on error ───────────────────────────────────────────────────────
+
+  Future<void> _runCleanup(String downloadPath) async {
+    _set(() => _phase = _Phase.cleanup);
+    // Delete temp file
+    try {
+      final f = File(downloadPath);
+      if (await f.exists()) await f.delete();
+    } catch (_) {}
+
+    // Run JSON-defined cleanup steps
+    if (widget.ext.cleanupSteps.isNotEmpty) {
+      for (final state in _cleanupStates) {
+        state.done = false;
+        state.active = false;
+      }
+      await _runSteps(_cleanupStates, downloadPath);
+    } else {
+      // Generic fallback for deb: try dpkg --purge
+      if (widget.ext.package.type == 'deb') {
+        final pkgName = widget.ext.package.filename
+            .split('_')
+            .first
+            .toLowerCase();
+        await _runShell(
+            'dpkg --purge $pkgName 2>&1 || apt-get remove --purge -y $pkgName 2>&1 || true',
+            downloadPath);
+      }
     }
   }
 
@@ -119,23 +179,12 @@ class _SdkInstallDialogState extends State<_SdkInstallDialog> {
 
   Future<void> _startInstall() async {
     _cancelled = false;
-    debugPrint('[SdkInstall] === starting install: ${widget.ext.displayName} ===');
-    debugPrint('[SdkInstall] package url: ${widget.ext.package.url}');
-    debugPrint('[SdkInstall] package type: ${widget.ext.package.type}');
-    debugPrint('[SdkInstall] bash path: ${RuntimeEnvir.bashPath}');
-    debugPrint('[SdkInstall] bash exists: ${File(RuntimeEnvir.bashPath).existsSync()}');
-    debugPrint('[SdkInstall] PREFIX: ${RuntimeEnvir.usrPath}');
-    debugPrint('[SdkInstall] HOME: ${RuntimeEnvir.homePath}');
-    debugPrint('[SdkInstall] flutter path: ${RuntimeEnvir.flutterPath}');
-    debugPrint('[SdkInstall] flutter binary exists: ${File('${RuntimeEnvir.flutterPath}/bin/flutter').existsSync()}');
+    final tmpDir = '${RuntimeEnvir.filesPath}/tmp';
+    await Directory(tmpDir).create(recursive: true);
+    final downloadPath = '$tmpDir/${widget.ext.package.filename}';
 
     try {
-      // ── Phase 1: Download ────────────────────────────────────────────────
-      final tmpDir = '${RuntimeEnvir.filesPath}/tmp';
-      await Directory(tmpDir).create(recursive: true);
-      final downloadPath = '$tmpDir/${widget.ext.package.filename}';
-      debugPrint('[SdkInstall] download path: $downloadPath');
-
+      // Phase 1: Download
       _set(() {
         _phase = _Phase.downloading;
         _downloadProgress = 0.0;
@@ -143,7 +192,6 @@ class _SdkInstallDialogState extends State<_SdkInstallDialog> {
       });
 
       final dio = Dio();
-      debugPrint('[SdkInstall] starting dio.download...');
       await dio.download(
         widget.ext.package.url,
         downloadPath,
@@ -161,85 +209,80 @@ class _SdkInstallDialogState extends State<_SdkInstallDialog> {
         },
         options: Options(followRedirects: true, maxRedirects: 10),
       );
-      debugPrint('[SdkInstall] download complete. file exists: ${File(downloadPath).existsSync()}');
-      debugPrint('[SdkInstall] file size: ${File(downloadPath).existsSync() ? File(downloadPath).lengthSync() : 0} bytes');
 
       if (_cancelled) return;
 
-      // ── Phase 2: Install steps ──────────────────────────────────────────
-      debugPrint('[SdkInstall] === phase 2: install (${_installStates.length} steps) ===');
+      // Phase 2: Install steps
       _set(() => _phase = _Phase.installing);
       for (final state in _installStates) {
         if (_cancelled) return;
-        debugPrint('[SdkInstall] install step: "${state.step.description}" type=${state.step.type}');
         _set(() => state.active = true);
-
         final String cmd;
         if (state.step.type == 'extract') {
           cmd = _extractCmd(state.step, downloadPath);
         } else {
           cmd = state.step.command ?? '';
         }
-
         if (cmd.isNotEmpty) {
-          final out = await _runShell(cmd, downloadPath);
-          state.output = out;
-        } else {
-          debugPrint('[SdkInstall] skipping empty command');
+          state.output = await _runShell(cmd, downloadPath);
         }
-
         _set(() {
           state.active = false;
           state.done = true;
         });
-        debugPrint('[SdkInstall] install step done: "${state.step.description}"');
       }
 
-      // ── Phase 3: Config steps ───────────────────────────────────────────
-      debugPrint('[SdkInstall] === phase 3: configure (${_configStates.length} steps) ===');
+      // Phase 3: Config steps
       _set(() => _phase = _Phase.configuring);
-      for (final state in _configStates) {
-        if (_cancelled) return;
-        debugPrint('[SdkInstall] config step: "${state.step.description}"');
-        _set(() => state.active = true);
+      await _runSteps(_configStates, downloadPath);
 
-        final cmd = state.step.command ?? '';
-        if (cmd.isNotEmpty) {
-          final out = await _runShell(cmd, downloadPath);
-          state.output = out;
-        } else {
-          debugPrint('[SdkInstall] skipping empty config command');
-        }
+      // Cleanup temp file on success
+      try { await File(downloadPath).delete(); } catch (_) {}
 
-        _set(() {
-          state.active = false;
-          state.done = true;
-        });
-        debugPrint('[SdkInstall] config step done: "${state.step.description}"');
-      }
-
-      // ── Cleanup temp file ───────────────────────────────────────────────
-      try {
-        await File(downloadPath).delete();
-        debugPrint('[SdkInstall] temp file deleted');
-      } catch (e) {
-        debugPrint('[SdkInstall] could not delete temp file: $e');
-      }
-
-      debugPrint('[SdkInstall] === install complete ===');
       _set(() => _phase = _Phase.done);
     } on DioException catch (e) {
       if (_cancelled) return;
-      debugPrint('[SdkInstall] DioException: ${e.type} | ${e.message} | ${e.error}');
-      debugPrint('[SdkInstall] response: ${e.response?.statusCode} ${e.response?.data}');
+      debugPrint('[SdkInstall] DioException: ${e.message}');
+      await _runCleanup(downloadPath);
       _set(() {
         _phase = _Phase.error;
         _error = 'Download failed: ${e.message}';
       });
     } catch (e, stack) {
       if (_cancelled) return;
-      debugPrint('[SdkInstall] unexpected error: $e');
-      debugPrint('[SdkInstall] stack: $stack');
+      debugPrint('[SdkInstall] error: $e\n$stack');
+      await _runCleanup(downloadPath);
+      _set(() {
+        _phase = _Phase.error;
+        _error = e.toString();
+      });
+    }
+  }
+
+  // ── Uninstall flow ─────────────────────────────────────────────────────────
+
+  Future<void> _startUninstall() async {
+    _cancelled = false;
+    const downloadPath = '';
+    _set(() => _phase = _Phase.uninstalling);
+
+    try {
+      if (widget.ext.uninstallSteps.isNotEmpty) {
+        await _runSteps(_uninstallStates, downloadPath);
+      } else {
+        // Generic fallback
+        if (widget.ext.package.type == 'deb') {
+          final pkgName = widget.ext.package.filename
+              .split('_')
+              .first
+              .toLowerCase();
+          await _runShell(
+              'dpkg --purge $pkgName 2>&1 || apt-get remove --purge -y $pkgName 2>&1 || true',
+              downloadPath);
+        }
+      }
+      _set(() => _phase = _Phase.done);
+    } catch (e) {
       _set(() {
         _phase = _Phase.error;
         _error = e.toString();
@@ -256,8 +299,9 @@ class _SdkInstallDialogState extends State<_SdkInstallDialog> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final isRunning =
-        _phase != _Phase.idle && _phase != _Phase.done && _phase != _Phase.error;
+    final isRunning = _phase != _Phase.idle &&
+        _phase != _Phase.done &&
+        _phase != _Phase.error;
 
     return AlertDialog(
       backgroundColor: cs.surface,
@@ -275,7 +319,7 @@ class _SdkInstallDialogState extends State<_SdkInstallDialog> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (_phase == _Phase.idle) _buildIdleInfo(cs),
-              if (_phase != _Phase.idle) ...[
+              if (!widget.uninstall && _phase != _Phase.idle) ...[
                 _PhaseSection(
                   label: 'Download',
                   icon: Icons.download_rounded,
@@ -316,10 +360,38 @@ class _SdkInstallDialogState extends State<_SdkInstallDialog> {
                       ? _StepList(states: _configStates, cs: cs)
                       : null,
                 ),
+                if (_phase == _Phase.cleanup) ...[
+                  const SizedBox(height: 8),
+                  _PhaseSection(
+                    label: 'Cleanup (reversing on error)',
+                    icon: Icons.cleaning_services_rounded,
+                    isActive: true,
+                    isDone: false,
+                    cs: cs,
+                    child: _StepList(states: _cleanupStates, cs: cs),
+                  ),
+                ],
+              ],
+              if (widget.uninstall && _phase != _Phase.idle) ...[
+                _PhaseSection(
+                  label: 'Uninstall',
+                  icon: Icons.delete_outline_rounded,
+                  isActive: _phase == _Phase.uninstalling,
+                  isDone: _phase == _Phase.done,
+                  cs: cs,
+                  child: _phase.index >= _Phase.uninstalling.index
+                      ? _StepList(states: _uninstallStates, cs: cs)
+                      : null,
+                ),
               ],
               if (_phase == _Phase.done) ...[
                 const SizedBox(height: 16),
-                _SuccessBanner(cs: cs),
+                _SuccessBanner(
+                  message: widget.uninstall
+                      ? 'Uninstalled successfully. Restart the terminal to apply changes.'
+                      : 'Installation complete! Restart the terminal to use the SDK.',
+                  cs: cs,
+                ),
               ],
               if (_phase == _Phase.error) ...[
                 const SizedBox(height: 12),
@@ -335,7 +407,8 @@ class _SdkInstallDialogState extends State<_SdkInstallDialog> {
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
             child: Text('Cancel',
-                style: TextStyle(color: cs.onSurface.withValues(alpha: 0.6))),
+                style:
+                    TextStyle(color: cs.onSurface.withValues(alpha: 0.6))),
           ),
         if (_phase == _Phase.done || _phase == _Phase.error)
           FilledButton(
@@ -348,14 +421,21 @@ class _SdkInstallDialogState extends State<_SdkInstallDialog> {
               _cancelled = true;
               Navigator.of(context).pop();
             },
-            child: Text('Cancel',
-                style: TextStyle(color: cs.error)),
+            child: Text('Cancel', style: TextStyle(color: cs.error)),
           ),
         if (_phase == _Phase.idle)
           FilledButton.icon(
-            onPressed: _startInstall,
-            icon: const Icon(Icons.download_rounded, size: 16),
-            label: const Text('Install'),
+            onPressed: widget.uninstall ? _startUninstall : _startInstall,
+            icon: Icon(
+              widget.uninstall
+                  ? Icons.delete_outline_rounded
+                  : Icons.download_rounded,
+              size: 16,
+            ),
+            style: widget.uninstall
+                ? FilledButton.styleFrom(backgroundColor: cs.error)
+                : null,
+            label: Text(widget.uninstall ? 'Uninstall' : 'Install'),
           ),
         if (isRunning)
           FilledButton(
@@ -366,11 +446,11 @@ class _SdkInstallDialogState extends State<_SdkInstallDialog> {
                 SizedBox(
                   width: 14,
                   height: 14,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: cs.onPrimary),
+                  child:
+                      CircularProgressIndicator(strokeWidth: 2, color: cs.onPrimary),
                 ),
                 const SizedBox(width: 8),
-                const Text('Installing...'),
+                Text(widget.uninstall ? 'Uninstalling...' : 'Installing...'),
               ],
             ),
           ),
@@ -384,21 +464,33 @@ class _SdkInstallDialogState extends State<_SdkInstallDialog> {
         Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: cs.primaryContainer,
+            color: widget.uninstall
+                ? cs.errorContainer
+                : cs.primaryContainer,
             borderRadius: BorderRadius.circular(10),
           ),
-          child: Icon(Icons.extension_rounded, size: 20, color: cs.primary),
+          child: Icon(
+            widget.uninstall
+                ? Icons.delete_outline_rounded
+                : Icons.extension_rounded,
+            size: 20,
+            color: widget.uninstall ? cs.error : cs.primary,
+          ),
         ),
         const SizedBox(width: 12),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(widget.ext.displayName,
-                  style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      color: cs.onSurface)),
+              Text(
+                widget.uninstall
+                    ? 'Uninstall ${widget.ext.displayName}'
+                    : widget.ext.displayName,
+                style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: cs.onSurface),
+              ),
               Text(
                 'v${widget.ext.sdkVersion} · ${widget.ext.package.arch}',
                 style: TextStyle(
@@ -418,41 +510,46 @@ class _SdkInstallDialogState extends State<_SdkInstallDialog> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(widget.ext.description,
-            style: TextStyle(
-                fontSize: 13,
-                color: cs.onSurface.withValues(alpha: 0.7),
-                height: 1.5)),
-        const SizedBox(height: 12),
-        _InfoRow(
-          icon: Icons.inventory_2_outlined,
-          label: pkg.type.toUpperCase(),
-          value: pkg.sizeMb != null ? '~${pkg.sizeMb!.toInt()} MB' : '',
-          cs: cs,
-        ),
-        const SizedBox(height: 6),
-        _InfoRow(
-          icon: Icons.person_outline_rounded,
-          label: 'Package by',
-          value: widget.ext.packageAuthor.name,
-          cs: cs,
-        ),
-        const SizedBox(height: 6),
-        _InfoRow(
-          icon: Icons.edit_outlined,
-          label: 'Extension by',
-          value:
-              '${widget.ext.jsonAuthor.name} · ${widget.ext.jsonAuthor.date}',
-          cs: cs,
-        ),
-        const SizedBox(height: 8),
-        Divider(color: cs.outline.withValues(alpha: 0.15)),
-        const SizedBox(height: 4),
         Text(
-          '${widget.ext.installSteps.length} install step(s) · ${widget.ext.configSteps.length} config step(s)',
+          widget.uninstall
+              ? 'This will remove ${widget.ext.displayName} from your device.'
+              : widget.ext.description,
           style: TextStyle(
-              fontSize: 12, color: cs.onSurface.withValues(alpha: 0.45)),
+              fontSize: 13,
+              color: cs.onSurface.withValues(alpha: 0.7),
+              height: 1.5),
         ),
+        const SizedBox(height: 12),
+        if (!widget.uninstall) ...[
+          _InfoRow(
+            icon: Icons.inventory_2_outlined,
+            label: pkg.type.toUpperCase(),
+            value: pkg.sizeMb != null ? '~${pkg.sizeMb!.toInt()} MB' : '',
+            cs: cs,
+          ),
+          const SizedBox(height: 6),
+          _InfoRow(
+            icon: Icons.person_outline_rounded,
+            label: 'Package by',
+            value: widget.ext.packageAuthor.name,
+            cs: cs,
+          ),
+          const SizedBox(height: 6),
+          _InfoRow(
+            icon: Icons.edit_outlined,
+            label: 'Extension by',
+            value: '${widget.ext.jsonAuthor.name} · ${widget.ext.jsonAuthor.date}',
+            cs: cs,
+          ),
+          const SizedBox(height: 8),
+          Divider(color: cs.outline.withValues(alpha: 0.15)),
+          const SizedBox(height: 4),
+          Text(
+            '${widget.ext.installSteps.length} install step(s) · ${widget.ext.configSteps.length} config step(s)',
+            style: TextStyle(
+                fontSize: 12, color: cs.onSurface.withValues(alpha: 0.45)),
+          ),
+        ],
       ],
     );
   }
@@ -490,8 +587,7 @@ class _PhaseSection extends StatelessWidget {
       iconWidget = SizedBox(
         width: 18,
         height: 18,
-        child: CircularProgressIndicator(
-            strokeWidth: 2.5, color: iconColor),
+        child: CircularProgressIndicator(strokeWidth: 2.5, color: iconColor),
       );
     } else {
       iconColor = cs.onSurface.withValues(alpha: 0.3);
@@ -574,11 +670,9 @@ class _DownloadProgress extends StatelessWidget {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(
-              done ? 'Complete' : label,
-              style: TextStyle(
-                  fontSize: 11, color: cs.onSurface.withValues(alpha: 0.55)),
-            ),
+            Text(done ? 'Complete' : label,
+                style: TextStyle(
+                    fontSize: 11, color: cs.onSurface.withValues(alpha: 0.55))),
             Text(
               done ? '100%' : '${(progress * 100).toStringAsFixed(0)}%',
               style: TextStyle(
@@ -608,8 +702,7 @@ class _StepList extends StatelessWidget {
       children: states.map((s) {
         final Widget leading;
         if (s.done) {
-          leading =
-              Icon(Icons.check_rounded, size: 14, color: cs.primary);
+          leading = Icon(Icons.check_rounded, size: 14, color: cs.primary);
         } else if (s.active) {
           leading = SizedBox(
             width: 14,
@@ -653,8 +746,9 @@ class _StepList extends StatelessWidget {
 // ── Success / Error banners ───────────────────────────────────────────────────
 
 class _SuccessBanner extends StatelessWidget {
+  final String message;
   final ColorScheme cs;
-  const _SuccessBanner({required this.cs});
+  const _SuccessBanner({required this.message, required this.cs});
 
   @override
   Widget build(BuildContext context) {
@@ -663,22 +757,18 @@ class _SuccessBanner extends StatelessWidget {
       decoration: BoxDecoration(
         color: cs.primaryContainer.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(10),
-        border:
-            Border.all(color: cs.primary.withValues(alpha: 0.25)),
+        border: Border.all(color: cs.primary.withValues(alpha: 0.25)),
       ),
       child: Row(
         children: [
-          Icon(Icons.check_circle_outline_rounded,
-              size: 20, color: cs.primary),
+          Icon(Icons.check_circle_outline_rounded, size: 20, color: cs.primary),
           const SizedBox(width: 10),
           Expanded(
-            child: Text(
-              'Installation complete! Restart the terminal to use the SDK.',
-              style: TextStyle(
-                  fontSize: 12,
-                  color: cs.primary,
-                  fontWeight: FontWeight.w500),
-            ),
+            child: Text(message,
+                style: TextStyle(
+                    fontSize: 12,
+                    color: cs.primary,
+                    fontWeight: FontWeight.w500)),
           ),
         ],
       ),
@@ -706,10 +796,8 @@ class _ErrorBanner extends StatelessWidget {
           Icon(Icons.error_outline_rounded, size: 20, color: cs.error),
           const SizedBox(width: 10),
           Expanded(
-            child: Text(
-              message,
-              style: TextStyle(fontSize: 12, color: cs.error),
-            ),
+            child: Text(message,
+                style: TextStyle(fontSize: 12, color: cs.error)),
           ),
         ],
       ),
@@ -737,19 +825,15 @@ class _InfoRow extends StatelessWidget {
       children: [
         Icon(icon, size: 15, color: cs.onSurface.withValues(alpha: 0.45)),
         const SizedBox(width: 8),
-        Text(
-          label,
-          style: TextStyle(
-              fontSize: 12, color: cs.onSurface.withValues(alpha: 0.5)),
-        ),
+        Text(label,
+            style: TextStyle(
+                fontSize: 12, color: cs.onSurface.withValues(alpha: 0.5))),
         const SizedBox(width: 6),
-        Text(
-          value,
-          style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: cs.onSurface.withValues(alpha: 0.8)),
-        ),
+        Text(value,
+            style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: cs.onSurface.withValues(alpha: 0.8))),
       ],
     );
   }

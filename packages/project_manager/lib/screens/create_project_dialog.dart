@@ -90,7 +90,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
     );
 
     if (!mounted) return;
-    pm.openProject(project);
+    pm.openProject(project, isNew: true);
     Navigator.of(context).popUntil((route) => route.isFirst);
   }
 

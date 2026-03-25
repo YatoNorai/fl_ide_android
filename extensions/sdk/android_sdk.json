@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "sdk": "androidSdk",
+  "sdk_version": "latest",
+  "display_name": "Android SDK (termux-android-sdk)",
+  "description": "Android SDK for Termux by mumumusuc. Includes sdkmanager, platform-tools, build-tools and Gradle. Required for building native Android apps and Flutter APKs.",
+  "package": {
+    "type": "deb",
+    "url": "https://github.com/mumumusuc/termux-android-sdk/releases/latest/download/android-sdk_aarch64.deb",
+    "filename": "android-sdk_aarch64.deb",
+    "arch": "arm64",
+    "size_mb": 300
+  },
+  "package_author": {
+    "name": "mumumusuc",
+    "github": "https://github.com/mumumusuc/termux-android-sdk"
+  },
+  "json_author": {
+    "name": "Yato",
+    "date": "2026-03-25"
+  },
+  "install_steps": [
+    {
+      "type": "shell",
+      "command": "pkg update -y 2>&1 && pkg install -y openjdk-17 wget 2>&1",
+      "description": "Installing Java 17 and wget"
+    },
+    {
+      "type": "shell",
+      "command": "dpkg -i $DOWNLOAD_PATH 2>&1; apt-get install -f -y 2>&1",
+      "description": "Installing Android SDK .deb and resolving dependencies"
+    },
+    {
+      "type": "shell",
+      "command": "grep -qxF 'export ANDROID_HOME=\"$PREFIX/opt/android-sdk\"' $HOME/.bashrc || echo 'export ANDROID_HOME=\"$PREFIX/opt/android-sdk\"' >> $HOME/.bashrc",
+      "description": "Setting ANDROID_HOME"
+    },
+    {
+      "type": "shell",
+      "command": "grep -qxF 'export PATH=\"$PATH:$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdline-tools/latest/bin\"' $HOME/.bashrc || echo 'export PATH=\"$PATH:$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdline-tools/latest/bin\"' >> $HOME/.bashrc",
+      "description": "Adding Android tools to PATH"
+    }
+  ],
+  "config_steps": [
+    {
+      "type": "shell",
+      "command": "export ANDROID_HOME=\"$PREFIX/opt/android-sdk\" && export PATH=\"$PATH:$ANDROID_HOME/cmdline-tools/latest/bin\" && yes | sdkmanager --licenses 2>&1 || true",
+      "description": "Accepting all Android SDK licenses"
+    },
+    {
+      "type": "shell",
+      "command": "export ANDROID_HOME=\"$PREFIX/opt/android-sdk\" && export PATH=\"$PATH:$ANDROID_HOME/cmdline-tools/latest/bin\" && sdkmanager \"platform-tools\" \"platforms;android-34\" \"build-tools;34.0.0\" 2>&1 || true",
+      "description": "Installing platform-tools, Android 34 platform and build-tools"
+    },
+    {
+      "type": "shell",
+      "command": "sdkmanager --version 2>&1 || true",
+      "description": "Verifying sdkmanager"
+    }
+  ],
+  "cleanup_steps": [
+    {
+      "type": "shell",
+      "command": "dpkg --purge android-sdk 2>&1 || true",
+      "description": "Removing Android SDK .deb package"
+    }
+  ],
+  "uninstall_steps": [
+    {
+      "type": "shell",
+      "command": "dpkg --purge android-sdk 2>&1 || true",
+      "description": "Uninstalling Android SDK"
+    },
+    {
+      "type": "shell",
+      "command": "rm -rf \"$PREFIX/opt/android-sdk\" 2>&1 || true",
+      "description": "Removing Android SDK directory"
+    },
+    {
+      "type": "shell",
+      "command": "sed -i '/ANDROID_HOME/d' $HOME/.bashrc 2>&1 || true",
+      "description": "Cleaning ANDROID_HOME from .bashrc"
+    }
+  ],
+  "verify_binary": "sdkmanager",
+  "verify_command": "sdkmanager --version",
+  "run_config": {
+    "run": "./gradlew installDebug",
+    "supports_devices": true,
+    "device_param": "-Pandroid.deploy.adbOptions=-s",
+    "build_debug": "./gradlew assembleDebug",
+    "build_release": "./gradlew assembleRelease"
+  }
+}

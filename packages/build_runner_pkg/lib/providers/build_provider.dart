@@ -4,13 +4,78 @@ import 'dart:io';
 import 'package:core/core.dart';
 import 'package:flutter/foundation.dart';
 
+// ── Build platform ────────────────────────────────────────────────────────────
+
+enum BuildPlatform {
+  android,
+  web,
+  linux,
+  apk, // generic APK (non-Flutter Android)
+  script; // run a script / interpret
+
+  String get label {
+    switch (this) {
+      case BuildPlatform.android:
+        return 'Android';
+      case BuildPlatform.web:
+        return 'Web';
+      case BuildPlatform.linux:
+        return 'Linux';
+      case BuildPlatform.apk:
+        return 'Android APK';
+      case BuildPlatform.script:
+        return 'Run';
+    }
+  }
+
+  String get icon {
+    switch (this) {
+      case BuildPlatform.android:
+      case BuildPlatform.apk:
+        return '🤖';
+      case BuildPlatform.web:
+        return '🌐';
+      case BuildPlatform.linux:
+        return '🐧';
+      case BuildPlatform.script:
+        return '▶';
+    }
+  }
+}
+
+List<BuildPlatform> supportedPlatforms(SdkType sdk) {
+  switch (sdk) {
+    case SdkType.flutter:
+      return [BuildPlatform.android, BuildPlatform.web, BuildPlatform.linux];
+    case SdkType.androidSdk:
+      return [BuildPlatform.apk];
+    case SdkType.reactNative:
+      return [BuildPlatform.android];
+    case SdkType.nodejs:
+    case SdkType.python:
+    case SdkType.swift:
+      return [BuildPlatform.script];
+  }
+}
+
+// ── BuildProvider ─────────────────────────────────────────────────────────────
+
 class BuildProvider extends ChangeNotifier {
   BuildResult _result = const BuildResult();
   Process? _buildProcess;
+  BuildPlatform? _selectedPlatform;
 
   BuildResult get result => _result;
   bool get isBuilding => _result.isRunning;
   String? get apkPath => _result.apkPath;
+
+  BuildPlatform selectedPlatform(SdkType sdk) =>
+      _selectedPlatform ?? supportedPlatforms(sdk).first;
+
+  void selectPlatform(BuildPlatform p) {
+    _selectedPlatform = p;
+    notifyListeners();
+  }
 
   Future<void> build(Project project) async {
     if (_result.isRunning) return;
@@ -20,7 +85,8 @@ class BuildProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final cmd = _buildCommand(project.sdk);
+      final platform = selectedPlatform(project.sdk);
+      final cmd = _buildCommand(project.sdk, platform);
       final parts = cmd.split(' ');
 
       _buildProcess = await Process.start(
@@ -88,10 +154,17 @@ class BuildProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  String _buildCommand(SdkType sdk) {
+  String _buildCommand(SdkType sdk, BuildPlatform platform) {
     switch (sdk) {
       case SdkType.flutter:
-        return 'flutter build apk --debug';
+        switch (platform) {
+          case BuildPlatform.web:
+            return 'flutter build web';
+          case BuildPlatform.linux:
+            return 'flutter build linux';
+          default:
+            return 'flutter build apk --debug';
+        }
       case SdkType.androidSdk:
         return './gradlew assembleDebug';
       case SdkType.reactNative:
@@ -100,6 +173,8 @@ class BuildProvider extends ChangeNotifier {
         return 'npm run build';
       case SdkType.python:
         return 'python3 main.py';
+      case SdkType.swift:
+        return 'swift build';
     }
   }
 

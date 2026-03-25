@@ -3,7 +3,8 @@ enum SdkType {
   androidSdk,
   reactNative,
   nodejs,
-  python;
+  python,
+  swift;
 
   String get displayName {
     switch (this) {
@@ -17,6 +18,8 @@ enum SdkType {
         return 'Node.js';
       case SdkType.python:
         return 'Python';
+      case SdkType.swift:
+        return 'Swift';
     }
   }
 
@@ -32,6 +35,8 @@ enum SdkType {
         return '🟩';
       case SdkType.python:
         return '🐍';
+      case SdkType.swift:
+        return '🦅';
     }
   }
 
@@ -47,6 +52,8 @@ enum SdkType {
         return 'JavaScript/TypeScript runtime';
       case SdkType.python:
         return 'Python 3 scripting and apps';
+      case SdkType.swift:
+        return 'Swift scripting and server-side apps';
     }
   }
 }

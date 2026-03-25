@@ -353,6 +353,9 @@ class ExtensionsProvider extends ChangeNotifier {
     );
   }
 
+  /// Call after SDK install/uninstall to refresh isInstalled state in the UI.
+  void refreshSdkStates() => notifyListeners();
+
   // ── Helpers ──────────────────────────────────────────────────────────────
   static Future<Directory> _themesDir() async {
     final base = await getApplicationDocumentsDirectory();

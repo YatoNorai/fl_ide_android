@@ -10,9 +10,12 @@ import '../project_template.dart';
 class ProjectManagerProvider extends ChangeNotifier {
   final List<Project> _projects = [];
   Project? _activeProject;
+  bool _activeProjectIsNew = false;
 
   List<Project> get projects => List.unmodifiable(_projects);
   Project? get activeProject => _activeProject;
+  /// True if the active project was just created (not loaded from history).
+  bool get activeProjectIsNew => _activeProjectIsNew;
 
   Future<void> initialize() async {
     await _loadProjects();
@@ -45,7 +48,7 @@ class ProjectManagerProvider extends ChangeNotifier {
     return project;
   }
 
-  void openProject(Project project) {
+  void openProject(Project project, {bool isNew = false}) {
     final updated = project.copyWith(lastOpenedAt: DateTime.now());
     final idx = _projects.indexWhere((p) => p.id == project.id);
     if (idx != -1) {
@@ -53,6 +56,7 @@ class ProjectManagerProvider extends ChangeNotifier {
       _saveProjects();
     }
     _activeProject = updated;
+    _activeProjectIsNew = isNew;
     notifyListeners();
   }
 

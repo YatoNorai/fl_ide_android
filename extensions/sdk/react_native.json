@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "sdk": "reactNative",
+  "sdk_version": "latest",
+  "display_name": "React Native (Node.js LTS)",
+  "description": "React Native via Node.js LTS from the official Termux repository. Supports ARM64. Includes npm and the React Native CLI.",
+  "package": {
+    "type": "pkg",
+    "url": "",
+    "filename": "",
+    "arch": "arm64",
+    "size_mb": 80
+  },
+  "package_author": {
+    "name": "Termux / Meta",
+    "github": "https://github.com/termux/termux-packages"
+  },
+  "json_author": {
+    "name": "Yato",
+    "date": "2026-03-25"
+  },
+  "install_steps": [
+    {
+      "type": "shell",
+      "command": "pkg update -y 2>&1",
+      "description": "Updating package lists"
+    },
+    {
+      "type": "shell",
+      "command": "pkg install -y nodejs-lts 2>&1",
+      "description": "Installing Node.js LTS"
+    },
+    {
+      "type": "shell",
+      "command": "npm install -g react-native@latest 2>&1",
+      "description": "Installing React Native CLI globally"
+    }
+  ],
+  "config_steps": [
+    {
+      "type": "shell",
+      "command": "node --version 2>&1 && npm --version 2>&1",
+      "description": "Verifying Node.js and npm versions"
+    },
+    {
+      "type": "shell",
+      "command": "npx react-native --version 2>&1 || true",
+      "description": "Verifying React Native CLI"
+    }
+  ],
+  "uninstall_steps": [
+    {
+      "type": "shell",
+      "command": "npm uninstall -g react-native 2>&1 || true",
+      "description": "Removing React Native CLI"
+    },
+    {
+      "type": "shell",
+      "command": "pkg uninstall -y nodejs-lts 2>&1 || true",
+      "description": "Removing Node.js LTS"
+    }
+  ],
+  "verify_binary": "node",
+  "verify_command": "node --version",
+  "run_config": {
+    "run": "npx react-native run-android",
+    "supports_devices": true,
+    "device_param": "--deviceId",
+    "build_debug": "npx react-native build-android --mode=debug",
+    "build_release": "npx react-native build-android --mode=release"
+  }
+}

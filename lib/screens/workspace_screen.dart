@@ -13,6 +13,7 @@ import 'package:quill_code/quill_code.dart'
 import 'package:sdk_manager/sdk_manager.dart';
 import 'package:terminal_pkg/terminal_pkg.dart';
 
+import '../l10n/app_strings.dart';
 import '../providers/extensions_provider.dart';
 import '../providers/settings_provider.dart';
 import 'settings_screen.dart' show SettingsScreen;
@@ -26,9 +27,17 @@ const _kSpecialChars = [
   '#', '@', r'$', '%', '^', '~', '?', '\t',
 ];
 
+// Init phases shown in the peek bar
+enum _InitPhase { creatingProject, loadingProject, startingLsp, ready }
+
 class WorkspaceScreen extends StatefulWidget {
   final Project project;
-  const WorkspaceScreen({super.key, required this.project});
+  final bool isNewProject;
+  const WorkspaceScreen({
+    super.key,
+    required this.project,
+    this.isNewProject = false,
+  });
 
   @override
   State<WorkspaceScreen> createState() => _WorkspaceScreenState();
@@ -40,6 +49,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   late final Animation<double> _drawerAnim;
   late final TabController _bottomTabCtrl;
   final _sheetKey = GlobalKey<_BottomSheetPanelState>();
+  _InitPhase _initPhase = _InitPhase.loadingProject;
 
   @override
   void initState() {
@@ -63,6 +73,14 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
+
+      // Phase 1: creating / loading project
+      if (widget.isNewProject) {
+        setState(() => _initPhase = _InitPhase.creatingProject);
+      } else {
+        setState(() => _initPhase = _InitPhase.loadingProject);
+      }
+
       final editor = context.read<EditorProvider>();
       await editor.loadProject(widget.project.path);
       if (!mounted) return;
@@ -72,17 +90,27 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
       await editor.openFile(entryFile);
       if (!mounted) return;
 
+      // Phase 2: starting LSP
+      setState(() => _initPhase = _InitPhase.startingLsp);
       final settings = context.read<SettingsProvider>();
       await context.read<LspProvider>().startForExtension(
             def.defaultEntryFile.split('.').last,
             widget.project.path,
             customPaths: settings.lspPaths,
           );
+      if (!mounted) return;
+      setState(() => _initPhase = _InitPhase.ready);
 
-      await context.read<TerminalProvider>().createSession(
+      // Phase 3: create terminal and cd to project directory
+      final session = await context.read<TerminalProvider>().createSession(
             label: widget.project.name,
             workingDirectory: widget.project.path,
           );
+      // Explicit cd ensures correct directory even if shell sources .bashrc
+      await Future.delayed(const Duration(milliseconds: 400));
+      if (mounted) {
+        session.writeCommand('cd "${widget.project.path}"');
+      }
     });
   }
 
@@ -143,6 +171,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                             bottomTabCtrl: _bottomTabCtrl,
                             sheetKey: _sheetKey,
                             keyboardVisible: keyboardVisible,
+                            initPhase: _initPhase,
                           ),
                         ),
                       ],
@@ -618,12 +647,14 @@ class _MainContent extends StatelessWidget {
   final TabController bottomTabCtrl;
   final GlobalKey<_BottomSheetPanelState> sheetKey;
   final bool keyboardVisible;
+  final _InitPhase initPhase;
 
   const _MainContent({
     required this.project,
     required this.bottomTabCtrl,
     required this.sheetKey,
     required this.keyboardVisible,
+    required this.initPhase,
   });
 
   @override
@@ -652,6 +683,7 @@ class _MainContent extends StatelessWidget {
               project: project,
               tabCtrl: bottomTabCtrl,
               keyboardVisible: keyboardVisible,
+              initPhase: initPhase,
             ),
           ),
         ],
@@ -842,6 +874,7 @@ class _BottomSheetPanel extends StatefulWidget {
   final Project project;
   final TabController tabCtrl;
   final bool keyboardVisible;
+  final _InitPhase initPhase;
 
   const _BottomSheetPanel({
     super.key,
@@ -849,6 +882,7 @@ class _BottomSheetPanel extends StatefulWidget {
     required this.project,
     required this.tabCtrl,
     required this.keyboardVisible,
+    required this.initPhase,
   });
 
   @override
@@ -992,7 +1026,7 @@ class _BottomSheetPanelState extends State<_BottomSheetPanel>
                                 width: double.infinity,
                                 child: Transform.translate(
                                   offset: Offset(0, _kPeekBarH * p3),
-                                  child: const _PeekBar(),
+                                  child: _PeekBar(initPhase: widget.initPhase),
                                 ),
                               ),
                             );
@@ -1066,20 +1100,38 @@ class _BottomSheetPanelState extends State<_BottomSheetPanel>
 // ── Peek bar shown at the collapsed (60 dp) stage ────────────────────────────
 
 class _PeekBar extends StatelessWidget {
-  const _PeekBar();
+  final _InitPhase initPhase;
+  const _PeekBar({required this.initPhase});
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final lsp = context.watch<LspProvider>();
-    final isStarting = lsp.status == LspStatus.starting;
+    final s = AppStrings.of(context);
+
+    final String label;
+    final bool showProgress;
+    switch (initPhase) {
+      case _InitPhase.creatingProject:
+        label = s.peekCreatingProject;
+        showProgress = false;
+      case _InitPhase.loadingProject:
+        label = s.peekLoadingProject;
+        showProgress = false;
+      case _InitPhase.startingLsp:
+        label = s.peekStartingLsp;
+        showProgress = true;
+      case _InitPhase.ready:
+        label = s.peekReady;
+        showProgress = false;
+    }
+
     return SizedBox(
       height: _BottomSheetPanelState._kPeekBarH,
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Text(
-            isStarting ? 'Inicializando projeto...' : 'Projeto inicializado',
+            label,
             textAlign: TextAlign.center,
             style: TextStyle(
               color: cs.onSurface,
@@ -1087,12 +1139,24 @@ class _PeekBar extends StatelessWidget {
               fontWeight: FontWeight.w600,
             ),
           ),
-          const SizedBox(height: 3),
-          Text(
-            'Deslize para cima para ter acesso ao terminal',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: cs.onSurfaceVariant, fontSize: 10),
-          ),
+          if (showProgress) ...[
+            const SizedBox(height: 6),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 40),
+              child: LinearProgressIndicator(
+                minHeight: 2,
+                backgroundColor: cs.outlineVariant,
+                color: cs.primary,
+              ),
+            ),
+          ] else ...[
+            const SizedBox(height: 3),
+            Text(
+              s.peekSwipeUp,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: cs.onSurfaceVariant, fontSize: 10),
+            ),
+          ],
         ],
       ),
     );

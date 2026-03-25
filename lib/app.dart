@@ -55,47 +55,49 @@ class FlIdeApp extends StatelessWidget {
           ];
           final locale = settings.languageLocale;
 
-          if (activeEditorTheme != null && activeMeta != null) {
-            final extTheme = _buildThemeFromEditorTheme(
-                activeEditorTheme, activeMeta.dark);
-            return MaterialApp(
-              title: 'FL IDE',
-              debugShowCheckedModeBanner: false,
-              themeMode: activeMeta.dark ? ThemeMode.dark : ThemeMode.light,
-              theme: extTheme,
-              darkTheme: extTheme,
-              locale: locale,
-              localizationsDelegates: _locDelegates,
-              supportedLocales: _supportedLocales,
-              builder: _systemBarsBuilder,
-              home: const _AppShell(),
-            );
-          }
-
+          // Always use a single DynamicColorBuilder → single MaterialApp so the
+          // Navigator stack is preserved when the active extension theme changes.
           return DynamicColorBuilder(
             builder: (ColorScheme? lightDynamic, ColorScheme? darkDynamic) {
-              final lightScheme = settings.useDynamicColors && lightDynamic != null
-                  ? lightDynamic.harmonized()
-                  : ColorScheme.fromSeed(
-                      seedColor: Colors.blue,
-                      brightness: Brightness.light,
-                    );
-              final darkScheme = settings.useDynamicColors && darkDynamic != null
-                  ? darkDynamic.harmonized()
-                  : ColorScheme.fromSeed(
-                      seedColor: Colors.blueGrey,
-                      brightness: Brightness.dark,
-                    );
-              final themeMode = settings.followSystemTheme
-                  ? ThemeMode.system
-                  : (settings.useDarkMode ? ThemeMode.dark : ThemeMode.light);
+              final ThemeData lightTheme, darkTheme;
+              final ThemeMode themeMode;
+
+              if (activeEditorTheme != null && activeMeta != null) {
+                final extTheme = _buildThemeFromEditorTheme(
+                    activeEditorTheme, activeMeta.dark);
+                lightTheme = extTheme;
+                darkTheme = extTheme;
+                themeMode =
+                    activeMeta.dark ? ThemeMode.dark : ThemeMode.light;
+              } else {
+                final lightScheme =
+                    settings.useDynamicColors && lightDynamic != null
+                        ? lightDynamic.harmonized()
+                        : ColorScheme.fromSeed(
+                            seedColor: Colors.blue,
+                            brightness: Brightness.light,
+                          );
+                final darkScheme =
+                    settings.useDynamicColors && darkDynamic != null
+                        ? darkDynamic.harmonized()
+                        : ColorScheme.fromSeed(
+                            seedColor: Colors.blueGrey,
+                            brightness: Brightness.dark,
+                          );
+                lightTheme = _buildLightTheme(lightScheme);
+                darkTheme =
+                    _buildDarkTheme(darkScheme, amoled: settings.useAmoled);
+                themeMode = settings.followSystemTheme
+                    ? ThemeMode.system
+                    : (settings.useDarkMode ? ThemeMode.dark : ThemeMode.light);
+              }
 
               return MaterialApp(
                 title: 'FL IDE',
                 debugShowCheckedModeBanner: false,
                 themeMode: themeMode,
-                theme: _buildLightTheme(lightScheme),
-                darkTheme: _buildDarkTheme(darkScheme, amoled: settings.useAmoled),
+                theme: lightTheme,
+                darkTheme: darkTheme,
                 locale: locale,
                 localizationsDelegates: _locDelegates,
                 supportedLocales: _supportedLocales,
@@ -294,7 +296,10 @@ class _AppShell extends StatelessWidget {
                         value: context.read<ExtensionsProvider>(),
                       ),
                     ],
-                    child: WorkspaceScreen(project: activeProject),
+                    child: WorkspaceScreen(
+                      project: activeProject,
+                      isNewProject: pm.activeProjectIsNew,
+                    ),
                   );
                 }
 
