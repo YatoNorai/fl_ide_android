@@ -6,7 +6,7 @@
   "description": "Android SDK for Termux by mumumusuc. Includes sdkmanager, platform-tools, build-tools and Gradle. Required for building native Android apps and Flutter APKs.",
   "package": {
     "type": "deb",
-    "url": "https://github.com/mumumusuc/termux-android-sdk/releases/latest/download/android-sdk_aarch64.deb",
+    "url": "https://github.com/mumumusuc/termux-android-sdk/releases/download/35.0.0/android-sdk_35.0.0_aarch64.deb",
     "filename": "android-sdk_aarch64.deb",
     "arch": "arm64",
     "size_mb": 300
