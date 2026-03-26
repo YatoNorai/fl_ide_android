@@ -17,7 +17,7 @@
   },
   "json_author": {
     "name": "Yato",
-    "date": "2026-03-25"
+    "date": "2026-03-26"
   },
   "install_steps": [
     {
@@ -27,35 +27,40 @@
     },
     {
       "type": "shell",
-      "command": "dpkg -i $DOWNLOAD_PATH 2>&1; apt-get install -f -y 2>&1",
-      "description": "Installing Android SDK .deb and resolving dependencies"
+      "command": "dpkg -i $DOWNLOAD_PATH 2>&1; apt-get install -f -y 2>&1; dpkg -l android-sdk 2>&1 | grep -q '^ii' || (echo 'ERROR: android-sdk package not installed' && exit 1)",
+      "description": "Installing Android SDK .deb"
     },
     {
       "type": "shell",
-      "command": "grep -qxF 'export ANDROID_HOME=\"$PREFIX/opt/android-sdk\"' $HOME/.bashrc || echo 'export ANDROID_HOME=\"$PREFIX/opt/android-sdk\"' >> $HOME/.bashrc",
-      "description": "Setting ANDROID_HOME"
+      "command": "grep -qxF 'export ANDROID_HOME=\"$PREFIX/opt/android-sdk\"' $HOME/.bashrc || echo 'export ANDROID_HOME=\"$PREFIX/opt/android-sdk\"' >> $HOME/.bashrc && grep -qxF 'export PATH=\"$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools\"' $HOME/.bashrc || echo 'export PATH=\"$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools\"' >> $HOME/.bashrc",
+      "description": "Adding Android SDK to .bashrc"
     },
     {
       "type": "shell",
-      "command": "grep -qxF 'export PATH=\"$PATH:$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdline-tools/latest/bin\"' $HOME/.bashrc || echo 'export PATH=\"$PATH:$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdline-tools/latest/bin\"' >> $HOME/.bashrc",
-      "description": "Adding Android tools to PATH"
+      "command": "SDKMANAGER=\"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager\" && test -f \"$SDKMANAGER\" || (echo \"ERROR: sdkmanager not found at $SDKMANAGER\" && exit 1) && ln -sf \"$SDKMANAGER\" \"$PREFIX/bin/sdkmanager\" && echo 'sdkmanager symlink created'",
+      "description": "Symlinking sdkmanager to PATH"
     }
   ],
   "config_steps": [
     {
       "type": "shell",
-      "command": "export ANDROID_HOME=\"$PREFIX/opt/android-sdk\" && export PATH=\"$PATH:$ANDROID_HOME/cmdline-tools/latest/bin\" && yes | sdkmanager --licenses 2>&1 || true",
-      "description": "Accepting all Android SDK licenses"
+      "command": "yes | sdkmanager --licenses 2>&1 || true",
+      "description": "Accepting Android SDK licenses"
     },
     {
       "type": "shell",
-      "command": "export ANDROID_HOME=\"$PREFIX/opt/android-sdk\" && export PATH=\"$PATH:$ANDROID_HOME/cmdline-tools/latest/bin\" && sdkmanager \"platform-tools\" \"platforms;android-34\" \"build-tools;34.0.0\" 2>&1 || true",
-      "description": "Installing platform-tools, Android 34 platform and build-tools"
+      "command": "sdkmanager \"platform-tools\" \"platforms;android-34\" \"build-tools;34.0.0\" 2>&1",
+      "description": "Installing platform-tools, Android 34 and build-tools"
     },
     {
       "type": "shell",
-      "command": "sdkmanager --version 2>&1 || true",
-      "description": "Verifying sdkmanager"
+      "command": "ADB=\"$ANDROID_HOME/platform-tools/adb\" && test -f \"$ADB\" || (echo \"ERROR: adb not found — platform-tools install may have failed\" && exit 1) && ln -sf \"$ADB\" \"$PREFIX/bin/adb\" && echo 'adb symlink created'",
+      "description": "Symlinking adb to PATH"
+    },
+    {
+      "type": "shell",
+      "command": "adb version 2>&1",
+      "description": "Verifying adb (platform-tools)"
     }
   ],
   "cleanup_steps": [
@@ -68,27 +73,41 @@
   "uninstall_steps": [
     {
       "type": "shell",
+      "command": "rm -f \"$PREFIX/bin/sdkmanager\" \"$PREFIX/bin/adb\" 2>&1 || true",
+      "description": "Removing sdkmanager and adb symlinks"
+    },
+    {
+      "type": "shell",
       "command": "dpkg --purge android-sdk 2>&1 || true",
       "description": "Uninstalling Android SDK"
     },
     {
       "type": "shell",
-      "command": "rm -rf \"$PREFIX/opt/android-sdk\" 2>&1 || true",
+      "command": "rm -rf \"$ANDROID_HOME\" 2>&1 || true",
       "description": "Removing Android SDK directory"
     },
     {
       "type": "shell",
-      "command": "sed -i '/ANDROID_HOME/d' $HOME/.bashrc 2>&1 || true",
-      "description": "Cleaning ANDROID_HOME from .bashrc"
+      "command": "sed -i '/ANDROID_HOME/d; /cmdline-tools/d' $HOME/.bashrc 2>&1 || true",
+      "description": "Cleaning .bashrc"
     }
   ],
-  "verify_binary": "sdkmanager",
-  "verify_command": "sdkmanager --version",
+  "verify_binary": "adb",
+  "verify_command": "adb version",
   "run_config": {
     "run": "./gradlew installDebug",
     "supports_devices": true,
     "device_param": "-Pandroid.deploy.adbOptions=-s",
     "build_debug": "./gradlew assembleDebug",
     "build_release": "./gradlew assembleRelease"
-  }
+  },
+  "sdk_config": {
+    "new_project_cmd": "mkdir -p $name",
+    "default_entry_file": "app/src/main/java/MainActivity.kt",
+    "file_extensions": ["java", "kotlin", "kt", "xml", "gradle"],
+    "sync_command": "",
+    "sync_trigger_file": "",
+    "format_command": ""
+  },
+  "dap_config": {}
 }

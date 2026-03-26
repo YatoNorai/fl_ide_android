@@ -15,6 +15,7 @@ workspace:
   - packages/code_editor
   - packages/build_runner_pkg
   - packages/lsp_client
+  - packages/dap_client
   - packages/app_installer
 
 
@@ -39,6 +40,8 @@ dependencies:
     path: packages/build_runner_pkg
   lsp_client:
     path: packages/lsp_client
+  dap_client:
+    path: packages/dap_client
   app_installer:
     path: packages/app_installer
 
@@ -59,9 +62,12 @@ dependencies:
       ref: rust-impl
   url_launcher: ^6.3.2
   permission_handler: ^11.3.1
+  flutter_inappwebview: ^6.1.5
   flutter_localizations:
     sdk: flutter
   intl: ^0.20.0
+  device_preview: ^1.3.1
+  flutter_foreground_task: ^8.11.0
 
 dev_dependencies:
   flutter_test:

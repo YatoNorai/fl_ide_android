@@ -1,4 +1,5 @@
 import 'package:core/core.dart';
+import 'package:dap_client/dap_client.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lsp_client/lsp_client.dart';
@@ -18,6 +19,12 @@ class EditorArea extends StatelessWidget {
   final double? fontSize;
   /// Font family override applied to [editorTheme].
   final String? fontFamily;
+  /// Whether to show the [EditorTabBar] at the top.
+  /// Set to false when the caller provides its own tab bar (e.g. bottom panel).
+  final bool showTabBar;
+  /// When true this area only renders files whose [OpenFile.inBottomPanel] is
+  /// true; when false (default) it only renders top-panel files.
+  final bool forBottomPanel;
 
   const EditorArea({
     super.key,
@@ -26,27 +33,34 @@ class EditorArea extends StatelessWidget {
     this.showSymbolBar = true,
     this.fontSize,
     this.fontFamily,
+    this.showTabBar = true,
+    this.forBottomPanel = false,
   });
 
   @override
   Widget build(BuildContext context) {
     return Consumer<EditorProvider>(
       builder: (context, editor, _) {
+        final active = editor.activeFile;
+        final showEditor = active != null &&
+            (forBottomPanel ? active.inBottomPanel : !active.inBottomPanel);
         return Column(
           children: [
-            const EditorTabBar(),
-            const Divider(height: 1, thickness: 1),
+            if (showTabBar) ...[
+              const EditorTabBar(),
+              const Divider(height: 1, thickness: 1),
+            ],
             Expanded(
-              child: editor.activeFile == null
-                  ? const _WelcomePane()
-                  : _ActiveEditor(
-                      file: editor.activeFile!,
+              child: showEditor
+                  ? _ActiveEditor(
+                      file: active,
                       editorTheme: editorTheme,
                       configureProps: configureProps,
                       showSymbolBar: showSymbolBar,
                       fontSize: fontSize,
                       fontFamily: fontFamily,
-                    ),
+                    )
+                  : const _WelcomePane(),
             ),
           ],
         );
@@ -56,7 +70,7 @@ class EditorArea extends StatelessWidget {
 }
 
 
-class _ActiveEditor extends StatelessWidget {
+class _ActiveEditor extends StatefulWidget {
   final OpenFile file;
   final EditorTheme? editorTheme;
   final void Function(EditorProps props)? configureProps;
@@ -74,26 +88,137 @@ class _ActiveEditor extends StatelessWidget {
   });
 
   @override
+  State<_ActiveEditor> createState() => _ActiveEditorState();
+}
+
+class _ActiveEditorState extends State<_ActiveEditor> {
+  Set<int> _lastKnownBreakpoints = {};
+  DebugProvider? _debugProvider;
+  // Guard: prevents _onControllerChanged from reacting to setLineStyles calls,
+  // which also notify listeners but don't change breakpoints.
+  bool _applyingLineStyles = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.file.controller?.addListener(_onControllerChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _syncBreakpointsIn();
+      _applyDebugLine();
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Subscribe directly to DebugProvider so we can call setLineStyles
+    // outside of build() — calling it inside build causes setState-during-build.
+    final newDbg = Provider.of<DebugProvider>(context, listen: false);
+    if (newDbg != _debugProvider) {
+      _debugProvider?.removeListener(_applyDebugLine);
+      _debugProvider = newDbg;
+      _debugProvider!.addListener(_applyDebugLine);
+    }
+  }
+
+  @override
+  void didUpdateWidget(_ActiveEditor old) {
+    super.didUpdateWidget(old);
+    if (old.file.path != widget.file.path) {
+      old.file.controller?.removeListener(_onControllerChanged);
+      widget.file.controller?.addListener(_onControllerChanged);
+      _syncBreakpointsIn();
+      _applyDebugLine();
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.file.controller?.removeListener(_onControllerChanged);
+    _debugProvider?.removeListener(_applyDebugLine);
+    super.dispose();
+  }
+
+  /// Apply or clear the current-line highlight based on debug state.
+  /// Called from the DebugProvider listener — never from build().
+  void _applyDebugLine() {
+    if (!mounted) return;
+    final ctrl = widget.file.controller;
+    if (ctrl == null) return;
+    final dbg = _debugProvider;
+    if (dbg == null) return;
+    final stoppedHere = dbg.isPaused &&
+        dbg.stoppedFile == widget.file.path &&
+        dbg.stoppedLine != null;
+    // Guard against the re-entrant loop before calling setLineStyles.
+    _applyingLineStyles = true;
+    if (stoppedHere) {
+      ctrl.setLineStyles({
+        dbg.stoppedLine!: LineStyle(
+          lineBackground: Colors.orange.withValues(alpha: 0.25),
+          gutterMarkerColor: Colors.orange,
+          gutterMarkerWidth: 4,
+        ),
+      });
+    } else {
+      ctrl.setLineStyles({});
+    }
+    _applyingLineStyles = false;
+  }
+
+  /// Sync breakpoints from DebugProvider → editor controller.
+  void _syncBreakpointsIn() {
+    final ctrl = widget.file.controller;
+    if (ctrl == null) return;
+    final dbg = context.read<DebugProvider>();
+    final lines = dbg.breakpointsForFile(widget.file.path).toSet();
+    _lastKnownBreakpoints = Set.from(ctrl.breakpoints);
+    // Remove obsolete, add missing
+    for (final l in _lastKnownBreakpoints.difference(lines)) {
+      if (ctrl.hasBreakpoint(l)) ctrl.toggleBreakpoint(l);
+    }
+    for (final l in lines.difference(_lastKnownBreakpoints)) {
+      if (!ctrl.hasBreakpoint(l)) ctrl.toggleBreakpoint(l);
+    }
+    _lastKnownBreakpoints = Set.from(ctrl.breakpoints);
+  }
+
+  /// Called on any controller change — detect breakpoint changes and sync
+  /// them back to DebugProvider.
+  void _onControllerChanged() {
+    // Ignore notifications triggered by our own setLineStyles call to avoid
+    // an infinite loop: setLineStyles → notifyListeners → _onControllerChanged
+    // → setBreakpointsForFile → notifyListeners → _applyDebugLine → setLineStyles…
+    if (_applyingLineStyles) return;
+    final ctrl = widget.file.controller;
+    if (ctrl == null) return;
+    final current = Set<int>.from(ctrl.breakpoints);
+    // Use explicit content comparison — Set == Set uses identity in Dart.
+    if (current.length == _lastKnownBreakpoints.length &&
+        current.containsAll(_lastKnownBreakpoints)) return;
+    _lastKnownBreakpoints = current;
+    context.read<DebugProvider>().setBreakpointsForFile(widget.file.path, current);
+  }
+
+  @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    if (file.controller == null) {
-      return Center(
-        child: CircularProgressIndicator(color: cs.primary),
-      );
+    if (widget.file.controller == null) {
+      return Center(child: CircularProgressIndicator(color: cs.primary));
     }
 
-    // Apply caller-supplied props (e.g. from SettingsProvider)
-    if (configureProps != null) {
-      configureProps!(file.controller!.props);
+    final ctrl = widget.file.controller!;
+
+    if (widget.configureProps != null) {
+      widget.configureProps!(ctrl.props);
     }
 
-    // Apply font size and font family overrides to theme
-    final effectiveTheme = (fontSize != null || fontFamily != null)
-        ? (editorTheme ?? QuillThemeDark.build()).copyWith(
-            fontSize: fontSize,
-            fontFamily: fontFamily,
+    final effectiveTheme = (widget.fontSize != null || widget.fontFamily != null)
+        ? (widget.editorTheme ?? QuillThemeDark.build()).copyWith(
+            fontSize: widget.fontSize,
+            fontFamily: widget.fontFamily,
           )
-        : editorTheme;
+        : widget.editorTheme;
 
     final lspProvider = context.watch<LspProvider>();
 
@@ -109,20 +234,19 @@ class _ActiveEditor extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(bottom: 60),
               child: QuillCodeEditor(
-                controller: file.controller!,
-                onChanged: (_) =>
-                    context.read<EditorProvider>().markDirty(),
+                controller: ctrl,
+                onChanged: (_) => context.read<EditorProvider>().markDirty(),
                 lspConfig: lspProvider.lspConfig,
-                fileUri: Uri.file(file.path).toString(),
+                fileUri: Uri.file(widget.file.path).toString(),
                 theme: effectiveTheme,
-                showSymbolBar: showSymbolBar,
+                showSymbolBar: widget.showSymbolBar,
               ),
             ),
             Positioned(
               bottom: 0,
               left: 0,
               right: 0,
-              child: _DiagnosticsBar(controller: file.controller!),
+              child: _DiagnosticsBar(controller: ctrl),
             ),
           ],
         ),

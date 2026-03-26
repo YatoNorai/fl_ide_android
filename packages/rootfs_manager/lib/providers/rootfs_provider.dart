@@ -267,7 +267,7 @@ export PATH="\$FLUTTER_ROOT/bin:\$PATH"
 
 # Android SDK
 export ANDROID_HOME="${RuntimeEnvir.androidSdkPath}"
-export PATH="\$ANDROID_HOME/tools/bin:\$ANDROID_HOME/platform-tools:\$PATH"
+export PATH="\$ANDROID_HOME/cmdline-tools/latest/bin:\$ANDROID_HOME/platform-tools:\$PATH"
 
 ''');
     }

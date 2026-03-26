@@ -81,7 +81,10 @@ class SettingsProvider extends ChangeNotifier {
 
   // ── Run & Debug ───────────────────────────────────────────────────────────
   static const _kLspPaths = 'rd_lspPaths';
+  static const _kDebugPlatforms = 'rd_debugPlatforms';
   Map<String, String> _lspPaths = {};
+  /// sdkTypeName → buildPlatformName (e.g. 'flutter' → 'android')
+  Map<String, String> _debugPlatforms = {};
 
   // ── Language ──────────────────────────────────────────────────────────────
   static const _kLanguage = 'language';
@@ -131,6 +134,8 @@ class SettingsProvider extends ChangeNotifier {
   // ── Getters: Run & Debug ──────────────────────────────────────────────────
   Map<String, String> get lspPaths => Map.unmodifiable(_lspPaths);
   String lspPathFor(String ext) => _lspPaths[ext.toLowerCase()] ?? '';
+  /// Returns the saved debug platform name for a given SDK type name, or null.
+  String? debugPlatformFor(String sdkTypeName) => _debugPlatforms[sdkTypeName];
 
   // ── Getters: Language ─────────────────────────────────────────────────────
   /// Empty string = device locale. Otherwise a language code like 'en', 'pt'.
@@ -186,6 +191,14 @@ class SettingsProvider extends ChangeNotifier {
       try {
         final m = jsonDecode(lspJson) as Map<String, dynamic>;
         _lspPaths = m.map((k, v) => MapEntry(k, v as String));
+      } catch (_) {}
+    }
+
+    final dpJson = p.getString(_kDebugPlatforms);
+    if (dpJson != null) {
+      try {
+        final m = jsonDecode(dpJson) as Map<String, dynamic>;
+        _debugPlatforms = m.map((k, v) => MapEntry(k, v as String));
       } catch (_) {}
     }
 
@@ -423,6 +436,13 @@ class SettingsProvider extends ChangeNotifier {
   }
 
   // ── Run & Debug setters ───────────────────────────────────────────────────
+  Future<void> setDebugPlatform(String sdkTypeName, String platformName) async {
+    _debugPlatforms[sdkTypeName] = platformName;
+    final p = await SharedPreferences.getInstance();
+    await p.setString(_kDebugPlatforms, jsonEncode(_debugPlatforms));
+    notifyListeners();
+  }
+
   Future<void> setLspPath(String ext, String path) async {
     if (path.trim().isEmpty) {
       _lspPaths.remove(ext.toLowerCase());

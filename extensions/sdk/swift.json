@@ -52,5 +52,14 @@
     "supports_devices": false,
     "build_debug": "swift build",
     "build_release": "swift build -c release"
-  }
+  },
+  "sdk_config": {
+    "new_project_cmd": "mkdir -p $name && cd $name && swift package init --type executable",
+    "default_entry_file": "Sources/main.swift",
+    "file_extensions": ["swift", "json", "md"],
+    "sync_command": "",
+    "sync_trigger_file": "",
+    "format_command": ""
+  },
+  "dap_config": {}
 }

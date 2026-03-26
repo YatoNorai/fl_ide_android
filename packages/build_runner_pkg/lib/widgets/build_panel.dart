@@ -1,4 +1,5 @@
 import 'package:core/core.dart';
+import 'package:dap_client/dap_client.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -126,6 +127,9 @@ class _BuildToolbar extends StatelessWidget {
               onPressed: () =>
                   context.read<BuildProvider>().build(project),
             ),
+          const SizedBox(width: 6),
+          // Start Debug button
+          _DebugStartButton(project: project, selectedPlatform: selected),
         ],
       ),
     );
@@ -159,6 +163,74 @@ class _BuildToolbar extends StatelessWidget {
 }
 
 // ── Platform widgets ──────────────────────────────────────────────────────────
+
+// ── Debug start button ────────────────────────────────────────────────────────
+
+class _DebugStartButton extends StatelessWidget {
+  final Project project;
+  final BuildPlatform selectedPlatform;
+  const _DebugStartButton(
+      {required this.project, required this.selectedPlatform});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final dbg = context.watch<DebugProvider>();
+
+    // Only show for SDKs that support DAP (Flutter/Dart)
+    if (project.sdk != SdkType.flutter) return const SizedBox.shrink();
+
+    if (dbg.isActive) {
+      return OutlinedButton.icon(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: cs.error,
+          side: BorderSide(color: cs.error.withValues(alpha: 0.5)),
+          padding:
+              const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          minimumSize: Size.zero,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          textStyle: const TextStyle(fontSize: 12),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8)),
+        ),
+        icon: const Icon(Icons.stop_rounded, size: 14),
+        label: const Text('Stop Debug'),
+        onPressed: () => dbg.stopSession(),
+      );
+    }
+
+    return OutlinedButton.icon(
+      style: OutlinedButton.styleFrom(
+        foregroundColor: cs.primary,
+        side: BorderSide(color: cs.primary.withValues(alpha: 0.5)),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        textStyle: const TextStyle(fontSize: 12),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8)),
+      ),
+      icon: const Icon(Icons.bug_report_rounded, size: 14),
+      label: const Text('Debug'),
+      onPressed: () {
+        final platformArg = _platformToArg(selectedPlatform);
+        dbg.startSession(project, platform: platformArg);
+      },
+    );
+  }
+
+  String _platformToArg(BuildPlatform p) {
+    switch (p) {
+      case BuildPlatform.web:
+        return 'web';
+      case BuildPlatform.linux:
+        return 'linux';
+      default:
+        return 'android';
+    }
+  }
+}
 
 class _PlatformBadge extends StatelessWidget {
   final BuildPlatform platform;

@@ -1,6 +1,11 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:app_installer/app_installer.dart';
-import 'package:build_runner_pkg/build_runner_pkg.dart';
+import 'package:build_runner_pkg/build_runner_pkg.dart'
+    show BuildPlatform, supportedPlatforms;
 import 'package:code_editor/code_editor.dart';
+import 'package:dap_client/dap_client.dart';
 import 'package:core/core.dart';
 import 'package:fl_ide/screens/standalone_terminal_screen.dart';
 import 'package:flutter/material.dart';
@@ -8,14 +13,17 @@ import 'package:flutter/services.dart';
 import 'package:lsp_client/lsp_client.dart';
 import 'package:project_manager/project_manager.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:quill_code/quill_code.dart'
     show DiagnosticSeverity, QuillActionsMenu, QuillThemeDark, SearchOptions;
 import 'package:sdk_manager/sdk_manager.dart';
 import 'package:terminal_pkg/terminal_pkg.dart';
 
+import '../foreground_service.dart';
 import '../l10n/app_strings.dart';
 import '../providers/extensions_provider.dart';
 import '../providers/settings_provider.dart';
+import '../widgets/web_preview_overlay.dart';
 import 'settings_screen.dart' show SettingsScreen;
 
 const _kDrawerWidth = 300.0;
@@ -28,7 +36,7 @@ const _kSpecialChars = [
 ];
 
 // Init phases shown in the peek bar
-enum _InitPhase { creatingProject, loadingProject, startingLsp, ready }
+enum _InitPhase { creatingProject, loadingProject, startingLsp, syncingDeps, ready }
 
 class WorkspaceScreen extends StatefulWidget {
   final Project project;
@@ -47,14 +55,22 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     with TickerProviderStateMixin {
   late final AnimationController _drawerCtrl;
   late final Animation<double> _drawerAnim;
-  late final TabController _bottomTabCtrl;
   final _sheetKey = GlobalKey<_BottomSheetPanelState>();
   _InitPhase _initPhase = _InitPhase.loadingProject;
+  bool _showWebPreview = false;
+  String? _webPreviewUrl;
+  OverlayEntry? _webPreviewEntry;
+
+  // ── Sync banner (pub get / npm install / etc.) ─────────────────────────────
+  bool _syncBannerVisible = false;
+  String _syncCommand = '';
+
+  // ── Auto-save ──────────────────────────────────────────────────────────────
+  Timer? _autoSaveTimer;
 
   @override
   void initState() {
     super.initState();
-    _bottomTabCtrl = TabController(length: 4, vsync: this);
     _drawerCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 280),
@@ -85,21 +101,49 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
       await editor.loadProject(widget.project.path);
       if (!mounted) return;
 
-      final def = SdkDefinition.forType(widget.project.sdk);
-      final entryFile = '${widget.project.path}/${def.defaultEntryFile}';
+      // Prefer SdkConfig from installed JSON extension, fall back to SdkDefinition.
+      final loadedExt = context.read<ExtensionsProvider>().availableSdks
+          .where((e) => e.sdk == widget.project.sdk.name)
+          .firstOrNull;
+      final loadedCfg = loadedExt?.sdkConfig ??
+          SdkDefinition.forType(widget.project.sdk).sdkConfig;
+      final entryFile = '${widget.project.path}/${loadedCfg.defaultEntryFile}';
       await editor.openFile(entryFile);
       if (!mounted) return;
 
       // Phase 2: starting LSP
       setState(() => _initPhase = _InitPhase.startingLsp);
       final settings = context.read<SettingsProvider>();
-      await context.read<LspProvider>().startForExtension(
-            def.defaultEntryFile.split('.').last,
+      final lspProv = context.read<LspProvider>();
+      await lspProv.startForExtension(
+            loadedCfg.defaultEntryFile.split('.').last,
             widget.project.path,
             customPaths: settings.lspPaths,
           );
       if (!mounted) return;
-      setState(() => _initPhase = _InitPhase.ready);
+
+      if (lspProv.status == LspStatus.warming) {
+        // LSP process started — stay in startingLsp until the first diagnostics
+        // push arrives (proves completions are also working).
+        final activeCtrl = context.read<EditorProvider>().activeFile?.controller;
+        if (activeCtrl is LspAwareController) {
+          activeCtrl.onDiagnosticsReceived = () {
+            lspProv.markReady();
+            if (mounted) setState(() => _initPhase = _InitPhase.ready);
+          };
+        }
+      } else {
+        // No LSP binary for this language — skip straight to ready.
+        setState(() => _initPhase = _InitPhase.ready);
+      }
+
+      // Start foreground service to prevent background kill
+      unawaited(FlutterForegroundTask.startService(
+        serviceId: 256,
+        notificationTitle: 'FL IDE',
+        notificationText: widget.project.name,
+        callback: fgServiceCallback,
+      ));
 
       // Phase 3: create terminal and cd to project directory
       final session = await context.read<TerminalProvider>().createSession(
@@ -111,15 +155,115 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
       if (mounted) {
         session.writeCommand('cd "${widget.project.path}"');
       }
+
+      // Show sync banner if the project has a dependency file.
+      // Prefer SdkConfig from installed JSON extension, fall back to SdkDefinition.
+      final ext = context.read<ExtensionsProvider>().availableSdks
+          .where((e) => e.sdk == widget.project.sdk.name)
+          .firstOrNull;
+      final sdkCfg = ext?.sdkConfig ??
+          SdkDefinition.forType(widget.project.sdk).sdkConfig;
+      if (sdkCfg.syncCommand.isNotEmpty && sdkCfg.syncTriggerFile.isNotEmpty) {
+        final triggerPath =
+            '${widget.project.path}/${sdkCfg.syncTriggerFile}';
+        if (await File(triggerPath).exists()) {
+          if (mounted) {
+            setState(() {
+              _syncCommand = sdkCfg.syncCommand;
+              _syncBannerVisible = true;
+            });
+          }
+        }
+      }
+
+      // Auto-save every 30 seconds
+      _autoSaveTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+        if (!mounted) return;
+        context.read<EditorProvider>().saveActiveFile();
+      });
     });
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final dbg = context.read<DebugProvider>();
+    dbg.removeListener(_onDebugChanged);
+    dbg.addListener(_onDebugChanged);
+  }
+
+  void _onDebugChanged() {
+    if (!mounted) return;
+    final dbg = context.read<DebugProvider>();
+    final url = dbg.webServerUrl;
+    if (url != null && !_showWebPreview) {
+      _showPreview(url: url);
+    } else if (url == null && _showWebPreview) {
+      _hidePreview();
+    }
+  }
+
+  void _showPreview({String? url}) {
+    final mq = MediaQuery.of(context);
+    final initialPos = Offset(16, mq.padding.top + kToolbarHeight + 3 + 10);
+    _webPreviewEntry?.remove();
+    final resolvedUrl = url ?? _webPreviewUrl ?? 'http://localhost:${DebugProvider.webServerPort}';
+    // Re-inject DebugProvider so the overlay toolbar can access it.
+    // OverlayEntry builders run in a context that is above the Provider tree.
+    final debugProvider = context.read<DebugProvider>();
+    _webPreviewEntry = OverlayEntry(
+      builder: (_) => ChangeNotifierProvider<DebugProvider>.value(
+        value: debugProvider,
+        child: WebPreviewOverlay(
+          url: resolvedUrl,
+          onClose: _hidePreview,
+          initialPos: initialPos,
+        ),
+      ),
+    );
+    Overlay.of(context).insert(_webPreviewEntry!);
+    setState(() {
+      _showWebPreview = true;
+      if (url != null) _webPreviewUrl = url;
+    });
+  }
+
+  void _hidePreview() {
+    _webPreviewEntry?.remove();
+    _webPreviewEntry = null;
+    if (mounted) setState(() => _showWebPreview = false);
+  }
+
+  @override
   void dispose() {
+    _autoSaveTimer?.cancel();
+    _webPreviewEntry?.remove();
+    _webPreviewEntry = null;
+    context.read<DebugProvider>().removeListener(_onDebugChanged);
     _drawerCtrl.dispose();
-    _bottomTabCtrl.dispose();
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+    unawaited(FlutterForegroundTask.stopService());
     super.dispose();
+  }
+
+  void _runSync() {
+    setState(() {
+      _syncBannerVisible = false;
+      _initPhase = _InitPhase.syncingDeps;
+    });
+    _sheetKey.currentState?.expandToMid();
+    // The terminal session is always the first one created.
+    final termProv = context.read<TerminalProvider>();
+    final sessions = termProv.sessions;
+    if (sessions.isNotEmpty) {
+      sessions.first.writeCommand(_syncCommand);
+    }
+    // After a generous timeout revert the peek bar to ready regardless.
+    Future.delayed(const Duration(seconds: 90), () {
+      if (mounted && _initPhase == _InitPhase.syncingDeps) {
+        setState(() => _initPhase = _InitPhase.ready);
+      }
+    });
   }
 
   void _closeDrawer() => _drawerCtrl.reverse();
@@ -164,11 +308,21 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                           project: widget.project,
                           drawerAnim: _drawerAnim,
                           onMenuTap: _toggleDrawer,
+                          onShowWebPreview: () {
+                            final url = context.read<DebugProvider>().webServerUrl;
+                            _showPreview(url: url);
+                          },
+                        ),
+                        // ── Sync banner (slides down from below AppBar) ──────
+                        _SyncBanner(
+                          visible: _syncBannerVisible,
+                          command: _syncCommand,
+                          onIgnore: () => setState(() => _syncBannerVisible = false),
+                          onRun: _runSync,
                         ),
                         Expanded(
                           child: _MainContent(
                             project: widget.project,
-                            bottomTabCtrl: _bottomTabCtrl,
                             sheetKey: _sheetKey,
                             keyboardVisible: keyboardVisible,
                             initPhase: _initPhase,
@@ -199,7 +353,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                             project: widget.project,
                             onClose: _closeDrawer,
                             onTabChange: (i) {
-                              setState(() => _bottomTabCtrl.index = i);
+                              _sheetKey.currentState?.selectToolTab(i);
                               _closeDrawer();
                               _expandBottomSheet();
                             },
@@ -239,11 +393,13 @@ class _WorkspaceAppBar extends StatefulWidget {
   final Project project;
   final Animation<double> drawerAnim;
   final VoidCallback onMenuTap;
+  final VoidCallback onShowWebPreview;
 
   const _WorkspaceAppBar({
     required this.project,
     required this.drawerAnim,
     required this.onMenuTap,
+    required this.onShowWebPreview,
   });
 
   @override
@@ -275,6 +431,34 @@ class _WorkspaceAppBarState extends State<_WorkspaceAppBar> {
       _searchMode = false;
       _searchCtrl.clear();
     });
+  }
+
+  Future<void> _startDebugSession(BuildContext context) async {
+    final settings = context.read<SettingsProvider>();
+    // Save (+ format) all open files before building.
+    await context.read<EditorProvider>().saveAllFiles(format: settings.formatOnSave);
+    if (!context.mounted) return;
+    final platforms = supportedPlatforms(widget.project.sdk);
+    final savedName = settings.debugPlatformFor(widget.project.sdk.name);
+    final platform = savedName != null
+        ? platforms.firstWhere((p) => p.name == savedName,
+            orElse: () => platforms.first)
+        : platforms.first;
+    // Prefer DapConfig from installed JSON extension, fall back to SdkDefinition.
+    final ext = context.read<ExtensionsProvider>().availableSdks
+        .where((e) => e.sdk == widget.project.sdk.name)
+        .firstOrNull;
+    final dapConfig = ext?.dapConfig ??
+        SdkDefinition.forType(widget.project.sdk).dapConfig;
+    context.read<DebugProvider>().startSession(
+          widget.project,
+          platform: platform.name,
+          dapConfig: dapConfig,
+        );
+  }
+
+  void _showWebPreview(BuildContext context) {
+    widget.onShowWebPreview();
   }
 
   void _onSearchChanged(String q) {
@@ -314,18 +498,22 @@ class _WorkspaceAppBarState extends State<_WorkspaceAppBar> {
           children: [
             SizedBox(
               height: kToolbarHeight,
-              child: _searchMode
-                  ? _buildSearchBar(cs)
-                  : _buildNormalBar(cs),
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 200),
+                child: _searchMode
+                    ? _buildSearchBar(cs)
+                    : _buildNormalBar(cs),
+              ),
             ),
-            Consumer<BuildProvider>(
-              builder: (context, build, _) => build.isBuilding
-                  ? LinearProgressIndicator(
-                      color: cs.primary,
-                      backgroundColor: Colors.transparent,
-                      minHeight: 3,
-                    )
-                  : const SizedBox(height: 3),
+            Consumer<DebugProvider>(
+              builder: (context, dbg, _) =>
+                  (dbg.status == DebugStatus.starting || dbg.isBuilding)
+                      ? LinearProgressIndicator(
+                          color: cs.primary,
+                          backgroundColor: Colors.transparent,
+                          minHeight: 3,
+                        )
+                      : const SizedBox(height: 3),
             ),
           ],
         ),
@@ -458,33 +646,48 @@ class _WorkspaceAppBarState extends State<_WorkspaceAppBar> {
                 )
               : const SizedBox.shrink(),
         ),
-        // ── Build / Stop button ────────────────────────────────────
-        Consumer<BuildProvider>(
-          builder: (context, build, _) => build.isBuilding
-              ? IconButton(
-                  icon: Container(
-                    width: 20,
-                    height: 20,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(color: cs.error, width: 2),
-                    ),
-                    child: Icon(Icons.stop, color: cs.error, size: 11),
+        // ── Run / Stop DAP button ──────────────────────────────────
+        Consumer<DebugProvider>(
+          builder: (context, dbg, _) {
+            if (dbg.isActive) {
+              return IconButton(
+                icon: Container(
+                  width: 20,
+                  height: 20,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: cs.error, width: 2),
                   ),
-                  onPressed: build.cancel,
-                  tooltip: 'Stop build',
-                  constraints:
-                      const BoxConstraints(minWidth: 40, minHeight: 40),
-                )
-              : IconButton(
-                  icon: Icon(Icons.play_arrow_rounded,
-                      color: cs.primary, size: 24),
-                  onPressed: () =>
-                      context.read<BuildProvider>().build(widget.project),
-                  tooltip: 'Build project',
-                  constraints:
-                      const BoxConstraints(minWidth: 40, minHeight: 40),
+                  child: Icon(Icons.stop, color: cs.error, size: 11),
                 ),
+                onPressed: () => dbg.stopSession(),
+                tooltip: 'Stop debug session',
+                constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+              );
+            }
+            return IconButton(
+              icon: Icon(Icons.play_arrow_rounded, color: cs.primary, size: 24),
+              onPressed: () => _startDebugSession(context),
+              tooltip: 'Run & Debug',
+              constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+            );
+          },
+        ),
+        // ── Web preview button (only when DAP is running on web) ───
+        Consumer<DebugProvider>(
+          builder: (context, dbg, _) {
+            if (!dbg.isActive) return const SizedBox.shrink();
+            final settings = context.read<SettingsProvider>();
+            final pName = settings.debugPlatformFor(widget.project.sdk.name)
+                ?? supportedPlatforms(widget.project.sdk).first.name;
+            if (pName != BuildPlatform.web.name) return const SizedBox.shrink();
+            return IconButton(
+              icon: Icon(Icons.web_rounded, color: cs.primary, size: 22),
+              onPressed: () => _showWebPreview(context),
+              tooltip: 'Web Preview',
+              constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+            );
+          },
         ),
         // ── Type commands (only when not at max buttons) ───────────
         if (!canRedo)
@@ -518,13 +721,14 @@ class _WorkspaceAppBarState extends State<_WorkspaceAppBar> {
           constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
           onSelected: (val) {
             final editor = context.read<EditorProvider>();
+            final settings = context.read<SettingsProvider>();
             switch (val) {
               case 'undo':
                 editor.undo();
               case 'redo':
                 editor.redo();
               case 'save':
-                editor.saveActiveFile();
+                editor.saveActiveFile(format: settings.formatOnSave);
               case 'sync':
                 editor.loadProject(widget.project.path);
               case 'search':
@@ -536,56 +740,78 @@ class _WorkspaceAppBarState extends State<_WorkspaceAppBar> {
                     context.read<ExtensionsProvider>().activeEditorTheme ??
                         QuillThemeDark.build();
                 QuillActionsMenu.show(context, ctrl, theme);
+              case 'hot_reload':
+                context.read<DebugProvider>().hotReload();
+              case 'hot_restart':
+                context.read<DebugProvider>().restart();
               case 'close':
                 _confirmCloseProject(context);
             }
           },
-          itemBuilder: (_) => [
-            const PopupMenuItem(
-              value: 'undo',
-              height: 40,
-              child: _PopupItem(icon: Icons.undo_rounded, label: 'Undo'),
-            ),
-            const PopupMenuItem(
-              value: 'redo',
-              height: 40,
-              child: _PopupItem(icon: Icons.redo_rounded, label: 'Redo'),
-            ),
-            const PopupMenuItem(
-              value: 'save',
-              height: 40,
-              child: _PopupItem(icon: Icons.save_outlined, label: 'Save'),
-            ),
-            const PopupMenuItem(
-              value: 'sync',
-              height: 40,
-              child: _PopupItem(
-                  icon: Icons.sync_rounded, label: 'Sync project'),
-            ),
-            if (canUndo)
-              const PopupMenuItem(
-                value: 'search',
+          itemBuilder: (ctx) {
+            final s = AppStrings.of(ctx);
+            final dbg = context.read<DebugProvider>();
+            return [
+              PopupMenuItem(
+                value: 'undo',
                 height: 40,
-                child:
-                    _PopupItem(icon: Icons.search_rounded, label: 'Search'),
+                child: _PopupItem(icon: Icons.undo_rounded, label: s.wsUndo),
               ),
-            if (canRedo)
-              const PopupMenuItem(
-                value: 'commands',
+              PopupMenuItem(
+                value: 'redo',
+                height: 40,
+                child: _PopupItem(icon: Icons.redo_rounded, label: s.wsRedo),
+              ),
+              PopupMenuItem(
+                value: 'save',
+                height: 40,
+                child: _PopupItem(icon: Icons.save_outlined, label: s.save),
+              ),
+              PopupMenuItem(
+                value: 'sync',
                 height: 40,
                 child: _PopupItem(
-                    icon: Icons.terminal_outlined, label: 'Commands'),
+                    icon: Icons.sync_rounded, label: s.wsSyncProject),
               ),
-            const PopupMenuDivider(),
-            const PopupMenuItem(
-              value: 'close',
-              height: 40,
-              child: _PopupItem(
-                  icon: Icons.close,
-                  label: 'Close project',
-                  isDestructive: true),
-            ),
-          ],
+              if (canUndo)
+                PopupMenuItem(
+                  value: 'search',
+                  height: 40,
+                  child: _PopupItem(
+                      icon: Icons.search_rounded, label: s.wsSearchInFile),
+                ),
+              if (canRedo)
+                PopupMenuItem(
+                  value: 'commands',
+                  height: 40,
+                  child: _PopupItem(
+                      icon: Icons.terminal_outlined, label: s.wsCommands),
+                ),
+              if (dbg.isRunning)
+                PopupMenuItem(
+                  value: 'hot_reload',
+                  height: 40,
+                  child: _PopupItem(
+                      icon: Icons.electric_bolt_rounded, label: s.wsHotReload),
+                ),
+              if (dbg.isActive)
+                PopupMenuItem(
+                  value: 'hot_restart',
+                  height: 40,
+                  child: _PopupItem(
+                      icon: Icons.restart_alt_rounded, label: s.wsHotRestart),
+                ),
+              const PopupMenuDivider(),
+              PopupMenuItem(
+                value: 'close',
+                height: 40,
+                child: _PopupItem(
+                    icon: Icons.close,
+                    label: s.wsCloseProject,
+                    isDestructive: true),
+              ),
+            ];
+          },
         ),
         const SizedBox(width: 2),
       ],
@@ -597,22 +823,25 @@ Future<void> _confirmCloseProject(BuildContext context) async {
   final cs = Theme.of(context).colorScheme;
   final confirmed = await showDialog<bool>(
     context: context,
-    builder: (ctx) => AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      title: const Text('Close project'),
-      content: const Text('Are you sure you want to close the current project? Any unsaved changes will be lost.'),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(ctx, false),
-          child: Text('No', style: TextStyle(color: cs.onSurfaceVariant)),
-        ),
-        FilledButton(
-          style: FilledButton.styleFrom(backgroundColor: cs.error),
-          onPressed: () => Navigator.pop(ctx, true),
-          child: const Text('Yes, close'),
-        ),
-      ],
-    ),
+    builder: (ctx) {
+      final ss = AppStrings.of(ctx);
+      return AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(ss.wsCloseProjectQ),
+        content: Text(ss.wsCloseProjectBody),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(ss.no, style: TextStyle(color: cs.onSurfaceVariant)),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: cs.error),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(ss.wsCloseYes),
+          ),
+        ],
+      );
+    },
   );
   if (confirmed == true && context.mounted) {
     context.read<ProjectManagerProvider>().closeProject();
@@ -642,48 +871,58 @@ class _PopupItem extends StatelessWidget {
 
 // ── Main content ──────────────────────────────────────────────────────────────
 
-class _MainContent extends StatelessWidget {
+class _MainContent extends StatefulWidget {
   final Project project;
-  final TabController bottomTabCtrl;
   final GlobalKey<_BottomSheetPanelState> sheetKey;
   final bool keyboardVisible;
   final _InitPhase initPhase;
 
   const _MainContent({
     required this.project,
-    required this.bottomTabCtrl,
     required this.sheetKey,
     required this.keyboardVisible,
     required this.initPhase,
   });
 
   @override
+  State<_MainContent> createState() => _MainContentState();
+}
+
+class _MainContentState extends State<_MainContent> {
+  @override
   Widget build(BuildContext context) {
     final settings = context.watch<SettingsProvider>();
     return LayoutBuilder(
       builder: (context, constraints) => Stack(
         children: [
-          Positioned.fill(
-            child: EditorArea(
-              editorTheme:
-                  context.watch<ExtensionsProvider>().activeEditorTheme,
-              showSymbolBar: false,
-              fontSize: settings.fontSize,
-              fontFamily: settings.fontFamily,
-              configureProps: settings.applyToProps,
-            ),
+          // ── Editor + overlay + bottom sheet (column) ─────────────────
+          Column(
+            children: [
+              Expanded(
+                child: EditorArea(
+                  editorTheme:
+                      context.watch<ExtensionsProvider>().activeEditorTheme,
+                  showSymbolBar: false,
+                  fontSize: settings.fontSize,
+                  fontFamily: settings.fontFamily,
+                  configureProps: settings.applyToProps,
+                ),
+              ),
+              // VS Code-style debug execution overlay
+              const _DebugExecutionOverlay(),
+            ],
           ),
+          // ── Bottom sheet overlaid on top (draggable) ─────────────────
           Positioned(
             left: 0,
             right: 0,
             bottom: 0,
             child: _BottomSheetPanel(
-              key: sheetKey,
+              key: widget.sheetKey,
               availableHeight: constraints.maxHeight,
-              project: project,
-              tabCtrl: bottomTabCtrl,
-              keyboardVisible: keyboardVisible,
-              initPhase: initPhase,
+              project: widget.project,
+              keyboardVisible: widget.keyboardVisible,
+              initPhase: widget.initPhase,
             ),
           ),
         ],
@@ -798,11 +1037,11 @@ class _DrawerRail extends StatelessWidget {
     ),
             ),
             _CircleRailBtn(
-              icon: Icons.android,
-              tooltip: 'Build',
+              icon: Icons.bug_report_outlined,
+              tooltip: 'Debug Output',
               bg: cs.primaryContainer,
               fg: cs.onPrimaryContainer,
-              onTap: () => onTabChange(1),
+              onTap: () => onTabChange(4),
             ),
             _CircleRailBtn(
               icon: Icons.settings_outlined,
@@ -872,7 +1111,6 @@ class _CircleRailBtn extends StatelessWidget {
 class _BottomSheetPanel extends StatefulWidget {
   final double availableHeight;
   final Project project;
-  final TabController tabCtrl;
   final bool keyboardVisible;
   final _InitPhase initPhase;
 
@@ -880,7 +1118,6 @@ class _BottomSheetPanel extends StatefulWidget {
     super.key,
     required this.availableHeight,
     required this.project,
-    required this.tabCtrl,
     required this.keyboardVisible,
     required this.initPhase,
   });
@@ -890,23 +1127,98 @@ class _BottomSheetPanel extends StatefulWidget {
 }
 
 class _BottomSheetPanelState extends State<_BottomSheetPanel>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   static const double _kPeek = 60.0;
   static const double _kMid = 400.0;
   static const double _kPeekBarH = 64.0;
+  static const int _kToolCount = 5;
 
   double _height = _kPeek;
   late AnimationController _animCtrl;
   late Animation<double> _anim;
 
+  // Combined tab controller: [file tabs...] + [TERMINAL, PROBLEMS, VARIABLES, CALL STACK, OUTPUT]
+  late TabController _combinedTabCtrl;
+  int _fileTabCount = 0;
+  EditorProvider? _editorProv;
+
   @override
   void initState() {
     super.initState();
+    _combinedTabCtrl = TabController(length: _kToolCount, vsync: this);
+    _combinedTabCtrl.addListener(_onTabChanged);
     _animCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 280),
     );
     _animCtrl.addListener(() => setState(() => _height = _anim.value));
+  }
+
+  void _onTabChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final ep = context.read<EditorProvider>();
+    if (_editorProv != ep) {
+      _editorProv?.removeListener(_onEditorChanged);
+      _editorProv = ep;
+      ep.addListener(_onEditorChanged);
+    }
+  }
+
+  void _onEditorChanged() {
+    if (!mounted) return;
+    _syncFromEditor(_editorProv!);
+  }
+
+  /// Keeps [_combinedTabCtrl] in sync when bottom-panel files change.
+  void _syncFromEditor(EditorProvider ep) {
+    final bf = ep.bottomPanelFiles;
+    final total = bf.length + _kToolCount;
+
+    if (_combinedTabCtrl.length != total) {
+      // File count changed — rebuild controller preserving tool-tab selection.
+      final oldIdx = _combinedTabCtrl.index;
+      final oldFileCount = _fileTabCount;
+      int newIdx;
+      if (oldIdx >= oldFileCount) {
+        // Was on a tool tab — keep same tool tab with new offset.
+        newIdx = bf.length + (oldIdx - oldFileCount);
+      } else if (ep.activeFile?.inBottomPanel == true) {
+        // Active file is a bottom-panel file — jump to its tab.
+        final i = bf.indexOf(ep.activeFile!);
+        newIdx = i >= 0 ? i : 0;
+      } else {
+        newIdx = bf.length; // default to TERMINAL
+      }
+      newIdx = newIdx.clamp(0, total - 1);
+
+      final old = _combinedTabCtrl;
+      _combinedTabCtrl = TabController(length: total, vsync: this, initialIndex: newIdx);
+      _combinedTabCtrl.addListener(_onTabChanged);
+      _fileTabCount = bf.length;
+      setState(() {});
+      WidgetsBinding.instance.addPostFrameCallback((_) => old.dispose());
+    } else if (ep.activeFile?.inBottomPanel == true) {
+      // Length unchanged but active file may have switched — sync index.
+      final i = bf.indexOf(ep.activeFile!);
+      if (i >= 0 && _combinedTabCtrl.index != i) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _combinedTabCtrl.index != i) {
+            setState(() => _combinedTabCtrl.index = i);
+          }
+        });
+      }
+    }
+  }
+
+  /// Called by the drawer rail to jump to a specific tool tab.
+  void selectToolTab(int toolIndex) {
+    final i = (_fileTabCount + toolIndex).clamp(0, _combinedTabCtrl.length - 1);
+    setState(() => _combinedTabCtrl.index = i);
   }
 
   @override
@@ -919,6 +1231,9 @@ class _BottomSheetPanelState extends State<_BottomSheetPanel>
 
   @override
   void dispose() {
+    _editorProv?.removeListener(_onEditorChanged);
+    _combinedTabCtrl.removeListener(_onTabChanged);
+    _combinedTabCtrl.dispose();
     _animCtrl.dispose();
     super.dispose();
   }
@@ -975,122 +1290,156 @@ class _BottomSheetPanelState extends State<_BottomSheetPanel>
       onAcceptWithDetails: (details) {
         final editor = context.read<EditorProvider>();
         final idx = editor.openFiles.indexOf(details.data);
-        if (idx != -1) editor.moveToPanel(idx, bottom: true);
+        if (idx != -1) editor.moveToPanel(idx, bottom: true, atFirst: true);
       },
-      builder: (context, candidates, _) {
+      builder: (dragCtx, candidates, _) {
         final isDragOver = candidates.isNotEmpty;
-        return SizedBox(
-          height: _height,
-          child: ClipRect(
-            child: Material(
-              color: isDragOver
-                  ? cs.primaryContainer.withValues(alpha: 0.15)
-                  : cs.surfaceContainerLow,
-              child: Column(
-                children: [
-                  // ── Draggable header (drag anywhere here to resize) ──
-                  GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onVerticalDragUpdate: _onDragUpdate,
-                    onVerticalDragEnd: _onDragEnd,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Consumer<LspProvider>(
-                          builder: (ctx, lsp, _) {
-                            if (lsp.status == LspStatus.starting) {
-                              return LinearProgressIndicator(
-                                minHeight: 2,
-                                backgroundColor: cs.outlineVariant,
-                              );
-                            }
-                            return Divider(
-                                height: 1,
-                                thickness: 1,
-                                color: cs.outlineVariant);
-                          },
-                        ),
-
-                        // ── Stage 1: peek bar (or symbol bar when keyboard up)
-                        // When stage 3 begins the peek bar slides downward
-                        // behind the tab bar and the SizedBox collapses it.  ─
-                        if (widget.keyboardVisible)
-                          const _SpecialCharsBar()
-                        else
-                          Builder(builder: (context) {
-                            final p3 = _stage3Progress;
-                            if (p3 >= 1.0) return const SizedBox.shrink();
-                            return ClipRect(
-                              child: SizedBox(
-                                height: _kPeekBarH * (1.0 - p3),
-                                width: double.infinity,
-                                child: Transform.translate(
-                                  offset: Offset(0, _kPeekBarH * p3),
-                                  child: _PeekBar(initPhase: widget.initPhase),
-                                ),
-                              ),
-                            );
-                          }),
-
-                        // ── Stage 2: tab bar — always rendered below ─────────
-                        ...[
-                          Consumer<EditorProvider>(
-                            builder: (ctx, editor, _) {
-                              final bf = editor.bottomPanelFiles;
-                              if (bf.isEmpty) return const SizedBox.shrink();
-                              return _BottomFileTabs(
-                                  files: bf, editor: editor);
-                            },
-                          ),
-                          ColoredBox(
-                            color: cs.surfaceContainerHigh,
-                            child: TabBar(
-                              controller: widget.tabCtrl,
-                              isScrollable: true,
-                              tabAlignment: TabAlignment.start,
-                              padding: EdgeInsets.zero,
-                              dividerColor: Colors.transparent,
-                              labelStyle: const TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
-                                  letterSpacing: 0.5),
-                              unselectedLabelStyle:
-                                  const TextStyle(fontSize: 11),
-                              tabs: const [
-                                Tab(text: 'TERMINAL', height: 40),
-                                Tab(text: 'BUILD', height: 40),
-                                Tab(text: 'LOGS', height: 40),
-                                Tab(text: 'PROBLEMS', height: 40),
-                              ],
+        return Consumer<EditorProvider>(
+          builder: (ctx, editor, _) {
+            final bf = editor.bottomPanelFiles;
+            final tabIdx = _combinedTabCtrl.index;
+            final isFileTab = tabIdx < bf.length;
+            return SizedBox(
+              height: _height,
+              child: ClipRect(
+                child: Material(
+                  color: isDragOver
+                      ? cs.primaryContainer.withValues(alpha: 0.15)
+                      : cs.surfaceContainerLow,
+                  child: Column(
+                    children: [
+                      // ── Draggable header ─────────────────────────────
+                      GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onVerticalDragUpdate: _onDragUpdate,
+                        onVerticalDragEnd: _onDragEnd,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Divider(height: 1, thickness: 1, color: cs.outlineVariant),
+                            // LSP / build progress indicator
+                            Consumer2<LspProvider, DebugProvider>(
+                              builder: (c, lsp, dbg, _) {
+                                final loading = lsp.status == LspStatus.starting ||
+                                    lsp.status == LspStatus.warming ||
+                                    dbg.status == DebugStatus.starting ||
+                                    dbg.isBuilding;
+                                return loading
+                                    ? LinearProgressIndicator(
+                                        minHeight: 2,
+                                        backgroundColor: cs.outlineVariant,
+                                      )
+                                    : const SizedBox.shrink();
+                              },
                             ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  // ── Content ──────────────────────────────────────────
-                  Divider(height: 1, color: cs.outlineVariant),
-                  Expanded(
-                    child: TabBarView(
-                      controller: widget.tabCtrl,
-                      physics: const NeverScrollableScrollPhysics(),
-                      children: [
-                        const TerminalTabs(),
-                        BuildPanel(project: widget.project),
-                        LogsPanel(
-                          packageName:
-                              widget.project.sdk == SdkType.flutter
-                                  ? 'com.example.${widget.project.name}'
-                                  : null,
+                            // Peek bar / special chars bar (animated switch)
+                            AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 200),
+                              child: widget.keyboardVisible
+                                  ? const _SpecialCharsBar()
+                                  : Builder(builder: (context) {
+                                      final p3 = _stage3Progress;
+                                      if (p3 >= 1.0) return const SizedBox.shrink();
+                                      return ClipRect(
+                                        child: SizedBox(
+                                          height: _kPeekBarH * (1.0 - p3),
+                                          width: double.infinity,
+                                          child: Transform.translate(
+                                            offset: Offset(0, _kPeekBarH * p3),
+                                            child: _PeekBar(initPhase: widget.initPhase),
+                                          ),
+                                        ),
+                                      );
+                                    }),
+                            ),
+                            // ── Single unified tab bar ──────────────────
+                            ColoredBox(
+                              color: cs.surfaceContainerHigh,
+                              child: TabBar(
+                                controller: _combinedTabCtrl,
+                                isScrollable: true,
+                                tabAlignment: TabAlignment.start,
+                                padding: EdgeInsets.zero,
+                                dividerColor: Colors.transparent,
+                                labelStyle: const TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    letterSpacing: 0.5),
+                                unselectedLabelStyle:
+                                    const TextStyle(fontSize: 11),
+                                onTap: (i) {
+                                  if (i < bf.length) {
+                                    final gIdx = editor.openFiles.indexOf(bf[i]);
+                                    if (gIdx != -1) editor.switchTo(gIdx);
+                                  }
+                                },
+                                tabs: [
+                                  // File tabs (dynamic)
+                                  for (final f in bf)
+                                    Tab(
+                                      height: 40,
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text(f.name),
+                                          const SizedBox(width: 6),
+                                          GestureDetector(
+                                            behavior: HitTestBehavior.opaque,
+                                            onTap: () {
+                                              final gIdx = editor.openFiles.indexOf(f);
+                                              if (gIdx != -1) editor.moveToPanel(gIdx, bottom: false);
+                                            },
+                                            child: Icon(Icons.close_rounded,
+                                                size: 12,
+                                                color: cs.onSurfaceVariant),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  // Fixed tool tabs
+                                  const Tab(text: 'TERMINAL', height: 40),
+                                  const Tab(text: 'PROBLEMS', height: 40),
+                                  const Tab(text: 'VARIABLES', height: 40),
+                                  const Tab(text: 'CALL STACK', height: 40),
+                                  const Tab(text: 'OUTPUT', height: 40),
+                                ],
+                              ),
+                            ),
+                          ],
                         ),
-                        _ProblemsPanel(),
-                      ],
-                    ),
+                      ),
+                      Divider(height: 1, color: cs.outlineVariant),
+                      // ── Content area ────────────────────────────────
+                      Expanded(
+                        child: isFileTab
+                            ? Consumer2<ExtensionsProvider, SettingsProvider>(
+                                builder: (c, ext, sett, _) => EditorArea(
+                                  editorTheme: ext.activeEditorTheme,
+                                  showSymbolBar: false,
+                                  fontSize: sett.fontSize,
+                                  fontFamily: sett.fontFamily,
+                                  configureProps: sett.applyToProps,
+                                  showTabBar: false,
+                                  forBottomPanel: true,
+                                ),
+                              )
+                            : IndexedStack(
+                                index: (tabIdx - bf.length).clamp(0, _kToolCount - 1),
+                                children: [
+                                  const TerminalTabs(),
+                                  _ProblemsPanel(),
+                                  const DebugVariablesPanel(),
+                                  const DebugCallStackPanel(),
+                                  const DebugOutputPanel(),
+                                ],
+                              ),
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
-            ),
-          ),
+            );
+          },
         );
       },
     );
@@ -1120,6 +1469,9 @@ class _PeekBar extends StatelessWidget {
       case _InitPhase.startingLsp:
         label = s.peekStartingLsp;
         showProgress = true;
+      case _InitPhase.syncingDeps:
+        label = s.peekSyncingDeps;
+        showProgress = true;
       case _InitPhase.ready:
         label = s.peekReady;
         showProgress = false;
@@ -1139,120 +1491,80 @@ class _PeekBar extends StatelessWidget {
               fontWeight: FontWeight.w600,
             ),
           ),
-          if (showProgress) ...[
-            const SizedBox(height: 6),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 40),
-              child: LinearProgressIndicator(
-                minHeight: 2,
-                backgroundColor: cs.outlineVariant,
-                color: cs.primary,
-              ),
-            ),
-          ] else ...[
-            const SizedBox(height: 3),
-            Text(
-              s.peekSwipeUp,
-              textAlign: TextAlign.center,
-              style: TextStyle(color: cs.onSurfaceVariant, fontSize: 10),
-            ),
-          ],
+          const SizedBox(height: 3),
+          Text(
+            showProgress ? '...' : s.peekSwipeUp,
+            textAlign: TextAlign.center,
+            style: TextStyle(color: cs.onSurfaceVariant, fontSize: 10),
+          ),
         ],
       ),
     );
   }
 }
 
-// ── Bottom-panel file tabs ────────────────────────────────────────────────────
+// ── Sync-dependencies banner (slides down from below AppBar) ─────────────────
 
-class _BottomFileTabs extends StatelessWidget {
-  final List<OpenFile> files;
-  final EditorProvider editor;
+class _SyncBanner extends StatelessWidget {
+  final bool visible;
+  final String command;
+  final VoidCallback onIgnore;
+  final VoidCallback onRun;
 
-  const _BottomFileTabs({required this.files, required this.editor});
+  const _SyncBanner({
+    required this.visible,
+    required this.command,
+    required this.onIgnore,
+    required this.onRun,
+  });
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return ColoredBox(
-      color: cs.surfaceContainer,
-      child: SizedBox(
-        height: 36,
-        child: ListView.builder(
-          scrollDirection: Axis.horizontal,
-          itemCount: files.length,
-          itemBuilder: (context, i) {
-            final f = files[i];
-            final globalIndex = editor.openFiles.indexOf(f);
-            final isActive = editor.activeFile?.path == f.path;
-            return LongPressDraggable<OpenFile>(
-              data: f,
-              feedback: Material(
-                elevation: 4,
-                borderRadius: BorderRadius.circular(8),
-                color: cs.primaryContainer,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 4),
-                  child: Text(f.name,
-                      style: TextStyle(
-                          color: cs.onPrimaryContainer,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600)),
-                ),
-              ),
-              onDragEnd: (details) {
-                // If dragged upward far enough, move back to top bar
-                if (details.velocity.pixelsPerSecond.dy < -200) {
-                  editor.moveToPanel(globalIndex, bottom: false);
-                }
-              },
-              child: GestureDetector(
-                onTap: () => editor.switchTo(globalIndex),
-                child: Container(
-                  height: 36,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10),
-                  decoration: BoxDecoration(
-                    border: Border(
-                      bottom: BorderSide(
-                        color:
-                            isActive ? cs.primary : Colors.transparent,
-                        width: 2,
+    final s = AppStrings.of(context);
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeInOut,
+      alignment: Alignment.topCenter,
+      child: visible
+          ? Material(
+              color: cs.primaryContainer,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                child: Row(
+                  children: [
+                    Icon(Icons.download_rounded,
+                        size: 18, color: cs.onPrimaryContainer),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        s.syncBannerMsg(command),
+                        style: TextStyle(
+                            color: cs.onPrimaryContainer, fontSize: 13),
                       ),
                     ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        f.name,
-                        style: TextStyle(
-                          color: isActive
-                              ? cs.primary
-                              : cs.onSurfaceVariant,
-                          fontSize: 11,
-                          fontWeight: isActive
-                              ? FontWeight.w600
-                              : FontWeight.w400,
-                        ),
+                    TextButton(
+                      onPressed: onIgnore,
+                      style: TextButton.styleFrom(
+                          foregroundColor: cs.onPrimaryContainer,
+                          padding: const EdgeInsets.symmetric(horizontal: 8)),
+                      child: Text(s.syncBannerIgnore),
+                    ),
+                    FilledButton(
+                      onPressed: onRun,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: cs.primary,
+                        foregroundColor: cs.onPrimary,
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        minimumSize: const Size(0, 32),
                       ),
-                      const SizedBox(width: 4),
-                      // Move back to top bar
-                      GestureDetector(
-                        onTap: () => editor.moveToPanel(globalIndex,
-                            bottom: false),
-                        child: Icon(Icons.arrow_upward_rounded,
-                            size: 12, color: cs.onSurfaceVariant),
-                      ),
-                    ],
-                  ),
+                      child: Text(s.syncBannerRun),
+                    ),
+                  ],
                 ),
               ),
-            );
-          },
-        ),
-      ),
+            )
+          : const SizedBox.shrink(),
     );
   }
 }
@@ -1388,6 +1700,172 @@ class _PanelPlaceholder extends StatelessWidget {
           Text(text,
               style: TextStyle(color: cs.onSurfaceVariant, fontSize: 13)),
         ],
+      ),
+    );
+  }
+}
+
+// ── VS Code-style debug execution overlay ─────────────────────────────────────
+//
+// Appears at the bottom of the editor (above the bottom sheet) when a DAP
+// session is active. Shows status, current stopped location, and quick actions.
+
+class _DebugExecutionOverlay extends StatelessWidget {
+  const _DebugExecutionOverlay();
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<DebugProvider>(
+      builder: (context, dbg, _) {
+        if (!dbg.isActive) return const SizedBox.shrink();
+        final cs = Theme.of(context).colorScheme;
+        final paused = dbg.isPaused;
+
+        // Status colour: orange when paused, green when running
+        final statusColor = paused ? Colors.orange : Colors.green;
+
+        String statusText;
+        if (paused && dbg.stoppedFile != null && dbg.stoppedLine != null) {
+          final fileName = dbg.stoppedFile!.split('/').last;
+          statusText = 'Paused at $fileName:${dbg.stoppedLine}';
+        } else if (paused) {
+          statusText = 'Paused — ${dbg.stopReason ?? 'breakpoint'}';
+        } else if (dbg.status == DebugStatus.starting) {
+          statusText = 'Starting debug session…';
+        } else {
+          statusText = 'Running';
+        }
+
+        return Material(
+          elevation: 4,
+          color: cs.surfaceContainerHighest,
+          child: Container(
+            height: 36,
+            decoration: BoxDecoration(
+              border: Border(
+                top: BorderSide(color: statusColor, width: 2),
+              ),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Row(
+              children: [
+                // Status dot
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: statusColor,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Icon(Icons.bug_report_rounded,
+                    size: 13, color: cs.primary),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    statusText,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: cs.onSurface,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                // Quick actions
+                _OverlayBtn(
+                  icon: Icons.play_arrow_rounded,
+                  tooltip: 'Continue',
+                  enabled: paused,
+                  color: Colors.green,
+                  onTap: () => dbg.continueExec(),
+                ),
+                _OverlayBtn(
+                  icon: Icons.pause_rounded,
+                  tooltip: 'Pause',
+                  enabled: dbg.isRunning,
+                  onTap: () => dbg.pause(),
+                ),
+                _OverlayBtn(
+                  icon: Icons.redo_rounded,
+                  tooltip: 'Step Over',
+                  enabled: paused,
+                  onTap: () => dbg.stepOver(),
+                ),
+                _OverlayBtn(
+                  icon: Icons.south_rounded,
+                  tooltip: 'Step In',
+                  enabled: paused,
+                  onTap: () => dbg.stepIn(),
+                ),
+                _OverlayBtn(
+                  icon: Icons.north_rounded,
+                  tooltip: 'Step Out',
+                  enabled: paused,
+                  onTap: () => dbg.stepOut(),
+                ),
+                _OverlayBtn(
+                  icon: Icons.electric_bolt_rounded,
+                  tooltip: 'Hot Reload',
+                  enabled: dbg.isRunning,
+                  color: Colors.orange,
+                  onTap: () => dbg.hotReload(),
+                ),
+                _OverlayBtn(
+                  icon: Icons.refresh_rounded,
+                  tooltip: 'Restart',
+                  enabled: paused || dbg.isRunning,
+                  onTap: () => dbg.restart(),
+                ),
+                _OverlayBtn(
+                  icon: Icons.stop_rounded,
+                  tooltip: 'Stop',
+                  enabled: true,
+                  color: cs.error,
+                  onTap: () => dbg.stopSession(),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _OverlayBtn extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final bool enabled;
+  final Color? color;
+  final VoidCallback onTap;
+
+  const _OverlayBtn({
+    required this.icon,
+    required this.tooltip,
+    required this.enabled,
+    required this.onTap,
+    this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final c = color ?? cs.onSurface;
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        borderRadius: BorderRadius.circular(4),
+        child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: Icon(
+            icon,
+            size: 16,
+            color: enabled ? c : c.withValues(alpha: 0.25),
+          ),
+        ),
       ),
     );
   }

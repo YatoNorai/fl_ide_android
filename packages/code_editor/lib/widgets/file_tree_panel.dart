@@ -97,12 +97,15 @@ class _DirectoryNode extends StatelessWidget {
 
   void _showDirSheet(BuildContext context, FileNode dir) {
     final editor = context.read<EditorProvider>();
+    // Capture parent context before sheet opens so action dialogs can use it.
+    final parentCtx = context;
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
       builder: (ctx) => _DirActionsSheet(
         dir: dir,
+        parentContext: parentCtx,
         onRefresh: editor.refreshTree,
         onCloseUnder: (path) => editor.closeFilesUnderPath(path),
         onOpenFile: editor.openFile,
@@ -141,12 +144,14 @@ class _FileLeaf extends StatelessWidget {
 
   void _showFileSheet(BuildContext context, FileNode file) {
     final editor = context.read<EditorProvider>();
+    final parentCtx = context;
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
       builder: (ctx) => _FileActionsSheet(
         file: file,
+        parentContext: parentCtx,
         onRefresh: editor.refreshTree,
         onCloseFile: () {
           final idx =
@@ -299,11 +304,13 @@ class _TreeItemState extends State<_TreeItem> {
 
 class _FileActionsSheet extends StatelessWidget {
   final FileNode file;
+  final BuildContext parentContext;
   final VoidCallback onRefresh;
   final VoidCallback onCloseFile;
 
   const _FileActionsSheet({
     required this.file,
+    required this.parentContext,
     required this.onRefresh,
     required this.onCloseFile,
   });
@@ -374,7 +381,7 @@ class _FileActionsSheet extends StatelessWidget {
   void _confirmDelete(BuildContext context) {
     Navigator.pop(context);
     showDialog(
-      context: context,
+      context: parentContext,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Delete file?'),
@@ -388,14 +395,15 @@ class _FileActionsSheet extends StatelessWidget {
                 backgroundColor: Theme.of(ctx).colorScheme.error),
             onPressed: () async {
               Navigator.pop(ctx);
-              final messenger = ScaffoldMessenger.of(context);
               try {
                 onCloseFile();
                 await File(file.path).delete();
                 onRefresh();
               } catch (e) {
-                messenger.showSnackBar(
-                    SnackBar(content: Text('Error: $e')));
+                if (parentContext.mounted) {
+                  ScaffoldMessenger.of(parentContext)
+                      .showSnackBar(SnackBar(content: Text('Error: $e')));
+                }
               }
             },
             child: const Text('Delete'),
@@ -409,7 +417,7 @@ class _FileActionsSheet extends StatelessWidget {
     Navigator.pop(context);
     final ctrl = TextEditingController(text: file.name);
     showDialog(
-      context: context,
+      context: parentContext,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Rename file'),
@@ -427,16 +435,15 @@ class _FileActionsSheet extends StatelessWidget {
               final newName = ctrl.text.trim();
               if (newName.isEmpty) return;
               Navigator.pop(ctx);
-              final messenger = ScaffoldMessenger.of(context);
-              final parent = file.path.substring(
-                  0, file.path.lastIndexOf('/'));
+              final parent = file.path.substring(0, file.path.lastIndexOf('/'));
               try {
-                await File(file.path)
-                    .rename('$parent/$newName');
+                await File(file.path).rename('$parent/$newName');
                 onRefresh();
               } catch (e) {
-                messenger.showSnackBar(
-                    SnackBar(content: Text('Error: $e')));
+                if (parentContext.mounted) {
+                  ScaffoldMessenger.of(parentContext)
+                      .showSnackBar(SnackBar(content: Text('Error: $e')));
+                }
               }
             },
             child: const Text('Rename'),
@@ -451,12 +458,14 @@ class _FileActionsSheet extends StatelessWidget {
 
 class _DirActionsSheet extends StatelessWidget {
   final FileNode dir;
+  final BuildContext parentContext;
   final VoidCallback onRefresh;
   final void Function(String path) onCloseUnder;
   final Future<void> Function(String path) onOpenFile;
 
   const _DirActionsSheet({
     required this.dir,
+    required this.parentContext,
     required this.onRefresh,
     required this.onCloseUnder,
     required this.onOpenFile,
@@ -536,7 +545,7 @@ class _DirActionsSheet extends StatelessWidget {
   void _confirmDelete(BuildContext context) {
     Navigator.pop(context);
     showDialog(
-      context: context,
+      context: parentContext,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Delete folder?'),
@@ -551,14 +560,15 @@ class _DirActionsSheet extends StatelessWidget {
                 backgroundColor: Theme.of(ctx).colorScheme.error),
             onPressed: () async {
               Navigator.pop(ctx);
-              final messenger = ScaffoldMessenger.of(context);
               try {
                 onCloseUnder(dir.path);
                 await Directory(dir.path).delete(recursive: true);
                 onRefresh();
               } catch (e) {
-                messenger.showSnackBar(
-                    SnackBar(content: Text('Error: $e')));
+                if (parentContext.mounted) {
+                  ScaffoldMessenger.of(parentContext)
+                      .showSnackBar(SnackBar(content: Text('Error: $e')));
+                }
               }
             },
             child: const Text('Delete'),
@@ -572,7 +582,7 @@ class _DirActionsSheet extends StatelessWidget {
     Navigator.pop(context);
     final ctrl = TextEditingController();
     showDialog(
-      context: context,
+      context: parentContext,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text(isFile ? 'New file' : 'New folder'),
@@ -593,7 +603,6 @@ class _DirActionsSheet extends StatelessWidget {
               final name = ctrl.text.trim();
               if (name.isEmpty) return;
               Navigator.pop(ctx);
-              final messenger = ScaffoldMessenger.of(context);
               final newPath = '${dir.path}/$name';
               try {
                 if (isFile) {
@@ -605,8 +614,10 @@ class _DirActionsSheet extends StatelessWidget {
                   onRefresh();
                 }
               } catch (e) {
-                messenger.showSnackBar(
-                    SnackBar(content: Text('Error: $e')));
+                if (parentContext.mounted) {
+                  ScaffoldMessenger.of(parentContext)
+                      .showSnackBar(SnackBar(content: Text('Error: $e')));
+                }
               }
             },
             child: const Text('Create'),
@@ -620,7 +631,7 @@ class _DirActionsSheet extends StatelessWidget {
     Navigator.pop(context);
     final ctrl = TextEditingController(text: dir.name);
     showDialog(
-      context: context,
+      context: parentContext,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Rename folder'),
@@ -638,15 +649,15 @@ class _DirActionsSheet extends StatelessWidget {
               final newName = ctrl.text.trim();
               if (newName.isEmpty) return;
               Navigator.pop(ctx);
-              final messenger = ScaffoldMessenger.of(context);
-              final parent =
-                  dir.path.substring(0, dir.path.lastIndexOf('/'));
+              final parent = dir.path.substring(0, dir.path.lastIndexOf('/'));
               try {
                 await Directory(dir.path).rename('$parent/$newName');
                 onRefresh();
               } catch (e) {
-                messenger.showSnackBar(
-                    SnackBar(content: Text('Error: $e')));
+                if (parentContext.mounted) {
+                  ScaffoldMessenger.of(parentContext)
+                      .showSnackBar(SnackBar(content: Text('Error: $e')));
+                }
               }
             },
             child: const Text('Rename'),

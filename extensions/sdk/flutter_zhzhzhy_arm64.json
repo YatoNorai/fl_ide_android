@@ -67,5 +67,38 @@
     "build_apk": "flutter build apk",
     "build_appbundle": "flutter build appbundle",
     "build_debug": "flutter build apk --debug"
+  },
+  "sdk_config": {
+    "new_project_cmd": "flutter create $name",
+    "default_entry_file": "lib/main.dart",
+    "file_extensions": ["dart", "yaml", "json"],
+    "sync_command": "flutter pub get",
+    "sync_trigger_file": "pubspec.yaml",
+    "format_command": "dart format"
+  },
+  "dap_config": {
+    "adapter_binary": "$FLUTTER_ROOT/bin/flutter",
+    "adapter_args": ["debug_adapter"],
+    "adapter_id": "dart",
+    "launch_program": "lib/main.dart",
+    "devices_command": "$FLUTTER_ROOT/bin/flutter devices --machine",
+    "build_done_strings": [
+      "Syncing files to device",
+      "flutter run key commands",
+      "Running with soundNullSafety",
+      "To hot reload"
+    ],
+    "platform_device_map": {
+      "android": "android",
+      "web": "web-server",
+      "linux": "linux"
+    },
+    "web_platform": "web",
+    "web_server_args": [
+      "-d", "web-server",
+      "--web-port", "5050",
+      "--web-hostname", "localhost",
+      "--no-start-paused"
+    ]
   }
 }

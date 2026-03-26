@@ -8,6 +8,10 @@
     <uses-permission android:name="android.permission.VIBRATE"/>
     <!-- For pm install -->
     <uses-permission android:name="android.permission.INSTALL_PACKAGES"/>
+    <!-- Keep app alive while actively developing (debug sessions, LSP) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
     <application
         android:label="FL IDE"
@@ -50,6 +54,12 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2"/>
+
+        <!-- Foreground service to keep the IDE alive while debugging -->
+        <service
+            android:name="com.pravera.flutter_foreground_task.service.ForegroundTaskService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync"/>
     </application>
 
     <queries>

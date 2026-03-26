@@ -15,7 +15,8 @@ class RuntimeEnvir {
 
   // SDK paths inside rootfs
   static String get flutterPath => '$usrPath/opt/flutter';
-  static String get androidSdkPath => '$usrPath/android-sdk';
+  // termux-android-sdk (mumumusuc) installs to $PREFIX/opt/android-sdk
+  static String get androidSdkPath => '$usrPath/opt/android-sdk';
   static String get nodePath => '$usrPath/bin/node';
   static String get npmPath => '$usrPath/bin/npm';
   static String get pythonPath => '$usrPath/bin/python3';

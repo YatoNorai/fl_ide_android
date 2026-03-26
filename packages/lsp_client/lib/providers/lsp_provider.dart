@@ -4,7 +4,13 @@ import 'package:core/core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:quill_code/quill_code.dart';
 
-enum LspStatus { stopped, starting, running, error }
+/// LSP lifecycle states:
+///   stopped  → process not configured
+///   starting → starting the LSP process (handshake in progress, ~0–1s)
+///   warming  → process running, waiting for first diagnostics push (~1–25s)
+///   ready    → LSP has responded at least once (completions + diagnostics work)
+///   error    → failed to start
+enum LspStatus { stopped, starting, warming, ready, error }
 
 class LspProvider extends ChangeNotifier {
   LspStatus _status = LspStatus.stopped;
@@ -14,7 +20,20 @@ class LspProvider extends ChangeNotifier {
   LspStatus get status => _status;
   QuillLspConfig? get lspConfig => _lspConfig;
   String? get error => _error;
-  bool get isRunning => _status == LspStatus.running;
+
+  /// True once the LSP process is running (warming OR ready).
+  bool get isRunning => _status == LspStatus.warming || _status == LspStatus.ready;
+
+  /// True only after the LSP has delivered its first diagnostics response.
+  bool get isReady => _status == LspStatus.ready;
+
+  /// Called by the editor when the LSP delivers its first diagnostics push.
+  void markReady() {
+    if (_status == LspStatus.warming) {
+      _status = LspStatus.ready;
+      notifyListeners();
+    }
+  }
 
   /// Build a QuillLspStdioConfig for the given file extension.
   /// The config is passed to QuillCodeEditor which manages the connection.
@@ -32,16 +51,13 @@ class LspProvider extends ChangeNotifier {
     _status = LspStatus.starting;
     notifyListeners();
 
-    // Let the UI render the "starting" state before switching to running.
-    await Future.microtask(() {});
-
     _lspConfig = QuillLspStdioConfig(
       executable: cmd.first,
       args: cmd.sublist(1),
       languageId: _languageId(extension),
       workspacePath: projectPath,
     );
-    _status = LspStatus.running;
+    _status = LspStatus.warming;
     notifyListeners();
   }
 

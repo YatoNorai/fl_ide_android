@@ -1,5 +1,5 @@
-name: build_runner_pkg
-description: "FL IDE — build execution, APK detection and output streaming"
+name: dap_client
+description: "FL IDE — Debug Adapter Protocol client for Flutter/Dart"
 publish_to: none
 version: 0.0.1
 
@@ -13,10 +13,6 @@ dependencies:
     sdk: flutter
   core:
     path: ../core
-  dap_client:
-    path: ../dap_client
-  terminal_pkg:
-    path: ../terminal_pkg
   provider: ^6.1.2
 
 dev_dependencies:

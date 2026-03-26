@@ -7,6 +7,7 @@ import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:dap_client/dap_client.dart';
 import 'package:lsp_client/lsp_client.dart';
 import 'package:project_manager/project_manager.dart';
 import 'package:provider/provider.dart';
@@ -266,7 +267,15 @@ class _AppShell extends StatelessWidget {
     return Consumer<SettingsProvider>(
       builder: (context, settings, _) {
         // Wait until SharedPreferences are loaded to avoid a false onboarding flash.
-        if (!settings.isLoaded) return const Scaffold(body: SizedBox.shrink());
+        if (!settings.isLoaded) {
+          return Scaffold(
+            body: Center(
+              child: Image.asset('assets/logo.png',
+                  width: 80, height: 80, fit: BoxFit.contain,
+                  color: Theme.of(context).colorScheme.primary),
+            ),
+          );
+        }
 
         if (!settings.onboardingDone) return const OnboardingScreen();
 
@@ -290,6 +299,7 @@ class _AppShell extends StatelessWidget {
                       ChangeNotifierProvider(create: (_) => TerminalProvider()),
                       ChangeNotifierProvider(create: (_) => BuildProvider()),
                       ChangeNotifierProvider(create: (_) => LspProvider()),
+                      ChangeNotifierProvider(create: (_) => DebugProvider()),
                       ChangeNotifierProvider(
                           create: (_) => AppInstallerProvider()),
                       ChangeNotifierProvider<ExtensionsProvider>.value(

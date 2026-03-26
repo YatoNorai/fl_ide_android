@@ -1,5 +1,7 @@
 import 'dart:ui';
 
+import 'package:build_runner_pkg/build_runner_pkg.dart'
+    show BuildPlatform, supportedPlatforms;
 import 'package:core/core.dart';
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
@@ -419,25 +421,29 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
             contentPadding: const EdgeInsets.symmetric(vertical: 8),
             content: Column(
               mainAxisSize: MainAxisSize.min,
-              children: kSupportedLanguages.map((lang) {
-                final selected = lang.code == vm.language;
-                return ListTile(
-                  title: Text(lang.native),
-                  subtitle: Text(lang.name,
+              children: [
+                for (final lang in kSupportedLanguages)
+                  ListTile(
+                    title: Text(lang.native),
+                    subtitle: Text(
+                      lang.name,
                       style: TextStyle(
-                          color: Theme.of(ctx).colorScheme.onSurfaceVariant,
-                          fontSize: 12)),
-                  trailing: selected
-                      ? Icon(Icons.check_rounded,
-                          color: Theme.of(ctx).colorScheme.primary)
-                      : null,
-                  selected: selected,
-                  onTap: () {
-                    vm.setLanguage(lang.code);
-                    Navigator.pop(ctx);
-                  },
-                );
-              }).toList(),
+                        color:
+                            Theme.of(ctx).colorScheme.onSurfaceVariant,
+                        fontSize: 12,
+                      ),
+                    ),
+                    trailing: lang.code == vm.language
+                        ? Icon(Icons.check_rounded,
+                            color: Theme.of(ctx).colorScheme.primary)
+                        : null,
+                    selected: lang.code == vm.language,
+                    onTap: () {
+                      vm.setLanguage(lang.code);
+                      Navigator.pop(ctx);
+                    },
+                  ),
+              ],
             ),
           ),
         ),
@@ -1039,6 +1045,72 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
                     icon: FontAwesomeIcons.wrench);
               }),
             const SizedBox(height: 16),
+            _sectionHeader('Debug Platform'),
+            Consumer<SettingsProvider>(
+              builder: (context, settings, _) {
+                // Only show SDKs that are installed AND support multiple platforms
+                // or need explicit platform selection (Flutter)
+                final debugSdks = installed.where((t) {
+                  final platforms = supportedPlatforms(t);
+                  return platforms.length > 1 || t == SdkType.flutter;
+                }).toList();
+
+                if (debugSdks.isEmpty) {
+                  return _infoTile(context,
+                      title: 'No configurable SDKs',
+                      subtitle: 'Install Flutter or another multi-platform SDK',
+                      borderRadius: const BorderRadius.all(Radius.circular(30)),
+                      iconBg: Colors.grey,
+                      icon: FontAwesomeIcons.gear);
+                }
+
+                return Column(
+                  children: debugSdks.asMap().entries.map((e) {
+                    final idx = e.key;
+                    final sdkType = e.value;
+                    final platforms = supportedPlatforms(sdkType);
+                    final savedName = settings.debugPlatformFor(sdkType.name);
+                    final currentPlatform = savedName != null
+                        ? platforms.firstWhere(
+                            (p) => p.name == savedName,
+                            orElse: () => platforms.first)
+                        : platforms.first;
+                    final isFirst = idx == 0;
+                    final isLast = idx == debugSdks.length - 1;
+                    return Card(
+                      elevation: 0,
+                      color: Theme.of(context).colorScheme.surfaceTint.withValues(alpha: 0.1),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.vertical(
+                          top: isFirst ? const Radius.circular(30) : const Radius.circular(10),
+                          bottom: isLast ? const Radius.circular(30) : const Radius.circular(10),
+                        ),
+                      ),
+                      margin: const EdgeInsets.symmetric(vertical: 2),
+                      child: ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: Colors.deepPurple,
+                          child: Text(sdkType.icon,
+                              style: const TextStyle(fontSize: 16)),
+                        ),
+                        title: Text(sdkType.displayName,
+                            style: TextStyle(
+                                color: Theme.of(context).colorScheme.onSurface)),
+                        subtitle: Text(
+                            '${currentPlatform.icon}  ${currentPlatform.label}',
+                            style: TextStyle(
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                fontSize: 12)),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () => _showPlatformPicker(
+                            context, sdkType, platforms, currentPlatform, settings),
+                      ),
+                    );
+                  }).toList(),
+                );
+              },
+            ),
+            const SizedBox(height: 16),
             _sectionHeader(s.lspPaths),
             Consumer<SettingsProvider>(
               builder: (context, settings, _) {
@@ -1077,6 +1149,47 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
           ],
         );
       },
+    );
+  }
+
+  void _showPlatformPicker(
+    BuildContext context,
+    SdkType sdkType,
+    List<BuildPlatform> platforms,
+    BuildPlatform current,
+    SettingsProvider settings,
+  ) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Debug platform for ${sdkType.displayName}'),
+        contentPadding: const EdgeInsets.symmetric(vertical: 8),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final p in platforms)
+              ListTile(
+                leading: Text(p.icon, style: const TextStyle(fontSize: 20)),
+                title: Text(p.label),
+                trailing: p == current
+                    ? Icon(Icons.check_rounded,
+                        color: Theme.of(ctx).colorScheme.primary, size: 18)
+                    : null,
+                selected: p == current,
+                onTap: () {
+                  settings.setDebugPlatform(sdkType.name, p.name);
+                  Navigator.pop(ctx);
+                },
+              ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(AppStrings.of(ctx).cancel),
+          ),
+        ],
+      ),
     );
   }
 

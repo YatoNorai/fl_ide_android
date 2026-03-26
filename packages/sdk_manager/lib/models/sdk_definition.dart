@@ -1,15 +1,20 @@
 import 'package:core/core.dart';
 
-/// All info needed to install and verify an SDK inside the rootfs
+/// Hardcoded fallback SDK definitions.
+/// When a JSON extension is installed its [SdkConfig] / [DapConfig] take
+/// priority. These values are used when no matching extension is available.
 class SdkDefinition {
   final SdkType type;
-  final String verifyBinary; // binary to check existence
-  final String verifyCmd; // command to run to get version
-  final String installScript; // bash one-liner to install
-  final String buildCommand; // how to build a project
-  final String newProjectCmd; // how to create a new project ($name = project name)
-  final List<String> projectFileExtensions; // for syntax highlighting
-  final String defaultEntryFile; // file to open on project launch
+  final String verifyBinary;
+  final String verifyCmd;
+  final String installScript;
+  final String buildCommand;
+
+  /// Project-level config (new project cmd, entry file, sync, etc.)
+  final SdkConfig sdkConfig;
+
+  /// DAP adapter config. Empty (no DAP) for non-Flutter SDKs by default.
+  final DapConfig dapConfig;
 
   const SdkDefinition({
     required this.type,
@@ -17,10 +22,19 @@ class SdkDefinition {
     required this.verifyCmd,
     required this.installScript,
     required this.buildCommand,
-    required this.newProjectCmd,
-    required this.projectFileExtensions,
-    required this.defaultEntryFile,
+    required this.sdkConfig,
+    this.dapConfig = DapConfig.empty,
   });
+
+  // ── Convenience pass-throughs ─────────────────────────────────────────────
+
+  String get newProjectCmd       => sdkConfig.newProjectCmd;
+  String get defaultEntryFile    => sdkConfig.defaultEntryFile;
+  List<String> get projectFileExtensions => sdkConfig.fileExtensions;
+  String get syncCommand         => sdkConfig.syncCommand;
+  String get syncTriggerFile     => sdkConfig.syncTriggerFile;
+
+  // ── Hardcoded definitions ─────────────────────────────────────────────────
 
   static const List<SdkDefinition> all = [
     SdkDefinition(
@@ -37,9 +51,39 @@ flutter config --android-sdk \$ANDROID_HOME
 flutter doctor
 ''',
       buildCommand: 'flutter build apk --debug',
-      newProjectCmd: 'flutter create \$name',
-      projectFileExtensions: ['dart', 'yaml', 'json'],
-      defaultEntryFile: 'lib/main.dart',
+      sdkConfig: SdkConfig(
+        newProjectCmd: 'flutter create \$name',
+        defaultEntryFile: 'lib/main.dart',
+        fileExtensions: ['dart', 'yaml', 'json'],
+        syncCommand: 'flutter pub get',
+        syncTriggerFile: 'pubspec.yaml',
+        formatCommand: 'dart format',
+      ),
+      dapConfig: DapConfig(
+        adapterBinary: r'$FLUTTER_ROOT/bin/flutter',
+        adapterArgs: ['debug_adapter'],
+        adapterId: 'dart',
+        launchProgram: 'lib/main.dart',
+        devicesCommand: r'$FLUTTER_ROOT/bin/flutter devices --machine',
+        buildDoneStrings: [
+          'Syncing files to device',
+          'flutter run key commands',
+          'Running with soundNullSafety',
+          'To hot reload',
+        ],
+        platformDeviceMap: {
+          'android': 'android',
+          'web': 'web-server',
+          'linux': 'linux',
+        },
+        webPlatform: 'web',
+        webServerArgs: [
+          '-d', 'web-server',
+          '--web-port', '5050',
+          '--web-hostname', 'localhost',
+          '--no-start-paused',
+        ],
+      ),
     ),
     SdkDefinition(
       type: SdkType.androidSdk,
@@ -56,11 +100,11 @@ yes | sdkmanager --licenses
 sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 ''',
       buildCommand: './gradlew assembleDebug',
-      newProjectCmd: '''
-mkdir -p \$name && cd \$name
-''',
-      projectFileExtensions: ['java', 'kotlin', 'kt', 'xml', 'gradle'],
-      defaultEntryFile: 'app/src/main/java/MainActivity.kt',
+      sdkConfig: SdkConfig(
+        newProjectCmd: 'mkdir -p \$name',
+        defaultEntryFile: 'app/src/main/java/MainActivity.kt',
+        fileExtensions: ['java', 'kotlin', 'kt', 'xml', 'gradle'],
+      ),
     ),
     SdkDefinition(
       type: SdkType.reactNative,
@@ -71,9 +115,13 @@ pkg update -y && pkg install -y nodejs-lts
 npm install -g react-native-cli
 ''',
       buildCommand: 'npx react-native build-android --mode=debug',
-      newProjectCmd: 'npx react-native init \$name',
-      projectFileExtensions: ['js', 'jsx', 'ts', 'tsx', 'json'],
-      defaultEntryFile: 'App.tsx',
+      sdkConfig: SdkConfig(
+        newProjectCmd: 'npx react-native init \$name',
+        defaultEntryFile: 'App.tsx',
+        fileExtensions: ['js', 'jsx', 'ts', 'tsx', 'json'],
+        syncCommand: 'npm install',
+        syncTriggerFile: 'package.json',
+      ),
     ),
     SdkDefinition(
       type: SdkType.nodejs,
@@ -81,9 +129,13 @@ npm install -g react-native-cli
       verifyCmd: 'node --version',
       installScript: 'pkg update -y && pkg install -y nodejs-lts',
       buildCommand: 'npm run build',
-      newProjectCmd: 'mkdir -p \$name && cd \$name && npm init -y',
-      projectFileExtensions: ['js', 'ts', 'mjs', 'cjs', 'json'],
-      defaultEntryFile: 'index.js',
+      sdkConfig: SdkConfig(
+        newProjectCmd: 'mkdir -p \$name && cd \$name && npm init -y',
+        defaultEntryFile: 'index.js',
+        fileExtensions: ['js', 'ts', 'mjs', 'cjs', 'json'],
+        syncCommand: 'npm install',
+        syncTriggerFile: 'package.json',
+      ),
     ),
     SdkDefinition(
       type: SdkType.python,
@@ -91,9 +143,13 @@ npm install -g react-native-cli
       verifyCmd: 'python3 --version',
       installScript: 'pkg update -y && pkg install -y python',
       buildCommand: 'python3 main.py',
-      newProjectCmd: 'mkdir -p \$name',
-      projectFileExtensions: ['py', 'txt', 'cfg', 'toml'],
-      defaultEntryFile: 'main.py',
+      sdkConfig: SdkConfig(
+        newProjectCmd: 'mkdir -p \$name',
+        defaultEntryFile: 'main.py',
+        fileExtensions: ['py', 'txt', 'cfg', 'toml'],
+        syncCommand: 'pip install -r requirements.txt',
+        syncTriggerFile: 'requirements.txt',
+      ),
     ),
     SdkDefinition(
       type: SdkType.swift,
@@ -101,9 +157,11 @@ npm install -g react-native-cli
       verifyCmd: 'swift --version',
       installScript: 'pkg update -y && pkg install -y swift',
       buildCommand: 'swift build',
-      newProjectCmd: 'mkdir -p \$name && cd \$name && swift package init --type executable',
-      projectFileExtensions: ['swift', 'json', 'md'],
-      defaultEntryFile: 'Sources/main.swift',
+      sdkConfig: SdkConfig(
+        newProjectCmd: 'mkdir -p \$name && cd \$name && swift package init --type executable',
+        defaultEntryFile: 'Sources/main.swift',
+        fileExtensions: ['swift', 'json', 'md'],
+      ),
     ),
   ];
 

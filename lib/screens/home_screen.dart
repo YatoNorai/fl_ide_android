@@ -1,8 +1,6 @@
-import 'package:core/core.dart';
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:project_manager/project_manager.dart';
-import 'package:provider/provider.dart';
 
 import '../l10n/app_strings.dart';
 import 'settings_screen.dart';

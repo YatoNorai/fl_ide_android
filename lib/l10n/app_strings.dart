@@ -213,8 +213,27 @@ class AppStrings {
   String get peekCreatingProject  => _t('peekCreatingProject');
   String get peekLoadingProject   => _t('peekLoadingProject');
   String get peekStartingLsp      => _t('peekStartingLsp');
+  String get peekSyncingDeps      => _t('peekSyncingDeps');
   String get peekReady            => _t('peekReady');
   String get peekSwipeUp          => _t('peekSwipeUp');
+
+  // ── Workspace sync banner ─────────────────────────────────────────────────
+  String syncBannerMsg(String cmd)  => _t('syncBannerMsg').replaceFirst('%s', cmd);
+  String get syncBannerIgnore       => _t('syncBannerIgnore');
+  String get syncBannerRun          => _t('syncBannerRun');
+
+  // ── Workspace dialogs / menus ─────────────────────────────────────────────
+  String get wsCloseProject       => _t('wsCloseProject');
+  String get wsCloseProjectQ      => _t('wsCloseProjectQ');
+  String get wsCloseProjectBody   => _t('wsCloseProjectBody');
+  String get wsCloseYes           => _t('wsCloseYes');
+  String get wsUndo               => _t('wsUndo');
+  String get wsRedo               => _t('wsRedo');
+  String get wsSyncProject        => _t('wsSyncProject');
+  String get wsSearchInFile       => _t('wsSearchInFile');
+  String get wsCommands           => _t('wsCommands');
+  String get wsHotReload          => _t('wsHotReload');
+  String get wsHotRestart         => _t('wsHotRestart');
 
   // ── Settings general ──────────────────────────────────────────────────────
   String get language          => _t('language');
@@ -447,8 +466,25 @@ class AppStrings {
       'peekCreatingProject': 'Criando projeto...',
       'peekLoadingProject': 'Carregando projeto...',
       'peekStartingLsp': 'Carregando LSP...',
+      'peekSyncingDeps': 'Instalando dependências...',
       'peekReady': 'Projeto pronto',
       'peekSwipeUp': 'Deslize para cima para acessar o terminal',
+      // Workspace sync banner
+      'syncBannerMsg': 'Instalar dependências com "%s"?',
+      'syncBannerIgnore': 'Ignorar',
+      'syncBannerRun': 'Instalar',
+      // Workspace dialogs / menus
+      'wsCloseProject': 'Fechar projeto',
+      'wsCloseProjectQ': 'Fechar projeto?',
+      'wsCloseProjectBody': 'Tem certeza que deseja fechar o projeto atual? Alterações não salvas serão perdidas.',
+      'wsCloseYes': 'Sim, fechar',
+      'wsUndo': 'Desfazer',
+      'wsRedo': 'Refazer',
+      'wsSyncProject': 'Sincronizar projeto',
+      'wsSearchInFile': 'Pesquisar no arquivo…',
+      'wsCommands': 'Comandos',
+      'wsHotReload': 'Hot Reload',
+      'wsHotRestart': 'Hot Restart',
     },
     'en': {
       'cancel': 'Cancel',
@@ -651,8 +687,25 @@ class AppStrings {
       'peekCreatingProject': 'Creating project...',
       'peekLoadingProject': 'Loading project...',
       'peekStartingLsp': 'Starting LSP...',
+      'peekSyncingDeps': 'Installing dependencies...',
       'peekReady': 'Project ready',
       'peekSwipeUp': 'Swipe up to access the terminal',
+      // Workspace sync banner
+      'syncBannerMsg': 'Install dependencies with "%s"?',
+      'syncBannerIgnore': 'Ignore',
+      'syncBannerRun': 'Install',
+      // Workspace dialogs / menus
+      'wsCloseProject': 'Close project',
+      'wsCloseProjectQ': 'Close project?',
+      'wsCloseProjectBody': 'Are you sure you want to close the current project? Any unsaved changes will be lost.',
+      'wsCloseYes': 'Yes, close',
+      'wsUndo': 'Undo',
+      'wsRedo': 'Redo',
+      'wsSyncProject': 'Sync project',
+      'wsSearchInFile': 'Search in file…',
+      'wsCommands': 'Commands',
+      'wsHotReload': 'Hot Reload',
+      'wsHotRestart': 'Hot Restart',
     },
     'es': {
       'cancel': 'Cancelar',
@@ -855,8 +908,25 @@ class AppStrings {
       'peekCreatingProject': 'Creando proyecto...',
       'peekLoadingProject': 'Cargando proyecto...',
       'peekStartingLsp': 'Iniciando LSP...',
+      'peekSyncingDeps': 'Instalando dependencias...',
       'peekReady': 'Proyecto listo',
       'peekSwipeUp': 'Desliza hacia arriba para acceder al terminal',
+      // Workspace sync banner
+      'syncBannerMsg': '¿Instalar dependencias con "%s"?',
+      'syncBannerIgnore': 'Ignorar',
+      'syncBannerRun': 'Instalar',
+      // Workspace dialogs / menus
+      'wsCloseProject': 'Cerrar proyecto',
+      'wsCloseProjectQ': '¿Cerrar proyecto?',
+      'wsCloseProjectBody': '¿Estás seguro de que deseas cerrar el proyecto actual? Los cambios no guardados se perderán.',
+      'wsCloseYes': 'Sí, cerrar',
+      'wsUndo': 'Deshacer',
+      'wsRedo': 'Rehacer',
+      'wsSyncProject': 'Sincronizar proyecto',
+      'wsSearchInFile': 'Buscar en archivo…',
+      'wsCommands': 'Comandos',
+      'wsHotReload': 'Hot Reload',
+      'wsHotRestart': 'Hot Restart',
     },
     'fr': {
       'cancel': 'Annuler',
@@ -1059,8 +1129,25 @@ class AppStrings {
       'peekCreatingProject': 'Création du projet...',
       'peekLoadingProject': 'Chargement du projet...',
       'peekStartingLsp': 'Démarrage du LSP...',
+      'peekSyncingDeps': 'Installation des dépendances...',
       'peekReady': 'Projet prêt',
       'peekSwipeUp': 'Glissez vers le haut pour accéder au terminal',
+      // Workspace sync banner
+      'syncBannerMsg': 'Installer les dépendances avec "%s" ?',
+      'syncBannerIgnore': 'Ignorer',
+      'syncBannerRun': 'Installer',
+      // Workspace dialogs / menus
+      'wsCloseProject': 'Fermer le projet',
+      'wsCloseProjectQ': 'Fermer le projet ?',
+      'wsCloseProjectBody': 'Voulez-vous vraiment fermer le projet en cours ? Les modifications non enregistrées seront perdues.',
+      'wsCloseYes': 'Oui, fermer',
+      'wsUndo': 'Annuler',
+      'wsRedo': 'Rétablir',
+      'wsSyncProject': 'Synchroniser le projet',
+      'wsSearchInFile': 'Rechercher dans le fichier…',
+      'wsCommands': 'Commandes',
+      'wsHotReload': 'Hot Reload',
+      'wsHotRestart': 'Hot Restart',
     },
     'de': {
       'cancel': 'Abbrechen',
@@ -1263,8 +1350,25 @@ class AppStrings {
       'peekCreatingProject': 'Projekt wird erstellt...',
       'peekLoadingProject': 'Projekt wird geladen...',
       'peekStartingLsp': 'LSP wird gestartet...',
+      'peekSyncingDeps': 'Abhängigkeiten werden installiert...',
       'peekReady': 'Projekt bereit',
       'peekSwipeUp': 'Nach oben wischen, um auf das Terminal zuzugreifen',
+      // Workspace sync banner
+      'syncBannerMsg': 'Abhängigkeiten mit "%s" installieren?',
+      'syncBannerIgnore': 'Ignorieren',
+      'syncBannerRun': 'Installieren',
+      // Workspace dialogs / menus
+      'wsCloseProject': 'Projekt schließen',
+      'wsCloseProjectQ': 'Projekt schließen?',
+      'wsCloseProjectBody': 'Möchten Sie das aktuelle Projekt wirklich schließen? Nicht gespeicherte Änderungen gehen verloren.',
+      'wsCloseYes': 'Ja, schließen',
+      'wsUndo': 'Rückgängig',
+      'wsRedo': 'Wiederholen',
+      'wsSyncProject': 'Projekt synchronisieren',
+      'wsSearchInFile': 'In Datei suchen…',
+      'wsCommands': 'Befehle',
+      'wsHotReload': 'Hot Reload',
+      'wsHotRestart': 'Hot Restart',
     },
   };
 }

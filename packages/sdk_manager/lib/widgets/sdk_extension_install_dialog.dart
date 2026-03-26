@@ -100,11 +100,18 @@ class _SdkInstallDialogState extends State<_SdkInstallDialog> {
 
   Map<String, String> _env(String downloadPath) {
     final base = RuntimeEnvir.baseEnv;
+    final androidHome = RuntimeEnvir.androidSdkPath;
     return {
       ...base,
       'PREFIX': RuntimeEnvir.usrPath,
+      'ANDROID_HOME': androidHome,
       'DOWNLOAD_PATH': downloadPath,
-      'PATH': '${RuntimeEnvir.flutterPath}/bin:${base['PATH'] ?? ''}',
+      // Include flutter bin, android cmdline-tools and platform-tools so every
+      // step can call sdkmanager/adb without needing "export PATH=..." inline.
+      'PATH': '${RuntimeEnvir.flutterPath}/bin'
+          ':$androidHome/cmdline-tools/latest/bin'
+          ':$androidHome/platform-tools'
+          ':${base['PATH'] ?? ''}',
     };
   }
 
@@ -122,7 +129,12 @@ class _SdkInstallDialogState extends State<_SdkInstallDialog> {
     if (stdout.isNotEmpty) debugPrint('[SdkInstall] stdout: $stdout');
     if (stderr.isNotEmpty) debugPrint('[SdkInstall] stderr: $stderr');
     debugPrint('[SdkInstall] exit: ${result.exitCode}');
-    return '$stdout$stderr'.trim();
+    final output = '$stdout${stderr.isNotEmpty ? '\n$stderr' : ''}'.trim();
+    if (result.exitCode != 0) {
+      throw Exception(
+          'Step failed (exit ${result.exitCode})${output.isNotEmpty ? ':\n$output' : ''}');
+    }
+    return output;
   }
 
   Future<void> _runSteps(List<_StepState> states, String downloadPath) async {
@@ -185,40 +197,47 @@ class _SdkInstallDialogState extends State<_SdkInstallDialog> {
 
   // ── Main install flow ──────────────────────────────────────────────────────
 
+  bool get _needsDownload =>
+      widget.ext.package.type != 'pkg' && widget.ext.package.url.isNotEmpty;
+
   Future<void> _startInstall() async {
     _cancelled = false;
     final tmpDir = '${RuntimeEnvir.filesPath}/tmp';
     await Directory(tmpDir).create(recursive: true);
-    final downloadPath = '$tmpDir/${widget.ext.package.filename}';
+    final downloadPath = _needsDownload
+        ? '$tmpDir/${widget.ext.package.filename}'
+        : '';
 
     try {
-      // Phase 1: Download
-      _set(() {
-        _phase = _Phase.downloading;
-        _downloadProgress = 0.0;
-        _downloadLabel = 'Starting download...';
-      });
+      // Phase 1: Download (skipped for pkg-type SDKs)
+      if (_needsDownload) {
+        _set(() {
+          _phase = _Phase.downloading;
+          _downloadProgress = 0.0;
+          _downloadLabel = 'Starting download...';
+        });
 
-      final dio = Dio();
-      await dio.download(
-        widget.ext.package.url,
-        downloadPath,
-        onReceiveProgress: (received, total) {
-          if (_cancelled) throw Exception('cancelled');
-          if (!mounted) return;
-          _set(() {
-            _downloadProgress = total > 0 ? received / total : 0;
-            final mb = (received / 1024 / 1024).toStringAsFixed(1);
-            final totalMb = total > 0
-                ? ' / ${(total / 1024 / 1024).toStringAsFixed(1)} MB'
-                : '';
-            _downloadLabel = '$mb MB$totalMb';
-          });
-        },
-        options: Options(followRedirects: true, maxRedirects: 10),
-      );
+        final dio = Dio();
+        await dio.download(
+          widget.ext.package.url,
+          downloadPath,
+          onReceiveProgress: (received, total) {
+            if (_cancelled) throw Exception('cancelled');
+            if (!mounted) return;
+            _set(() {
+              _downloadProgress = total > 0 ? received / total : 0;
+              final mb = (received / 1024 / 1024).toStringAsFixed(1);
+              final totalMb = total > 0
+                  ? ' / ${(total / 1024 / 1024).toStringAsFixed(1)} MB'
+                  : '';
+              _downloadLabel = '$mb MB$totalMb';
+            });
+          },
+          options: Options(followRedirects: true, maxRedirects: 10),
+        );
 
-      if (_cancelled) return;
+        if (_cancelled) return;
+      }
 
       // Phase 2: Install steps
       _set(() => _phase = _Phase.installing);
@@ -245,7 +264,9 @@ class _SdkInstallDialogState extends State<_SdkInstallDialog> {
       await _runSteps(_configStates, downloadPath);
 
       // Cleanup temp file on success
-      try { await File(downloadPath).delete(); } catch (_) {}
+      if (downloadPath.isNotEmpty) {
+        try { await File(downloadPath).delete(); } catch (_) {}
+      }
 
       _set(() => _phase = _Phase.done);
     } on DioException catch (e) {
@@ -328,24 +349,26 @@ class _SdkInstallDialogState extends State<_SdkInstallDialog> {
             children: [
               if (_phase == _Phase.idle) _buildIdleInfo(cs),
               if (!widget.uninstall && _phase != _Phase.idle) ...[
-                _PhaseSection(
-                  label: 'Download',
-                  icon: Icons.download_rounded,
-                  isActive: _phase == _Phase.downloading,
-                  isDone: _phase.index > _Phase.downloading.index &&
-                      _phase != _Phase.error,
-                  cs: cs,
-                  child: _phase == _Phase.downloading ||
-                          _phase.index > _Phase.downloading.index
-                      ? _DownloadProgress(
-                          progress: _downloadProgress,
-                          label: _downloadLabel,
-                          done: _phase.index > _Phase.downloading.index,
-                          cs: cs,
-                        )
-                      : null,
-                ),
-                const SizedBox(height: 8),
+                if (_needsDownload) ...[
+                  _PhaseSection(
+                    label: 'Download',
+                    icon: Icons.download_rounded,
+                    isActive: _phase == _Phase.downloading,
+                    isDone: _phase.index > _Phase.downloading.index &&
+                        _phase != _Phase.error,
+                    cs: cs,
+                    child: _phase == _Phase.downloading ||
+                            _phase.index > _Phase.downloading.index
+                        ? _DownloadProgress(
+                            progress: _downloadProgress,
+                            label: _downloadLabel,
+                            done: _phase.index > _Phase.downloading.index,
+                            cs: cs,
+                          )
+                        : null,
+                  ),
+                  const SizedBox(height: 8),
+                ],
                 _PhaseSection(
                   label: 'Install',
                   icon: Icons.install_mobile_rounded,
@@ -724,25 +747,33 @@ class _StepList extends StatelessWidget {
 
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 3),
-          child: Row(
+          child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Padding(
-                padding: const EdgeInsets.only(top: 1),
-                child: SizedBox(width: 16, height: 14, child: leading),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  s.step.description,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: s.done || s.active
-                        ? cs.onSurface.withValues(alpha: 0.85)
-                        : cs.onSurface.withValues(alpha: 0.4),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(top: 1),
+                    child: SizedBox(width: 16, height: 14, child: leading),
                   ),
-                ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      s.step.description,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: s.done || s.active
+                            ? cs.onSurface.withValues(alpha: 0.85)
+                            : cs.onSurface.withValues(alpha: 0.4),
+                      ),
+                    ),
+                  ),
+                ],
               ),
+              // Step output is intentionally not shown in the UI.
+              // Errors surface through the error banner; normal output is
+              // only printed to the debug console via debugPrint.
             ],
           ),
         );

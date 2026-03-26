@@ -1,5 +1,7 @@
 import 'package:core/core.dart';
 
+export 'package:core/core.dart' show SdkConfig, DapConfig;
+
 class SdkExtPackage {
   final String type;    // 'zip' | 'tar_gz' | 'deb'
   final String url;
@@ -17,8 +19,8 @@ class SdkExtPackage {
 
   factory SdkExtPackage.fromJson(Map<String, dynamic> j) => SdkExtPackage(
         type: j['type'] as String,
-        url: j['url'] as String,
-        filename: j['filename'] as String,
+        url: (j['url'] as String?) ?? '',
+        filename: (j['filename'] as String?) ?? '',
         arch: j['arch'] as String,
         sizeMb: (j['size_mb'] as num?)?.toDouble(),
       );
@@ -86,6 +88,12 @@ class SdkExtension {
   final String verifyBinary;
   final String verifyCommand;
 
+  /// Project-level SDK configuration (sync, new project, entry file, etc.)
+  final SdkConfig? sdkConfig;
+
+  /// Debug Adapter Protocol configuration for this SDK.
+  final DapConfig? dapConfig;
+
   const SdkExtension({
     required this.schemaVersion,
     required this.sdk,
@@ -101,34 +109,44 @@ class SdkExtension {
     this.uninstallSteps = const [],
     required this.verifyBinary,
     required this.verifyCommand,
+    this.sdkConfig,
+    this.dapConfig,
   });
 
-  factory SdkExtension.fromJson(Map<String, dynamic> j) => SdkExtension(
-        schemaVersion: j['schema_version'] as int,
-        sdk: j['sdk'] as String,
-        sdkVersion: j['sdk_version'] as String,
-        displayName: j['display_name'] as String,
-        description: j['description'] as String,
-        package: SdkExtPackage.fromJson(j['package'] as Map<String, dynamic>),
-        packageAuthor:
-            SdkExtAuthor.fromJson(j['package_author'] as Map<String, dynamic>),
-        jsonAuthor: SdkExtJsonAuthor.fromJson(
-            j['json_author'] as Map<String, dynamic>),
-        installSteps: (j['install_steps'] as List)
-            .map((s) => SdkExtStep.fromJson(s as Map<String, dynamic>))
-            .toList(),
-        configSteps: (j['config_steps'] as List)
-            .map((s) => SdkExtStep.fromJson(s as Map<String, dynamic>))
-            .toList(),
-        cleanupSteps: ((j['cleanup_steps'] as List?) ?? [])
-            .map((s) => SdkExtStep.fromJson(s as Map<String, dynamic>))
-            .toList(),
-        uninstallSteps: ((j['uninstall_steps'] as List?) ?? [])
-            .map((s) => SdkExtStep.fromJson(s as Map<String, dynamic>))
-            .toList(),
-        verifyBinary: j['verify_binary'] as String,
-        verifyCommand: j['verify_command'] as String,
-      );
+  factory SdkExtension.fromJson(Map<String, dynamic> j) {
+    final sdkCfgJson = j['sdk_config'] as Map<String, dynamic>?;
+    final dapCfgJson = j['dap_config'] as Map<String, dynamic>?;
+    return SdkExtension(
+      schemaVersion: j['schema_version'] as int,
+      sdk: j['sdk'] as String,
+      sdkVersion: j['sdk_version'] as String,
+      displayName: j['display_name'] as String,
+      description: j['description'] as String,
+      package: SdkExtPackage.fromJson(j['package'] as Map<String, dynamic>),
+      packageAuthor:
+          SdkExtAuthor.fromJson(j['package_author'] as Map<String, dynamic>),
+      jsonAuthor:
+          SdkExtJsonAuthor.fromJson(j['json_author'] as Map<String, dynamic>),
+      installSteps: (j['install_steps'] as List)
+          .map((s) => SdkExtStep.fromJson(s as Map<String, dynamic>))
+          .toList(),
+      configSteps: (j['config_steps'] as List)
+          .map((s) => SdkExtStep.fromJson(s as Map<String, dynamic>))
+          .toList(),
+      cleanupSteps: ((j['cleanup_steps'] as List?) ?? [])
+          .map((s) => SdkExtStep.fromJson(s as Map<String, dynamic>))
+          .toList(),
+      uninstallSteps: ((j['uninstall_steps'] as List?) ?? [])
+          .map((s) => SdkExtStep.fromJson(s as Map<String, dynamic>))
+          .toList(),
+      verifyBinary: j['verify_binary'] as String,
+      verifyCommand: j['verify_command'] as String,
+      sdkConfig: sdkCfgJson != null ? SdkConfig.fromJson(sdkCfgJson) : null,
+      dapConfig: (dapCfgJson != null && dapCfgJson.isNotEmpty)
+          ? DapConfig.fromJson(dapCfgJson)
+          : null,
+    );
+  }
 
   bool get isInstalled => RuntimeEnvir.isBinaryAvailable(verifyBinary);
 }

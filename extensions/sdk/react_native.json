@@ -66,5 +66,14 @@
     "device_param": "--deviceId",
     "build_debug": "npx react-native build-android --mode=debug",
     "build_release": "npx react-native build-android --mode=release"
-  }
+  },
+  "sdk_config": {
+    "new_project_cmd": "npx react-native init $name",
+    "default_entry_file": "App.tsx",
+    "file_extensions": ["js", "jsx", "ts", "tsx", "json"],
+    "sync_command": "npm install",
+    "sync_trigger_file": "package.json",
+    "format_command": ""
+  },
+  "dap_config": {}
 }

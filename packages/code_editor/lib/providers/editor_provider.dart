@@ -4,6 +4,25 @@ import 'package:core/core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:quill_code/quill_code.dart';
 
+/// [QuillCodeController] subclass that fires [onDiagnosticsReceived] the first
+/// time the LSP pushes a diagnostics notification. The callback is called once
+/// and cleared so it doesn't accumulate closures.
+class LspAwareController extends QuillCodeController {
+  VoidCallback? onDiagnosticsReceived;
+
+  LspAwareController({required super.text, super.language});
+
+  @override
+  void setDiagnostics(List<DiagnosticRegion> regions) {
+    super.setDiagnostics(regions);
+    final cb = onDiagnosticsReceived;
+    if (cb != null) {
+      onDiagnosticsReceived = null; // fire once
+      cb();
+    }
+  }
+}
+
 class OpenFile {
   final String path;
   final String name;
@@ -61,7 +80,7 @@ class EditorProvider extends ChangeNotifier {
     final name = filePath.split('/').last.split('\\').last;
     final openFile = OpenFile(path: filePath, name: name);
 
-    openFile.controller = QuillCodeController(
+    openFile.controller = LspAwareController(
       text: content,
       language: _detectLanguage(openFile.extension),
     );
@@ -71,13 +90,58 @@ class EditorProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> saveActiveFile() async {
+  /// Saves the active file.
+  /// If [format] is true and the file is a .dart file, runs
+  /// `dart format --output show` and applies the formatted output.
+  Future<void> saveActiveFile({bool format = false}) async {
     final f = activeFile;
     if (f == null || f.controller == null) return;
 
-    final content = f.controller!.content.fullText;
+    String content = f.controller!.content.fullText;
+
+    if (format && f.extension == 'dart') {
+      try {
+        // Write first so dart format can read the file.
+        await File(f.path).writeAsString(content);
+        final dart = '${RuntimeEnvir.usrPath}/bin/dart';
+        await Process.run(
+          dart,
+          ['format', f.path],
+          environment: RuntimeEnvir.baseEnv,
+        );
+        // Read back the (possibly) formatted content.
+        content = await File(f.path).readAsString();
+      } catch (_) {
+        // Formatting failed — save unformatted anyway.
+      }
+    }
+
     await File(f.path).writeAsString(content);
     f.isDirty = false;
+    notifyListeners();
+  }
+
+  /// Saves all open files, optionally formatting .dart files.
+  Future<void> saveAllFiles({bool format = false}) async {
+    for (var i = 0; i < _openFiles.length; i++) {
+      final f = _openFiles[i];
+      if (f.controller == null) continue;
+      String content = f.controller!.content.fullText;
+      if (format && f.extension == 'dart') {
+        try {
+          await File(f.path).writeAsString(content);
+          final dart = '${RuntimeEnvir.usrPath}/bin/dart';
+          await Process.run(
+            dart,
+            ['format', f.path],
+            environment: RuntimeEnvir.baseEnv,
+          );
+          content = await File(f.path).readAsString();
+        } catch (_) {}
+      }
+      await File(f.path).writeAsString(content);
+      f.isDirty = false;
+    }
     notifyListeners();
   }
 
@@ -145,9 +209,24 @@ class EditorProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  void moveToPanel(int globalIndex, {required bool bottom}) {
+  /// Moves a file between top/bottom panels.
+  /// When [bottom] is true and [atFirst] is true, inserts the file at
+  /// position 0 among bottom-panel files so the new tab appears first.
+  void moveToPanel(int globalIndex, {required bool bottom, bool atFirst = false}) {
     if (globalIndex < 0 || globalIndex >= _openFiles.length) return;
-    _openFiles[globalIndex].inBottomPanel = bottom;
+    final file = _openFiles[globalIndex];
+    file.inBottomPanel = bottom;
+
+    if (bottom && atFirst) {
+      _openFiles.removeAt(globalIndex);
+      final firstBottom = _openFiles.indexWhere((f) => f.inBottomPanel);
+      if (firstBottom == -1) {
+        _openFiles.add(file);
+      } else {
+        _openFiles.insert(firstBottom, file);
+      }
+      _activeIndex = _openFiles.indexOf(file);
+    }
     notifyListeners();
   }
 
