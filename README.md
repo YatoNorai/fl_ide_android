@@ -7,7 +7,6 @@ FlutterIDEAndroid é uma IDE móvel desenvolvida em Flutter e Kotlin para dispos
 
 ## Ferramentas Utilizadas
 
-- **[termux-app](https://github.com/FlutterIDEAndroid/termux-app):** fork de [termux-app](https://github.com/termux/termux-app)** Integração com o ambiente Terminal.
 - **[termux-packages](https://github.com/FlutterIDEAndroid/termux-packages):** fork de [termux-packages](https://github.com/termux/termux-packages) Gerenciamento e instalação de pacotes no Terminal.
 - **[termux-flutter](https://github.com/mumumusuc/termux-flutter):** fork de [termux-flutter](https://github.com/mumumusuc/termux-flutter) Ferramenta que permite a execução de comandos Flutter no ambiente Termux.
 
