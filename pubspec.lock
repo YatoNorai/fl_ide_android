@@ -578,7 +578,7 @@ packages:
     description:
       path: "."
       ref: rust-impl
-      resolved-ref: "7fb0f1b479c1161e55157915828cfeaa86557429"
+      resolved-ref: "9741e71ab69fcb906a23b9c89dcd23dac053ba46"
       url: "https://github.com/YatoNorai/quill_code.git"
     source: git
     version: "0.0.1"

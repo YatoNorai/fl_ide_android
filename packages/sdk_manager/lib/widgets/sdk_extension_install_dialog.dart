@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui';
 
@@ -47,6 +48,7 @@ class _StepState {
   bool done;
   bool active;
   String? output;
+  final List<String> liveLines = [];
 
   _StepState({required this.step})
       : done = false,
@@ -115,24 +117,47 @@ class _SdkInstallDialogState extends State<_SdkInstallDialog> {
     };
   }
 
-  Future<String> _runShell(String command, String downloadPath) async {
+  /// Runs [command] in bash, streaming stdout+stderr line-by-line.
+  /// [onLine] is called on every new line so the UI can update in real-time.
+  Future<String> _runShell(
+    String command,
+    String downloadPath, {
+    void Function(String line)? onLine,
+  }) async {
     final resolved = _resolve(command, downloadPath);
     debugPrint('[SdkInstall] shell: $resolved');
-    final result = await Process.run(
+
+    final process = await Process.start(
       RuntimeEnvir.bashPath,
       ['-c', resolved],
       environment: _env(downloadPath),
       workingDirectory: RuntimeEnvir.homePath,
     );
-    final stdout = result.stdout?.toString().trim() ?? '';
-    final stderr = result.stderr?.toString().trim() ?? '';
-    if (stdout.isNotEmpty) debugPrint('[SdkInstall] stdout: $stdout');
-    if (stderr.isNotEmpty) debugPrint('[SdkInstall] stderr: $stderr');
-    debugPrint('[SdkInstall] exit: ${result.exitCode}');
-    final output = '$stdout${stderr.isNotEmpty ? '\n$stderr' : ''}'.trim();
-    if (result.exitCode != 0) {
+
+    final buffer = StringBuffer();
+
+    Future<void> consume(Stream<List<int>> stream) async {
+      await for (final chunk in stream) {
+        final text = String.fromCharCodes(chunk);
+        buffer.write(text);
+        for (final line in text.split('\n')) {
+          final l = line.trim();
+          if (l.isNotEmpty) {
+            debugPrint('[SdkInstall] $l');
+            onLine?.call(l);
+          }
+        }
+      }
+    }
+
+    await Future.wait([consume(process.stdout), consume(process.stderr)]);
+    final exitCode = await process.exitCode;
+    debugPrint('[SdkInstall] exit: $exitCode');
+
+    final output = buffer.toString().trim();
+    if (exitCode != 0) {
       throw Exception(
-          'Step failed (exit ${result.exitCode})${output.isNotEmpty ? ':\n$output' : ''}');
+          'Step failed (exit $exitCode)${output.isNotEmpty ? ':\n$output' : ''}');
     }
     return output;
   }
@@ -140,10 +165,18 @@ class _SdkInstallDialogState extends State<_SdkInstallDialog> {
   Future<void> _runSteps(List<_StepState> states, String downloadPath) async {
     for (final state in states) {
       if (_cancelled) return;
-      _set(() => state.active = true);
+      _set(() {
+        state.active = true;
+        state.liveLines.clear();
+      });
       final cmd = state.step.command ?? '';
       if (cmd.isNotEmpty) {
-        state.output = await _runShell(cmd, downloadPath);
+        state.output = await _runShell(cmd, downloadPath, onLine: (line) {
+          _set(() {
+            state.liveLines.add(line);
+            if (state.liveLines.length > 6) state.liveLines.removeAt(0);
+          });
+        });
       }
       _set(() {
         state.active = false;
@@ -243,7 +276,10 @@ class _SdkInstallDialogState extends State<_SdkInstallDialog> {
       _set(() => _phase = _Phase.installing);
       for (final state in _installStates) {
         if (_cancelled) return;
-        _set(() => state.active = true);
+        _set(() {
+          state.active = true;
+          state.liveLines.clear();
+        });
         final String cmd;
         if (state.step.type == 'extract') {
           cmd = _extractCmd(state.step, downloadPath);
@@ -251,7 +287,12 @@ class _SdkInstallDialogState extends State<_SdkInstallDialog> {
           cmd = state.step.command ?? '';
         }
         if (cmd.isNotEmpty) {
-          state.output = await _runShell(cmd, downloadPath);
+          state.output = await _runShell(cmd, downloadPath, onLine: (line) {
+            _set(() {
+              state.liveLines.add(line);
+              if (state.liveLines.length > 6) state.liveLines.removeAt(0);
+            });
+          });
         }
         _set(() {
           state.active = false;
@@ -771,9 +812,29 @@ class _StepList extends StatelessWidget {
                   ),
                 ],
               ),
-              // Step output is intentionally not shown in the UI.
-              // Errors surface through the error banner; normal output is
-              // only printed to the debug console via debugPrint.
+              if (s.active && s.liveLines.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(left: 24, top: 4),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: cs.surfaceContainerHighest.withValues(alpha: 0.5),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      s.liveLines.join('\n'),
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontFamily: 'monospace',
+                        color: cs.onSurface.withValues(alpha: 0.6),
+                        height: 1.4,
+                      ),
+                      maxLines: 6,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
             ],
           ),
         );

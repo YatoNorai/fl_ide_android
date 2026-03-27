@@ -19,6 +19,7 @@ import 'package:quill_code/quill_code.dart'
 import 'package:sdk_manager/sdk_manager.dart';
 import 'package:terminal_pkg/terminal_pkg.dart';
 
+import '../app.dart' show showThemedDialog;
 import '../foreground_service.dart';
 import '../l10n/app_strings.dart';
 import '../providers/extensions_provider.dart';
@@ -64,9 +65,16 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   // ── Sync banner (pub get / npm install / etc.) ─────────────────────────────
   bool _syncBannerVisible = false;
   String _syncCommand = '';
+  String _syncTriggerPath = '';
+
+  // Cached EditorProvider reference — safe to use in dispose()
+  EditorProvider? _editorProvider;
 
   // ── Auto-save ──────────────────────────────────────────────────────────────
   Timer? _autoSaveTimer;
+
+  // Cached provider reference — safe to use in dispose()
+  DebugProvider? _debugProvider;
 
   @override
   void initState() {
@@ -170,7 +178,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
           if (mounted) {
             setState(() {
               _syncCommand = sdkCfg.syncCommand;
-              _syncBannerVisible = true;
+              _syncTriggerPath = triggerPath;
+              // Banner shown only when the user saves the trigger file.
             });
           }
         }
@@ -188,8 +197,25 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   void didChangeDependencies() {
     super.didChangeDependencies();
     final dbg = context.read<DebugProvider>();
+    _debugProvider = dbg;
     dbg.removeListener(_onDebugChanged);
     dbg.addListener(_onDebugChanged);
+
+    final editor = context.read<EditorProvider>();
+    _editorProvider = editor;
+    editor.removeListener(_onEditorChanged);
+    editor.addListener(_onEditorChanged);
+  }
+
+  void _onEditorChanged() {
+    if (!mounted) return;
+    final saved = _editorProvider?.lastSavedPath;
+    if (saved != null &&
+        _syncTriggerPath.isNotEmpty &&
+        saved == _syncTriggerPath &&
+        !_syncBannerVisible) {
+      setState(() => _syncBannerVisible = true);
+    }
   }
 
   void _onDebugChanged() {
@@ -239,7 +265,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     _autoSaveTimer?.cancel();
     _webPreviewEntry?.remove();
     _webPreviewEntry = null;
-    context.read<DebugProvider>().removeListener(_onDebugChanged);
+    _debugProvider?.removeListener(_onDebugChanged);
+    _editorProvider?.removeListener(_onEditorChanged);
     _drawerCtrl.dispose();
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     unawaited(FlutterForegroundTask.stopService());
@@ -313,19 +340,16 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                             _showPreview(url: url);
                           },
                         ),
-                        // ── Sync banner (slides down from below AppBar) ──────
-                        _SyncBanner(
-                          visible: _syncBannerVisible,
-                          command: _syncCommand,
-                          onIgnore: () => setState(() => _syncBannerVisible = false),
-                          onRun: _runSync,
-                        ),
                         Expanded(
                           child: _MainContent(
                             project: widget.project,
                             sheetKey: _sheetKey,
                             keyboardVisible: keyboardVisible,
                             initPhase: _initPhase,
+                            syncBannerVisible: _syncBannerVisible,
+                            syncCommand: _syncCommand,
+                            onSyncIgnore: () => setState(() => _syncBannerVisible = false),
+                            onSyncRun: _runSync,
                           ),
                         ),
                       ],
@@ -821,7 +845,7 @@ class _WorkspaceAppBarState extends State<_WorkspaceAppBar> {
 
 Future<void> _confirmCloseProject(BuildContext context) async {
   final cs = Theme.of(context).colorScheme;
-  final confirmed = await showDialog<bool>(
+  final confirmed = await showThemedDialog<bool>(
     context: context,
     builder: (ctx) {
       final ss = AppStrings.of(ctx);
@@ -876,12 +900,20 @@ class _MainContent extends StatefulWidget {
   final GlobalKey<_BottomSheetPanelState> sheetKey;
   final bool keyboardVisible;
   final _InitPhase initPhase;
+  final bool syncBannerVisible;
+  final String syncCommand;
+  final VoidCallback onSyncIgnore;
+  final VoidCallback onSyncRun;
 
   const _MainContent({
     required this.project,
     required this.sheetKey,
     required this.keyboardVisible,
     required this.initPhase,
+    required this.syncBannerVisible,
+    required this.syncCommand,
+    required this.onSyncIgnore,
+    required this.onSyncRun,
   });
 
   @override
@@ -923,6 +955,24 @@ class _MainContentState extends State<_MainContent> {
               project: widget.project,
               keyboardVisible: widget.keyboardVisible,
               initPhase: widget.initPhase,
+            ),
+          ),
+          // ── Sync banner: anchored just above the peek bar ─────────────
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: _BottomSheetPanelState._kPeek,
+            child: AnimatedSize(
+              duration: const Duration(milliseconds: 250),
+              curve: Curves.easeInOut,
+              alignment: Alignment.bottomCenter,
+              child: widget.syncBannerVisible
+                  ? _SyncBanner(
+                      command: widget.syncCommand,
+                      onIgnore: widget.onSyncIgnore,
+                      onRun: widget.onSyncRun,
+                    )
+                  : const SizedBox.shrink(),
             ),
           ),
         ],
@@ -1503,16 +1553,14 @@ class _PeekBar extends StatelessWidget {
   }
 }
 
-// ── Sync-dependencies banner (slides down from below AppBar) ─────────────────
+// ── Sync-dependencies banner (slides up from TabBar into code area) ──────────
 
 class _SyncBanner extends StatelessWidget {
-  final bool visible;
   final String command;
   final VoidCallback onIgnore;
   final VoidCallback onRun;
 
   const _SyncBanner({
-    required this.visible,
     required this.command,
     required this.onIgnore,
     required this.onRun,
@@ -1522,49 +1570,42 @@ class _SyncBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final s = AppStrings.of(context);
-    return AnimatedSize(
-      duration: const Duration(milliseconds: 250),
-      curve: Curves.easeInOut,
-      alignment: Alignment.topCenter,
-      child: visible
-          ? Material(
-              color: cs.primaryContainer,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                child: Row(
-                  children: [
-                    Icon(Icons.download_rounded,
-                        size: 18, color: cs.onPrimaryContainer),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        s.syncBannerMsg(command),
-                        style: TextStyle(
-                            color: cs.onPrimaryContainer, fontSize: 13),
-                      ),
-                    ),
-                    TextButton(
-                      onPressed: onIgnore,
-                      style: TextButton.styleFrom(
-                          foregroundColor: cs.onPrimaryContainer,
-                          padding: const EdgeInsets.symmetric(horizontal: 8)),
-                      child: Text(s.syncBannerIgnore),
-                    ),
-                    FilledButton(
-                      onPressed: onRun,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: cs.primary,
-                        foregroundColor: cs.onPrimary,
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        minimumSize: const Size(0, 32),
-                      ),
-                      child: Text(s.syncBannerRun),
-                    ),
-                  ],
-                ),
+    return Material(
+      color: cs.primaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          children: [
+            Icon(Icons.download_rounded,
+                size: 18, color: cs.onPrimaryContainer),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                s.syncBannerMsg(command),
+                style: TextStyle(
+                    color: cs.onPrimaryContainer, fontSize: 13),
               ),
-            )
-          : const SizedBox.shrink(),
+            ),
+            TextButton(
+              onPressed: onIgnore,
+              style: TextButton.styleFrom(
+                  foregroundColor: cs.onPrimaryContainer,
+                  padding: const EdgeInsets.symmetric(horizontal: 8)),
+              child: Text(s.syncBannerIgnore),
+            ),
+            FilledButton(
+              onPressed: onRun,
+              style: FilledButton.styleFrom(
+                backgroundColor: cs.primary,
+                foregroundColor: cs.onPrimary,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                minimumSize: const Size(0, 32),
+              ),
+              child: Text(s.syncBannerRun),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

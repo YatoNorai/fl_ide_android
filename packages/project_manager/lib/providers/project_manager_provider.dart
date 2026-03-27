@@ -26,6 +26,7 @@ class ProjectManagerProvider extends ChangeNotifier {
     required String name,
     required SdkType sdk,
     required void Function(String script) runInTerminal,
+    String? newProjectCmd,
   }) async {
     final projectPath = '${RuntimeEnvir.projectsPath}/$name';
     final project = Project(
@@ -37,9 +38,10 @@ class ProjectManagerProvider extends ChangeNotifier {
       lastOpenedAt: DateTime.now(),
     );
 
-    // Build the create command using the SDK definition
+    // Build the create command — prefer the installed JSON extension's command.
     final def = ProjectTemplate.forSdk(sdk);
-    final createCmd = def.createCommand(name, RuntimeEnvir.projectsPath);
+    final createCmd = def.createCommand(name, RuntimeEnvir.projectsPath,
+        overrideNewProjectCmd: newProjectCmd);
     runInTerminal(createCmd);
 
     _projects.insert(0, project);

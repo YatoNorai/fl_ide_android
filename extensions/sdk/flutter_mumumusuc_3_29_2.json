@@ -49,13 +49,13 @@
     },
     {
       "type": "shell",
-      "command": "flutter config --android-sdk $ANDROID_HOME 2>&1 || true",
+      "command": "flutter config --android-sdk \"$ANDROID_HOME\" 2>&1 || true",
       "description": "Configuring Android SDK path"
     },
     {
       "type": "shell",
-      "command": "flutter doctor -v 2>&1 || true",
-      "description": "Running Flutter doctor"
+      "command": "flutter --version 2>&1",
+      "description": "Verifying Flutter installation"
     }
   ],
   "cleanup_steps": [

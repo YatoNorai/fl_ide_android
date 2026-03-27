@@ -47,6 +47,8 @@ class EditorProvider extends ChangeNotifier {
   final List<OpenFile> _openFiles = [];
   int _activeIndex = -1;
   FileNode? _rootNode;
+  /// Path of the most recently saved file. Updated on every saveActiveFile call.
+  String? lastSavedPath;
 
   List<OpenFile> get openFiles => List.unmodifiable(_openFiles);
   List<OpenFile> get topFiles =>
@@ -118,6 +120,7 @@ class EditorProvider extends ChangeNotifier {
 
     await File(f.path).writeAsString(content);
     f.isDirty = false;
+    lastSavedPath = f.path;
     notifyListeners();
   }
 
@@ -146,7 +149,9 @@ class EditorProvider extends ChangeNotifier {
   }
 
   void markDirty() {
-    if (activeFile != null) {
+    if (activeFile != null && !activeFile!.isDirty) {
+      // Only notify on the clean→dirty transition.
+      // Subsequent keystrokes (file already dirty) skip the rebuild storm.
       activeFile!.isDirty = true;
       notifyListeners();
     }

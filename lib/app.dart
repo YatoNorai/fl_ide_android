@@ -22,6 +22,37 @@ import 'screens/home_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/workspace_screen.dart';
 
+/// Shows a dialog while temporarily making the system navigation bar
+/// transparent so it blends with the dialog scrim (edge-to-edge pattern).
+/// The nav bar style is restored automatically when the dialog is dismissed.
+Future<T?> showThemedDialog<T>({
+  required BuildContext context,
+  required WidgetBuilder builder,
+  bool barrierDismissible = true,
+  String? barrierLabel,
+  Color barrierColor = Colors.black54,
+}) {
+  final theme = Theme.of(context);
+  final isDark = theme.brightness == Brightness.dark;
+  final iconBrightness = isDark ? Brightness.light : Brightness.dark;
+
+  return showDialog<T>(
+    context: context,
+    barrierDismissible: barrierDismissible,
+    barrierLabel: barrierLabel,
+    barrierColor: barrierColor,
+    builder: (ctx) => AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle(
+        systemNavigationBarColor: Colors.transparent,
+        systemNavigationBarIconBrightness: iconBrightness,
+        systemNavigationBarDividerColor: Colors.transparent,
+        systemNavigationBarContrastEnforced: false,
+      ),
+      child: builder(ctx),
+    ),
+  );
+}
+
 class FlIdeApp extends StatelessWidget {
   const FlIdeApp({super.key});
 

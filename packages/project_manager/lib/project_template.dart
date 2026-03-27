@@ -6,9 +6,13 @@ class ProjectTemplate {
 
   const ProjectTemplate(this.sdk);
 
-  String createCommand(String projectName, String parentDir) {
+  /// [overrideNewProjectCmd] — when provided (e.g. from an installed JSON
+  /// extension) it replaces the hardcoded [SdkDefinition.newProjectCmd].
+  String createCommand(String projectName, String parentDir,
+      {String? overrideNewProjectCmd}) {
     final def = SdkDefinition.forType(sdk);
-    final cmd = def.newProjectCmd.replaceAll(r'$name', projectName);
+    final raw = overrideNewProjectCmd ?? def.newProjectCmd;
+    final cmd = raw.replaceAll(r'$name', projectName);
     final projectPath = '$parentDir/$projectName';
     final base = 'cd "$parentDir" && $cmd';
     if (sdk == SdkType.flutter) {

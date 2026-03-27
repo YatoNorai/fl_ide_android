@@ -10,6 +10,7 @@ import 'package:sdk_manager/sdk_manager.dart';
 
 import 'package:url_launcher/url_launcher.dart';
 
+import '../app.dart' show showThemedDialog;
 import '../l10n/app_strings.dart';
 import '../models/ai_agent.dart';
 import '../providers/ai_provider.dart' show AiProvider, kGeminiModels, kGptModels, kClaudeModels, kDeepSeekModels;
@@ -411,7 +412,7 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
 
   void _showLanguagePicker(BuildContext context, SettingsProvider vm) {
     final s = AppStrings.of(context);
-    showDialog<void>(
+    showThemedDialog<void>(
       context: context,
       builder: (ctx) => RepaintBoundary(
         child: BackdropFilter(
@@ -737,7 +738,7 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
         ),
         trailing: const Icon(Icons.chevron_right),
         onTap: () {
-          showDialog<void>(
+          showThemedDialog<void>(
             context: context,
             builder: (ctx) {
               return RepaintBoundary(
@@ -825,7 +826,7 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
     List<String> options,
     ValueChanged<String> onChanged,
   ) {
-    showDialog<void>(
+    showThemedDialog<void>(
       context: context,
       builder: (ctx) {
         return RepaintBoundary(
@@ -1159,7 +1160,7 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
     BuildPlatform current,
     SettingsProvider settings,
   ) {
-    showDialog<void>(
+    showThemedDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text('Debug platform for ${sdkType.displayName}'),
@@ -1241,7 +1242,7 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
   }) {
     final s = AppStrings.of(context);
     final ctrl = TextEditingController(text: current);
-    showDialog<void>(
+    showThemedDialog<void>(
       context: context,
       builder: (ctx) => RepaintBoundary(
                   child: BackdropFilter(
@@ -1461,7 +1462,7 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
     final s = AppStrings.of(context);
     final ctrl = TextEditingController(text: current);
     bool obscure = true;
-    showDialog<void>(
+    showThemedDialog<void>(
       context: context,
       builder: (ctx) {
         return StatefulBuilder(builder: (ctx, setState) {
@@ -1562,7 +1563,7 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
 
   void _confirmDeleteAgent(BuildContext context, AiAgent agent) {
     final s = AppStrings.of(context);
-    showDialog<void>(
+    showThemedDialog<void>(
       context: context,
       builder: (ctx) => RepaintBoundary(
                   child: BackdropFilter(
@@ -1595,7 +1596,7 @@ class _SettingsScreenBodyState extends State<_SettingsScreenBody> {
     final instrctrl = TextEditingController(text: existing?.instructions ?? '');
     Color avatarColor = Color(existing?.colorValue ?? 0xFF607D8B);
 
-    showDialog<void>(
+    showThemedDialog<void>(
       context: context,
       builder: (ctx) {
         return StatefulBuilder(builder: (ctx, setState) {

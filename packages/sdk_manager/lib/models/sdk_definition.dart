@@ -109,16 +109,13 @@ sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
     SdkDefinition(
       type: SdkType.reactNative,
       verifyBinary: 'node',
-      verifyCmd: 'npx react-native --version',
-      installScript: '''
-pkg update -y && pkg install -y nodejs-lts
-npm install -g react-native-cli
-''',
-      buildCommand: 'npx react-native build-android --mode=debug',
+      verifyCmd: 'node --version',
+      installScript: 'pkg update -y && pkg install -y nodejs-lts',
+      buildCommand: 'npm run build',
       sdkConfig: SdkConfig(
-        newProjectCmd: 'npx react-native init \$name',
-        defaultEntryFile: 'App.tsx',
-        fileExtensions: ['js', 'jsx', 'ts', 'tsx', 'json'],
+        newProjectCmd: r'npm create vite@latest $name -- --template react-ts && cd $name && npm install',
+        defaultEntryFile: 'src/App.tsx',
+        fileExtensions: ['js', 'jsx', 'ts', 'tsx', 'css', 'html', 'json'],
         syncCommand: 'npm install',
         syncTriggerFile: 'package.json',
       ),

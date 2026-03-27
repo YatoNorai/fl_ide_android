@@ -54,13 +54,8 @@
     },
     {
       "type": "shell",
-      "command": "ADB=\"$ANDROID_HOME/platform-tools/adb\" && test -f \"$ADB\" || (echo \"ERROR: adb not found — platform-tools install may have failed\" && exit 1) && ln -sf \"$ADB\" \"$PREFIX/bin/adb\" && echo 'adb symlink created'",
-      "description": "Symlinking adb to PATH"
-    },
-    {
-      "type": "shell",
-      "command": "adb version 2>&1",
-      "description": "Verifying adb (platform-tools)"
+      "command": "pkg install -y android-tools 2>&1 && adb version 2>&1",
+      "description": "Installing ARM64 adb via android-tools and verifying"
     }
   ],
   "cleanup_steps": [
@@ -73,8 +68,13 @@
   "uninstall_steps": [
     {
       "type": "shell",
-      "command": "rm -f \"$PREFIX/bin/sdkmanager\" \"$PREFIX/bin/adb\" 2>&1 || true",
-      "description": "Removing sdkmanager and adb symlinks"
+      "command": "rm -f \"$PREFIX/bin/sdkmanager\" 2>&1 || true",
+      "description": "Removing sdkmanager symlink"
+    },
+    {
+      "type": "shell",
+      "command": "pkg uninstall -y android-tools 2>&1 || true",
+      "description": "Removing android-tools (adb)"
     },
     {
       "type": "shell",

@@ -1,10 +1,12 @@
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:provider/provider.dart';
 import 'package:sdk_manager/sdk_manager.dart';
 
+import '../app.dart' show showThemedDialog;
 import '../l10n/app_strings.dart';
 import '../models/extension_theme_meta.dart';
 import '../providers/extensions_provider.dart';
@@ -331,7 +333,7 @@ class _ThemeCard extends StatelessWidget {
 
   void _confirmInstall(BuildContext context, ExtensionsProvider prov,
       ExtensionThemeMeta meta, AppStrings s) {
-    showDialog(
+    showThemedDialog(
       context: context,
       builder: (ctx) => RepaintBoundary(
                   child: BackdropFilter(
@@ -469,7 +471,7 @@ class _InstalledCard extends StatelessWidget {
 
   void _confirmDelete(BuildContext context, ExtensionsProvider prov,
       ExtensionThemeMeta meta, AppStrings s) {
-    showDialog(
+    showThemedDialog(
       context: context,
       builder: (ctx) => RepaintBoundary(
                   child: BackdropFilter(

@@ -1,5 +1,8 @@
+import 'dart:io';
+
 import 'package:core/core.dart';
 import 'package:fl_ide/l10n/app_strings.dart';
+import 'package:fl_ide/providers/extensions_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:sdk_manager/sdk_manager.dart';
@@ -19,8 +22,8 @@ class CreateProjectScreen extends StatefulWidget {
 typedef CreateProjectDialog = CreateProjectScreen;
 
 class _CreateProjectScreenState extends State<CreateProjectScreen> {
-  final _nameCtrl    = TextEditingController(text: 'meu_app');
-  final _packageCtrl = TextEditingController(text: 'com.example.meu_app');
+  late final TextEditingController _nameCtrl;
+  final _packageCtrl = TextEditingController();
   SdkType? _selectedSdk;
   bool _creating = false;
   late final TerminalProvider _termProvider;
@@ -40,7 +43,21 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
   void initState() {
     super.initState();
     _termProvider = TerminalProvider();
+    _nameCtrl = TextEditingController(text: _nextAvailableName());
+    _syncPackage();
     _nameCtrl.addListener(_syncPackage);
+  }
+
+  /// Returns 'application', 'application_1', 'application_2', … whichever
+  /// is the first name whose folder does not yet exist in the projects dir.
+  String _nextAvailableName() {
+    final base = 'application';
+    final dir = RuntimeEnvir.projectsPath;
+    if (!Directory('$dir/$base').existsSync()) return base;
+    for (int i = 1; ; i++) {
+      final candidate = '${base}_$i';
+      if (!Directory('$dir/$candidate').existsSync()) return candidate;
+    }
   }
 
   void _syncPackage() {
@@ -79,10 +96,18 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
     if (name.isEmpty || _selectedSdk == null) return;
     setState(() => _creating = true);
 
+    // Prefer the installed JSON extension's newProjectCmd if available.
+    final extProv = context.read<ExtensionsProvider>();
+    final ext = extProv.availableSdks
+        .where((e) => e.sdk == _selectedSdk!.name)
+        .firstOrNull;
+    final overrideCmd = ext?.sdkConfig?.newProjectCmd;
+
     final pm = context.read<ProjectManagerProvider>();
     final project = await pm.createProject(
       name: name,
       sdk: _selectedSdk!,
+      newProjectCmd: overrideCmd,
       runInTerminal: (script) async {
         await _termProvider.createSession(label: 'Criando $name');
         _termProvider.active?.writeCommand(script);

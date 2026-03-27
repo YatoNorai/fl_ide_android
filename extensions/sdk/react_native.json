@@ -2,20 +2,20 @@
   "schema_version": 1,
   "sdk": "reactNative",
   "sdk_version": "latest",
-  "display_name": "React Native (Node.js LTS)",
-  "description": "React Native via Node.js LTS from the official Termux repository. Supports ARM64. Includes npm and the React Native CLI.",
+  "display_name": "React (Node.js + Vite)",
+  "description": "React web development via Node.js LTS and Vite on Termux. Supports ARM64. Includes npm. Create, run and build React apps in the browser via a local dev server.",
   "package": {
     "type": "pkg",
     "arch": "arm64",
     "size_mb": 80
   },
   "package_author": {
-    "name": "Termux / Meta",
+    "name": "Termux / Node.js Foundation",
     "github": "https://github.com/termux/termux-packages"
   },
   "json_author": {
     "name": "Yato",
-    "date": "2026-03-25"
+    "date": "2026-03-26"
   },
   "install_steps": [
     {
@@ -27,11 +27,6 @@
       "type": "shell",
       "command": "pkg install -y nodejs-lts 2>&1",
       "description": "Installing Node.js LTS"
-    },
-    {
-      "type": "shell",
-      "command": "npm install -g react-native@latest 2>&1",
-      "description": "Installing React Native CLI globally"
     }
   ],
   "config_steps": [
@@ -39,19 +34,9 @@
       "type": "shell",
       "command": "node --version 2>&1 && npm --version 2>&1",
       "description": "Verifying Node.js and npm versions"
-    },
-    {
-      "type": "shell",
-      "command": "npx react-native --version 2>&1 || true",
-      "description": "Verifying React Native CLI"
     }
   ],
   "uninstall_steps": [
-    {
-      "type": "shell",
-      "command": "npm uninstall -g react-native 2>&1 || true",
-      "description": "Removing React Native CLI"
-    },
     {
       "type": "shell",
       "command": "pkg uninstall -y nodejs-lts 2>&1 || true",
@@ -61,16 +46,15 @@
   "verify_binary": "node",
   "verify_command": "node --version",
   "run_config": {
-    "run": "npx react-native run-android",
-    "supports_devices": true,
-    "device_param": "--deviceId",
-    "build_debug": "npx react-native build-android --mode=debug",
-    "build_release": "npx react-native build-android --mode=release"
+    "run": "npm run dev -- --host",
+    "supports_devices": false,
+    "build_debug": "npm run build",
+    "build_release": "npm run build"
   },
   "sdk_config": {
-    "new_project_cmd": "npx react-native init $name",
-    "default_entry_file": "App.tsx",
-    "file_extensions": ["js", "jsx", "ts", "tsx", "json"],
+    "new_project_cmd": "npm create vite@latest $name -- --template react-ts && cd $name && npm install",
+    "default_entry_file": "src/App.tsx",
+    "file_extensions": ["js", "jsx", "ts", "tsx", "css", "html", "json"],
     "sync_command": "npm install",
     "sync_trigger_file": "package.json",
     "format_command": ""
