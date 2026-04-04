@@ -2,6 +2,8 @@
   "schema_version": 1,
   "extensions": [
     "flutter_mumumusuc_3_29_2.json",
-    "android_sdk.json"
+    "android_sdk.json",
+    "react_native.json",
+    "swift.json"
   ]
 }
