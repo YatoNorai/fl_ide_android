@@ -15,17 +15,12 @@
   },
   "json_author": {
     "name": "Yato",
-    "date": "2026-03-26"
+    "date": "2026-04-08"
   },
   "install_steps": [
     {
       "type": "shell",
-      "command": "pkg update -y 2>&1",
-      "description": "Updating package lists"
-    },
-    {
-      "type": "shell",
-      "command": "pkg install -y nodejs-lts 2>&1",
+      "command": "apt-get update -y 2>&1 && apt-get install -y nodejs-lts 2>&1",
       "description": "Installing Node.js LTS"
     }
   ],
@@ -34,12 +29,39 @@
       "type": "shell",
       "command": "node --version 2>&1 && npm --version 2>&1",
       "description": "Verifying Node.js and npm versions"
+    },
+    {
+      "type": "shell",
+      "command": "npm install -g typescript typescript-language-server 2>&1",
+      "description": "Installing TypeScript Language Server (LSP)"
+    },
+    {
+      "type": "shell",
+      "command": "npm install -g eslint prettier 2>&1",
+      "description": "Installing ESLint and Prettier"
+    },
+    {
+      "type": "shell",
+      "command": "typescript-language-server --version 2>&1 && echo 'LSP OK'",
+      "description": "Verifying TypeScript LSP binary"
+    }
+  ],
+  "cleanup_steps": [
+    {
+      "type": "shell",
+      "command": "npm uninstall -g typescript typescript-language-server eslint prettier 2>&1 || true",
+      "description": "Removing globally installed npm packages on error"
     }
   ],
   "uninstall_steps": [
     {
       "type": "shell",
-      "command": "pkg uninstall -y nodejs-lts 2>&1 || true",
+      "command": "npm uninstall -g typescript typescript-language-server eslint prettier 2>&1 || true",
+      "description": "Removing TypeScript LSP and tools"
+    },
+    {
+      "type": "shell",
+      "command": "apt-get remove -y nodejs-lts 2>&1 || true",
       "description": "Removing Node.js LTS"
     }
   ],
@@ -57,7 +79,7 @@
     "file_extensions": ["js", "jsx", "ts", "tsx", "css", "html", "json"],
     "sync_command": "npm install",
     "sync_trigger_file": "package.json",
-    "format_command": ""
+    "format_command": "npx prettier --write ."
   },
   "dap_config": {}
 }
