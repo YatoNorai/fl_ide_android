@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 
@@ -10,6 +11,10 @@ import 'package:flutter/foundation.dart';
 /// via sequence numbers, and exposes an event stream for DAP events.
 class DapStdioClient {
   Process? _process;
+  // For SSH-backed sessions: write to this sink instead of _process.stdin
+  // dartssh2 SSHSession.stdin is StreamSink<Uint8List>.
+  StreamSink<Uint8List>? _remoteSink;
+
   int _seq = 0;
   final Map<int, Completer<Map<String, dynamic>>> _pending = {};
   final StreamController<Map<String, dynamic>> _events =
@@ -20,7 +25,7 @@ class DapStdioClient {
   int? _expectedLength;
 
   Stream<Map<String, dynamic>> get events => _events.stream;
-  bool get isRunning => _process != null;
+  bool get isRunning => _process != null || _remoteSink != null;
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
@@ -48,7 +53,20 @@ class DapStdioClient {
     _process!.exitCode.then((_) => _onProcessDone());
   }
 
+  /// Attach to an SSH-backed remote process.
+  /// [remoteStdout] / [remoteStdin] are the SSH session's stdio streams
+  /// (dartssh2 uses Stream<Uint8List> / StreamSink<Uint8List>).
+  Future<void> startRemote(
+    Stream<Uint8List> remoteStdout,
+    StreamSink<Uint8List> remoteStdin, {
+    void Function(String line)? onStderr,
+  }) async {
+    _remoteSink = remoteStdin;
+    remoteStdout.listen(_onBytes, onDone: _onProcessDone);
+  }
+
   Future<void> dispose() async {
+    _remoteSink = null;
     _process?.kill();
     _process = null;
     for (final c in _pending.values) {
@@ -81,13 +99,17 @@ class DapStdioClient {
   }
 
   Future<void> _sendRaw(Map<String, dynamic> msg) async {
-    if (_process == null) return;
     final body = jsonEncode(msg);
     final bytes = utf8.encode(body);
-    final header = 'Content-Length: ${bytes.length}\r\n\r\n';
-    _process!.stdin.add(utf8.encode(header));
-    _process!.stdin.add(bytes);
-    await _process!.stdin.flush();
+    final header = utf8.encode('Content-Length: ${bytes.length}\r\n\r\n');
+    final framed = Uint8List.fromList([...header, ...bytes]);
+    if (_remoteSink != null) {
+      _remoteSink!.add(framed);
+    } else if (_process != null) {
+      _process!.stdin.add(header);
+      _process!.stdin.add(bytes);
+      await _process!.stdin.flush();
+    }
   }
 
   // ── Receive ────────────────────────────────────────────────────────────────

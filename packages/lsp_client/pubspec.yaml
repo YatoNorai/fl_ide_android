@@ -16,9 +16,7 @@ dependencies:
   provider: ^6.1.2
 
   quill_code:
-    git:
-      url: https://github.com/YatoNorai/quill_code.git
-      ref: rust-impl
+    path: ../../../quill_code
 
 dev_dependencies:
   flutter_test:

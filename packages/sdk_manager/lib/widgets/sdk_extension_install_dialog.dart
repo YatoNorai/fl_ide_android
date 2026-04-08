@@ -14,7 +14,7 @@ Future<void> showSdkExtensionInstallDialog(
   BuildContext context,
   SdkExtension ext,
 ) {
-  return showDialog<void>(
+  return showThemedDialog<void>(
     context: context,
     barrierDismissible: false,
     builder: (_) => RepaintBoundary(
@@ -29,7 +29,7 @@ Future<void> showSdkExtensionUninstallDialog(
   BuildContext context,
   SdkExtension ext,
 ) {
-  return showDialog<void>(
+  return showThemedDialog<void>(
     context: context,
     barrierDismissible: false,
     builder: (_) => RepaintBoundary(
@@ -376,7 +376,7 @@ class _SdkInstallDialogState extends State<_SdkInstallDialog> {
     return AlertDialog(
       backgroundColor: cs.surface,
       surfaceTintColor: Colors.transparent,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20),side: BorderSide(color: Colors.grey, width: 0.2)),
       titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
       contentPadding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
       actionsPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),

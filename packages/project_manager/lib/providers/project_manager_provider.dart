@@ -9,10 +9,12 @@ import '../project_template.dart';
 
 class ProjectManagerProvider extends ChangeNotifier {
   final List<Project> _projects = [];
+  final List<Project> _remoteProjects = [];
   Project? _activeProject;
   bool _activeProjectIsNew = false;
 
   List<Project> get projects => List.unmodifiable(_projects);
+  List<Project> get remoteProjects => List.unmodifiable(_remoteProjects);
   Project? get activeProject => _activeProject;
   /// True if the active project was just created (not loaded from history).
   bool get activeProjectIsNew => _activeProjectIsNew;
@@ -25,10 +27,13 @@ class ProjectManagerProvider extends ChangeNotifier {
   Future<Project> createProject({
     required String name,
     required SdkType sdk,
-    required void Function(String script) runInTerminal,
+    required Future<void> Function(String script) runInTerminal,
     String? newProjectCmd,
+    String? projectsBasePath,
+    bool remoteIsWindows = false,
   }) async {
-    final projectPath = '${RuntimeEnvir.projectsPath}/$name';
+    final base = projectsBasePath ?? RuntimeEnvir.projectsPath;
+    final projectPath = '$base/$name';
     final project = Project(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       name: name,
@@ -40,9 +45,13 @@ class ProjectManagerProvider extends ChangeNotifier {
 
     // Build the create command — prefer the installed JSON extension's command.
     final def = ProjectTemplate.forSdk(sdk);
-    final createCmd = def.createCommand(name, RuntimeEnvir.projectsPath,
-        overrideNewProjectCmd: newProjectCmd);
-    runInTerminal(createCmd);
+    final createCmd = def.createCommand(name, base,
+        overrideNewProjectCmd: newProjectCmd,
+        remoteIsWindows: remoteIsWindows);
+
+    // Await the terminal callback so navigation only happens after the command
+    // runs (or the session signals completion).
+    await runInTerminal(createCmd);
 
     _projects.insert(0, project);
     await _saveProjects();
@@ -74,6 +83,37 @@ class ProjectManagerProvider extends ChangeNotifier {
     // Optionally delete files
     final dir = Directory(project.path);
     if (await dir.exists()) await dir.delete(recursive: true);
+    notifyListeners();
+  }
+
+  /// Refresh the list of remote projects by listing [remotePath] via [listDir].
+  Future<void> refreshRemoteProjects({
+    required Future<List<Map<String, dynamic>>> Function(String path) listDir,
+    required String remotePath,
+  }) async {
+    try {
+      final entries = await listDir(remotePath);
+      _remoteProjects.clear();
+      for (final entry in entries) {
+        if (entry['isDirectory'] == true) {
+          final name = entry['name'] as String;
+          final path = entry['path'] as String;
+          _remoteProjects.add(Project(
+            id: 'remote_${path.hashCode}',
+            name: name,
+            sdk: SdkType.flutter,
+            path: path,
+            createdAt: DateTime.now(),
+            lastOpenedAt: DateTime.now(),
+          ));
+        }
+      }
+      notifyListeners();
+    } catch (_) {}
+  }
+
+  void clearRemoteProjects() {
+    _remoteProjects.clear();
     notifyListeners();
   }
 

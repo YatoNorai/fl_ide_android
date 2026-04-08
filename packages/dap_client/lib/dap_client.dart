@@ -7,5 +7,7 @@ export 'widgets/debug_panel.dart'
         DebugPanel,
         DebugVariablesPanel,
         DebugCallStackPanel,
-        DebugOutputPanel;
+        DebugOutputPanel,
+        DebugBreakpointsPanel,
+        DebugWatchPanel;
 export 'widgets/debug_toolbar.dart';

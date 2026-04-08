@@ -11,7 +11,7 @@ class LspAwareController extends QuillCodeController {
   VoidCallback? onDiagnosticsReceived;
 
   LspAwareController({required super.text, super.language});
-
+  
   @override
   void setDiagnostics(List<DiagnosticRegion> regions) {
     super.setDiagnostics(regions);
@@ -46,9 +46,17 @@ class OpenFile {
 class EditorProvider extends ChangeNotifier {
   final List<OpenFile> _openFiles = [];
   int _activeIndex = -1;
+  int _lastTopIdx = -1;
+  int _lastBottomIdx = -1;
   FileNode? _rootNode;
   /// Path of the most recently saved file. Updated on every saveActiveFile call.
   String? lastSavedPath;
+  /// Set when the project lives on a remote machine; used for tree expand/refresh.
+  Future<List<Map<String, dynamic>>> Function(String path)? _remoteListDir;
+  /// SFTP read callback — set for remote projects; null for local.
+  Future<String> Function(String path)? _remoteReadFile;
+  /// SFTP write callback — set for remote projects; null for local.
+  Future<void> Function(String path, String content)? _remoteWriteFile;
 
   List<OpenFile> get openFiles => List.unmodifiable(_openFiles);
   List<OpenFile> get topFiles =>
@@ -60,10 +68,49 @@ class EditorProvider extends ChangeNotifier {
       _activeIndex >= 0 && _activeIndex < _openFiles.length
           ? _openFiles[_activeIndex]
           : null;
+
+  /// The last-active file in the top (main) panel.
+  OpenFile? get topActiveFile {
+    if (_lastTopIdx >= 0 && _lastTopIdx < _openFiles.length &&
+        !_openFiles[_lastTopIdx].inBottomPanel) {
+      return _openFiles[_lastTopIdx];
+    }
+    final i = _openFiles.indexWhere((f) => !f.inBottomPanel);
+    return i >= 0 ? _openFiles[i] : null;
+  }
+
+  /// The last-active file in the bottom panel.
+  OpenFile? get bottomActiveFile {
+    if (_lastBottomIdx >= 0 && _lastBottomIdx < _openFiles.length &&
+        _openFiles[_lastBottomIdx].inBottomPanel) {
+      return _openFiles[_lastBottomIdx];
+    }
+    final i = _openFiles.indexWhere((f) => f.inBottomPanel);
+    return i >= 0 ? _openFiles[i] : null;
+  }
   FileNode? get rootNode => _rootNode;
+  bool get isRemote => _remoteListDir != null;
 
   Future<void> loadProject(String projectPath) async {
+    _remoteListDir = null;
+    _remoteReadFile = null;
+    _remoteWriteFile = null;
     _rootNode = await FileNode.fromPath(projectPath);
+    notifyListeners();
+  }
+
+  /// Load a remote project's file tree via an SFTP listing callback.
+  /// Pass [readFile] and [writeFile] to enable opening and saving remote files.
+  Future<void> loadProjectRemote(
+    String projectPath,
+    Future<List<Map<String, dynamic>>> Function(String path) listDir, {
+    Future<String> Function(String path)? readFile,
+    Future<void> Function(String path, String content)? writeFile,
+  }) async {
+    _remoteListDir = listDir;
+    _remoteReadFile = readFile;
+    _remoteWriteFile = writeFile;
+    _rootNode = await FileNode.fromRemote(projectPath, listDir);
     notifyListeners();
   }
 
@@ -75,10 +122,19 @@ class EditorProvider extends ChangeNotifier {
       return;
     }
 
-    final file = File(filePath);
-    if (!await file.exists()) return;
+    String content;
+    if (_remoteReadFile != null) {
+      try {
+        content = await _remoteReadFile!(filePath);
+      } catch (_) {
+        return; // File not readable over SFTP
+      }
+    } else {
+      final file = File(filePath);
+      if (!await file.exists()) return;
+      content = await file.readAsString();
+    }
 
-    final content = await file.readAsString();
     final name = filePath.split('/').last.split('\\').last;
     final openFile = OpenFile(path: filePath, name: name);
 
@@ -89,17 +145,31 @@ class EditorProvider extends ChangeNotifier {
 
     _openFiles.add(openFile);
     _activeIndex = _openFiles.length - 1;
+    if (openFile.inBottomPanel) {
+      _lastBottomIdx = _activeIndex;
+    } else {
+      _lastTopIdx = _activeIndex;
+    }
     notifyListeners();
   }
 
   /// Saves the active file.
   /// If [format] is true and the file is a .dart file, runs
   /// `dart format --output show` and applies the formatted output.
+  /// For remote files, uses the SFTP write callback (no dart format).
   Future<void> saveActiveFile({bool format = false}) async {
     final f = activeFile;
     if (f == null || f.controller == null) return;
 
     String content = f.controller!.content.fullText;
+
+    if (_remoteWriteFile != null) {
+      try { await _remoteWriteFile!(f.path, content); } catch (_) {}
+      f.isDirty = false;
+      lastSavedPath = f.path;
+      notifyListeners();
+      return;
+    }
 
     if (format && f.extension == 'dart') {
       try {
@@ -125,11 +195,19 @@ class EditorProvider extends ChangeNotifier {
   }
 
   /// Saves all open files, optionally formatting .dart files.
+  /// For remote files, uses the SFTP write callback (no dart format).
   Future<void> saveAllFiles({bool format = false}) async {
     for (var i = 0; i < _openFiles.length; i++) {
       final f = _openFiles[i];
       if (f.controller == null) continue;
       String content = f.controller!.content.fullText;
+
+      if (_remoteWriteFile != null) {
+        try { await _remoteWriteFile!(f.path, content); } catch (_) {}
+        f.isDirty = false;
+        continue;
+      }
+
       if (format && f.extension == 'dart') {
         try {
           await File(f.path).writeAsString(content);
@@ -160,6 +238,11 @@ class EditorProvider extends ChangeNotifier {
   void switchTo(int index) {
     if (index < 0 || index >= _openFiles.length) return;
     _activeIndex = index;
+    if (_openFiles[index].inBottomPanel) {
+      _lastBottomIdx = index;
+    } else {
+      _lastTopIdx = index;
+    }
     notifyListeners();
   }
 
@@ -169,6 +252,8 @@ class EditorProvider extends ChangeNotifier {
     if (_activeIndex >= _openFiles.length) {
       _activeIndex = _openFiles.isEmpty ? -1 : _openFiles.length - 1;
     }
+    if (_lastTopIdx >= index) _lastTopIdx--;
+    if (_lastBottomIdx >= index) _lastBottomIdx--;
     notifyListeners();
   }
 
@@ -232,12 +317,40 @@ class EditorProvider extends ChangeNotifier {
       }
       _activeIndex = _openFiles.indexOf(file);
     }
+    // Update panel tracking after move
+    final newIdx = _openFiles.indexOf(file);
+    if (newIdx >= 0) {
+      if (bottom) {
+        _lastBottomIdx = newIdx;
+      } else {
+        _lastTopIdx = newIdx;
+      }
+    }
     notifyListeners();
   }
 
   Future<void> refreshTree() async {
     if (_rootNode == null) return;
-    _rootNode = await FileNode.fromPath(_rootNode!.path);
+    if (_remoteListDir != null) {
+      _rootNode = await FileNode.fromRemote(_rootNode!.path, _remoteListDir!);
+    } else {
+      _rootNode = await FileNode.fromPath(_rootNode!.path);
+    }
+    notifyListeners();
+  }
+
+  /// Closes [filePath] from the editor if it is currently open so that when
+  /// the user reopens it the fresh content from disk is loaded.
+  /// Called after the AI agent writes a file.
+  void reloadFile(String filePath) {
+    final idx = _openFiles.indexWhere((f) => f.path == filePath);
+    if (idx < 0) return;
+    _openFiles.removeAt(idx);
+    if (_activeIndex >= _openFiles.length) {
+      _activeIndex = _openFiles.isEmpty ? -1 : _openFiles.length - 1;
+    }
+    if (_lastTopIdx >= idx) _lastTopIdx = _lastTopIdx > 0 ? _lastTopIdx - 1 : -1;
+    if (_lastBottomIdx >= idx) _lastBottomIdx = _lastBottomIdx > 0 ? _lastBottomIdx - 1 : -1;
     notifyListeners();
   }
 
@@ -251,7 +364,11 @@ class EditorProvider extends ChangeNotifier {
 
   Future<void> expandNode(FileNode node) async {
     if (!node.isDirectory) return;
-    await node.loadChildren();
+    if (_remoteListDir != null) {
+      if (!node.isExpanded) await node.loadRemoteChildren(_remoteListDir!);
+    } else {
+      await node.loadChildren();
+    }
     node.isExpanded = !node.isExpanded;
     notifyListeners();
   }

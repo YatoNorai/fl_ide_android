@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:terminal_pkg/terminal_pkg.dart';
 
 import '../providers/editor_provider.dart';
 
@@ -30,7 +31,7 @@ class _EditorTabBarState extends State<EditorTabBar>
   void _syncController(int len, int active) {
     if (_ctrl.length != len) {
       final old = _ctrl;
-      _ctrl = TabController(length: len, vsync: this, initialIndex: active);
+      _ctrl = TabController(length: len, vsync: this, initialIndex: active.clamp(0, len - 1));
       WidgetsBinding.instance.addPostFrameCallback((_) => old.dispose());
     } else if (len > 0 && _ctrl.index != active) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -39,7 +40,7 @@ class _EditorTabBarState extends State<EditorTabBar>
     }
   }
 
-  void _showMenu(BuildContext ctx, EditorProvider editor, int globalIndex) {
+  void _showFileMenu(BuildContext ctx, EditorProvider editor, int globalIndex) {
     final box = context.findRenderObject() as RenderBox?;
     if (box == null) return;
     final origin = box.localToGlobal(Offset.zero);
@@ -50,30 +51,11 @@ class _EditorTabBarState extends State<EditorTabBar>
       position: RelativeRect.fromLTRB(
           origin.dx + 8, origin.dy + size.height, origin.dx + size.width, 0),
       items: [
-        PopupMenuItem(
-          value: 'close',
-          height: 40,
-          child: _MenuItem(icon: Icons.close, label: 'Close'),
-        ),
-        PopupMenuItem(
-          value: 'others',
-          height: 40,
-          child:
-              _MenuItem(icon: Icons.tab_unselected, label: 'Close others'),
-        ),
-        PopupMenuItem(
-          value: 'all',
-          height: 40,
-          child: _MenuItem(icon: Icons.clear_all, label: 'Close all'),
-        ),
+        PopupMenuItem(value: 'close', height: 40, child: _MenuItem(icon: Icons.close, label: 'Close')),
+        PopupMenuItem(value: 'others', height: 40, child: _MenuItem(icon: Icons.tab_unselected, label: 'Close others')),
+        PopupMenuItem(value: 'all', height: 40, child: _MenuItem(icon: Icons.clear_all, label: 'Close all')),
         const PopupMenuDivider(),
-        PopupMenuItem(
-          value: 'panel',
-          height: 40,
-          child: _MenuItem(
-              icon: Icons.vertical_align_bottom_rounded,
-              label: 'Move to panel'),
-        ),
+        PopupMenuItem(value: 'panel', height: 40, child: _MenuItem(icon: Icons.vertical_align_bottom_rounded, label: 'Move to panel')),
       ],
     ).then((val) {
       if (!mounted) return;
@@ -84,40 +66,77 @@ class _EditorTabBarState extends State<EditorTabBar>
     });
   }
 
+  void _showTerminalMenu(BuildContext ctx, TerminalProvider term, String sessionId) {
+    final box = context.findRenderObject() as RenderBox?;
+    if (box == null) return;
+    final origin = box.localToGlobal(Offset.zero);
+    final size = box.size;
+    showMenu<String>(
+      context: ctx,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      position: RelativeRect.fromLTRB(
+          origin.dx + 8, origin.dy + size.height, origin.dx + size.width, 0),
+      items: [
+        PopupMenuItem(value: 'panel', height: 40, child: _MenuItem(icon: Icons.vertical_align_bottom_rounded, label: 'Move to panel')),
+        PopupMenuItem(value: 'close', height: 40, child: _MenuItem(icon: Icons.close, label: 'Close terminal')),
+      ],
+    ).then((val) {
+      if (!mounted) return;
+      final idx = term.sessions.indexWhere((s) => s.id == sessionId);
+      if (val == 'panel') term.unpinFromTopBar(sessionId);
+      if (val == 'close' && idx != -1) term.closeSession(idx);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Consumer<EditorProvider>(
-      builder: (ctx, editor, _) {
+    return Consumer2<EditorProvider, TerminalProvider>(
+      builder: (ctx, editor, term, _) {
         final topFiles = editor.topFiles;
-        if (topFiles.isEmpty) return const SizedBox.shrink();
+        final topTerms = term.topBarSessions;
+        final totalLen = topFiles.length + topTerms.length;
 
-        final len = topFiles.length;
-        // Active tab index within topFiles list
-        final activeGlobal = editor.activeIndex;
-        final activeTop = topFiles.indexWhere(
-            (f) => editor.openFiles.indexOf(f) == activeGlobal);
-        final active = activeTop < 0 ? 0 : activeTop;
+        if (totalLen == 0) return const SizedBox.shrink();
 
-        _syncController(len, active);
+        // Compute active tab index across files + terminals
+        int activeIdx = 0;
+        if (term.isTopBarTerminalActive && term.topBarActiveId != null) {
+          final termIdx = topTerms.indexWhere((s) => s.id == term.topBarActiveId);
+          if (termIdx >= 0) {
+            activeIdx = topFiles.length + termIdx;
+          }
+        } else {
+          final topActive = editor.topActiveFile;
+          final activeTop = topActive == null ? -1 : topFiles.indexOf(topActive);
+          activeIdx = activeTop < 0 ? 0 : activeTop;
+        }
+
+        _syncController(totalLen, activeIdx);
 
         final cs = Theme.of(context).colorScheme;
 
-        // Wrap the entire bar in a DragTarget so bottom-panel tabs
-        // can be dragged back to the top bar.
-        return DragTarget<OpenFile>(
+        return DragTarget<Object>(
+          onWillAcceptWithDetails: (details) =>
+              details.data is OpenFile || details.data is TerminalSession,
           onAcceptWithDetails: (details) {
-            final globalIndex =
-                editor.openFiles.indexOf(details.data);
-            if (globalIndex != -1) {
-              editor.moveToPanel(globalIndex, bottom: false);
+            if (details.data is OpenFile) {
+              final f = details.data as OpenFile;
+              final globalIndex = editor.openFiles.indexOf(f);
+              if (globalIndex != -1) {
+                editor.moveToPanel(globalIndex, bottom: false);
+              }
+            } else if (details.data is TerminalSession) {
+              final s = details.data as TerminalSession;
+              term.pinToTopBar(s.id);
             }
           },
           builder: (ctx2, candidates, _) {
-            final isDragOver = candidates.isNotEmpty;
+            final isDragOver = candidates.isNotEmpty &&
+                candidates.any((c) => c is OpenFile || c is TerminalSession);
             return ColoredBox(
               color: isDragOver
                   ? cs.primaryContainer.withValues(alpha: 0.3)
-                  : cs.surfaceContainerHigh,
+                  : cs.surface,
               child: TabBar(
                 controller: _ctrl,
                 isScrollable: true,
@@ -127,69 +146,89 @@ class _EditorTabBarState extends State<EditorTabBar>
                 labelPadding: EdgeInsets.zero,
                 labelColor: cs.primary,
                 unselectedLabelColor: cs.onSurfaceVariant,
-                labelStyle: const TextStyle(
-                    fontSize: 12, fontWeight: FontWeight.w600),
-                unselectedLabelStyle: const TextStyle(
-                    fontSize: 12, fontWeight: FontWeight.w400),
+                labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                unselectedLabelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w400),
                 indicator: UnderlineTabIndicator(
                   borderSide: BorderSide(color: cs.primary, width: 2),
                 ),
                 indicatorSize: TabBarIndicatorSize.tab,
                 onTap: (i) {
                   if (_closeHandled) return;
-                  final globalIndex =
-                      editor.openFiles.indexOf(topFiles[i]);
-                  if (i == active) {
-                    _showMenu(ctx, editor, globalIndex);
+                  if (i < topFiles.length) {
+                    // File tab tapped
+                    final globalIndex = editor.openFiles.indexOf(topFiles[i]);
+                    if (i == activeIdx && !term.isTopBarTerminalActive) {
+                      _showFileMenu(ctx, editor, globalIndex);
+                    } else {
+                      term.clearTopBarActive();
+                      editor.switchTo(globalIndex);
+                    }
                   } else {
-                    editor.switchTo(globalIndex);
+                    // Terminal tab tapped
+                    final termLocal = i - topFiles.length;
+                    final session = topTerms[termLocal];
+                    if (i == activeIdx && term.isTopBarTerminalActive) {
+                      _showTerminalMenu(ctx, term, session.id);
+                    } else {
+                      term.setTopBarActive(session.id);
+                    }
                   }
                 },
-                tabs: List.generate(len, (i) {
-                  final f = topFiles[i];
-                  final globalIndex = editor.openFiles.indexOf(f);
-                  return Tab(
-                    height: 38,
-                    child: LongPressDraggable<OpenFile>(
-                      data: f,
-                      feedback: Material(
-                        elevation: 4,
-                        borderRadius: BorderRadius.circular(8),
-                        color: cs.primaryContainer,
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 6),
-                          child: Text(
-                            f.name,
-                            style: TextStyle(
-                                color: cs.onPrimaryContainer,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600),
+                tabs: [
+                  // File tabs
+                  for (var i = 0; i < topFiles.length; i++) ...[
+                    () {
+                      final f = topFiles[i];
+                      final globalIndex = editor.openFiles.indexOf(f);
+                      return Tab(
+                        height: 38,
+                        child: LongPressDraggable<OpenFile>(
+                          data: f,
+                          feedback: Material(
+                            elevation: 4,
+                            borderRadius: BorderRadius.circular(8),
+                            color: cs.primaryContainer,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                              child: Text(f.name,
+                                  style: TextStyle(color: cs.onPrimaryContainer, fontSize: 12, fontWeight: FontWeight.w600)),
+                            ),
                           ),
-                        ),
-                      ),
-                      childWhenDragging: Opacity(
-                        opacity: 0.4,
-                        child: _TabContent(
+                          childWhenDragging: Opacity(
+                            opacity: 0.4,
+                            child: _FileTabContent(file: f, cs: cs, onClose: () {}, closeHandled: false),
+                          ),
+                          child: _FileTabContent(
                             file: f,
                             cs: cs,
-                            onClose: () {},
-                            closeHandled: false),
-                      ),
-                      child: _TabContent(
-                        file: f,
+                            onClose: () {
+                              _closeHandled = true;
+                              WidgetsBinding.instance.addPostFrameCallback((_) => _closeHandled = false);
+                              editor.closeFile(globalIndex);
+                            },
+                            closeHandled: _closeHandled,
+                          ),
+                        ),
+                      );
+                    }(),
+                  ],
+                  // Terminal tabs
+                  for (final session in topTerms) ...[
+                    Tab(
+                      height: 38,
+                      child: _TerminalTabContent(
+                        session: session,
                         cs: cs,
                         onClose: () {
                           _closeHandled = true;
-                          WidgetsBinding.instance.addPostFrameCallback(
-                              (_) => _closeHandled = false);
-                          editor.closeFile(globalIndex);
+                          WidgetsBinding.instance.addPostFrameCallback((_) => _closeHandled = false);
+                          final idx = term.sessions.indexWhere((s) => s.id == session.id);
+                          if (idx != -1) term.closeSession(idx);
                         },
-                        closeHandled: _closeHandled,
                       ),
                     ),
-                  );
-                }),
+                  ],
+                ],
               ),
             );
           },
@@ -199,13 +238,13 @@ class _EditorTabBarState extends State<EditorTabBar>
   }
 }
 
-class _TabContent extends StatelessWidget {
+class _FileTabContent extends StatelessWidget {
   final OpenFile file;
   final ColorScheme cs;
   final VoidCallback onClose;
   final bool closeHandled;
 
-  const _TabContent({
+  const _FileTabContent({
     required this.file,
     required this.cs,
     required this.onClose,
@@ -224,16 +263,47 @@ class _TabContent extends StatelessWidget {
               width: 6,
               height: 6,
               margin: const EdgeInsets.only(right: 6),
-              decoration:
-                  BoxDecoration(color: cs.error, shape: BoxShape.circle),
+              decoration: BoxDecoration(color: cs.error, shape: BoxShape.circle),
             ),
           Text(file.name),
           const SizedBox(width: 6),
           GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: onClose,
-            child: Icon(Icons.close_rounded,
-                size: 13, color: cs.onSurfaceVariant),
+            child: Icon(Icons.close_rounded, size: 13, color: cs.onSurfaceVariant),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TerminalTabContent extends StatelessWidget {
+  final dynamic session; // TerminalSession
+  final ColorScheme cs;
+  final VoidCallback onClose;
+
+  const _TerminalTabContent({
+    required this.session,
+    required this.cs,
+    required this.onClose,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.terminal_rounded, size: 13, color: cs.tertiary),
+          const SizedBox(width: 6),
+          Text(session.label as String? ?? 'Terminal'),
+          const SizedBox(width: 6),
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: onClose,
+            child: Icon(Icons.close_rounded, size: 13, color: cs.onSurfaceVariant),
           ),
         ],
       ),

@@ -9,11 +9,15 @@ class PtyTerminalWidget extends StatelessWidget {
   const PtyTerminalWidget({super.key, required this.session});
 
   /// Builds a TerminalTheme that matches the active MaterialTheme.
-  /// Surface/foreground/cursor come from the ColorScheme; ANSI colours
-  /// stay as standard terminal values so output stays readable.
+  /// Cached by brightness to avoid allocating a new object every build.
+  static TerminalTheme? _lightTheme;
+  static TerminalTheme? _darkTheme;
+
   static TerminalTheme _themeFor(ColorScheme cs) {
     final isDark = cs.brightness == Brightness.dark;
-    return TerminalTheme(
+    if (isDark && _darkTheme != null) return _darkTheme!;
+    if (!isDark && _lightTheme != null) return _lightTheme!;
+    final theme = TerminalTheme(
       cursor:     cs.primary,
       selection:  cs.primary.withValues(alpha: 0.35),
       foreground: cs.onSurface,
@@ -39,16 +43,23 @@ class PtyTerminalWidget extends StatelessWidget {
       searchHitBackgroundCurrent: const Color(0xFFFF8C00),
       searchHitForeground:        const Color(0xFF000000),
     );
+    if (isDark) { _darkTheme = theme; } else { _lightTheme = theme; }
+    return theme;
   }
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return TerminalView(
-      session.terminal,
-      theme: _themeFor(cs),
-      autofocus: true,
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+    // RepaintBoundary isolates the terminal canvas from the rest of the UI.
+    // The terminal repaints at its own rate (cursor blink, output); without
+    // this boundary, its repaints would propagate up the render tree.
+    return RepaintBoundary(
+      child: TerminalView(
+        session.terminal,
+        theme: _themeFor(cs),
+        autofocus: true,
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+      ),
     );
   }
 }

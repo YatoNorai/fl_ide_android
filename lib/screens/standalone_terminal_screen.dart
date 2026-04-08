@@ -1,6 +1,10 @@
+import 'dart:async';
+import 'dart:typed_data';
+
 import 'package:core/core.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:ssh_pkg/ssh_pkg.dart';
 import 'package:terminal_pkg/terminal_pkg.dart';
 
 // ── Standalone terminal ───────────────────────────────────────────────────────
@@ -24,8 +28,26 @@ class StandaloneTerminalScreenState extends State<StandaloneTerminalScreen> {
       _termProvider.createSession(
         label: 'bash 1',
         workingDirectory: RuntimeEnvir.homePath,
+        sshSetup: _makeSshSetup(context),
       );
     });
+  }
+
+  Future<void> Function(TerminalSession)? _makeSshSetup(BuildContext ctx) {
+    final ssh = ctx.read<SshProvider>();
+    if (!ssh.isConnected) return null;
+    return (session) async {
+      final sshSession = await ssh.startShell();
+      final controller = StreamController<List<int>>();
+      controller.stream
+          .listen((bytes) => sshSession.stdin.add(Uint8List.fromList(bytes)));
+      session.attachRemote(
+        remoteOutput: sshSession.stdout.cast<List<int>>(),
+        remoteInput: controller.sink,
+        doneFuture: sshSession.done,
+        onResize: (w, h) => sshSession.resizeTerminal(w, h),
+      );
+    };
   }
 
   @override
@@ -64,13 +86,13 @@ class StandaloneTerminalScreenState extends State<StandaloneTerminalScreen> {
 
                 // ── Terminal body ─────────────────────────────────────────
                 Expanded(
-                  child: TerminalTabs(
-                    initialWorkDir: RuntimeEnvir.homePath,
-                  ),
+                  child: provider.active != null
+                      ? PtyTerminalWidget(session: provider.active!)
+                      : const SizedBox.shrink(),
                 ),
 
                 // ── Keys bar (padded above system nav bar) ─────────────────
-                if (provider.active != null)
+                if (provider.active?.pty != null)
                   SafeArea(
                     top: false,
                     child: XtermBottomBar(
@@ -124,8 +146,27 @@ class _SessionsDrawer extends StatelessWidget {
                     icon: Icons.add,
                     label: 'New',
                     onTap: () {
+                      final ssh = context.read<SshProvider>();
                       provider.createSession(
-                          workingDirectory: RuntimeEnvir.homePath);
+                        workingDirectory: RuntimeEnvir.homePath,
+                        sshSetup: ssh.isConnected
+                            ? (session) async {
+                                final sshSession = await ssh.startShell();
+                                final ctrl = StreamController<List<int>>();
+                                ctrl.stream.listen((bytes) =>
+                                    sshSession.stdin
+                                        .add(Uint8List.fromList(bytes)));
+                                session.attachRemote(
+                                  remoteOutput:
+                                      sshSession.stdout.cast<List<int>>(),
+                                  remoteInput: ctrl.sink,
+                                  doneFuture: sshSession.done,
+                                  onResize: (w, h) =>
+                                      sshSession.resizeTerminal(w, h),
+                                );
+                              }
+                            : null,
+                      );
                       Navigator.of(context).pop();
                     },
                   ),
@@ -341,9 +382,27 @@ class _TerminalAppBar extends StatelessWidget {
             _ActionChip(
               icon: Icons.add,
               label: 'New',
-              onTap: () => provider.createSession(
-                workingDirectory: RuntimeEnvir.homePath,
-              ),
+              onTap: () {
+                final ssh = context.read<SshProvider>();
+                provider.createSession(
+                  workingDirectory: RuntimeEnvir.homePath,
+                  sshSetup: ssh.isConnected
+                      ? (session) async {
+                          final sshSession = await ssh.startShell();
+                          final ctrl = StreamController<List<int>>();
+                          ctrl.stream.listen((bytes) =>
+                              sshSession.stdin.add(Uint8List.fromList(bytes)));
+                          session.attachRemote(
+                            remoteOutput: sshSession.stdout.cast<List<int>>(),
+                            remoteInput: ctrl.sink,
+                            doneFuture: sshSession.done,
+                            onResize: (w, h) =>
+                                sshSession.resizeTerminal(w, h),
+                          );
+                        }
+                      : null,
+                );
+              },
             ),
             const SizedBox(width: 8),
           ],

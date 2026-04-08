@@ -67,6 +67,39 @@ class LspProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Start LSP using a WebSocket URL (for SSH-backed remote LSP servers).
+  /// The WebSocket server is expected to speak JSON-RPC 2.0 over ws://.
+  void startForSocket(String wsUrl, String extension, String projectPath) {
+    _status = LspStatus.warming;
+    _lspConfig = QuillLspSocketConfig(
+      url: wsUrl,
+      languageId: _languageId(extension),
+      workspacePath: projectPath,
+    );
+    notifyListeners();
+  }
+
+  /// Returns the shell command to start the LSP server for [extension] on a
+  /// REMOTE machine (does NOT check local file existence).
+  /// Returns null if no LSP server is known for this extension.
+  String? lspRemoteCommandFor(String extension) {
+    switch (extension.toLowerCase()) {
+      case 'dart':
+        return 'dart language-server --lsp';
+      case 'js':
+      case 'jsx':
+      case 'ts':
+      case 'tsx':
+        return 'typescript-language-server --stdio';
+      case 'py':
+        return 'pylsp';
+      case 'kt':
+        return 'kotlin-language-server';
+      default:
+        return null;
+    }
+  }
+
   /// Returns [executable, ...args] for the LSP server, or null if the binary
   /// is not installed or the extension is unsupported.
   List<String>? _lspServerCommand(String ext,

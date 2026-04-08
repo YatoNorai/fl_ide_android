@@ -19,12 +19,14 @@ dependencies:
     path: ../dap_client
   provider: ^6.1.2
   path: ^1.9.0
+  terminal_pkg:
+    path: ../terminal_pkg
+  ssh_pkg:
+    path: ../ssh_pkg
 
   # Code editor package
   quill_code:
-    git:
-      url: https://github.com/YatoNorai/quill_code.git
-      ref: rust-impl
+    path: ../../../quill_code
 
 dev_dependencies:
   flutter_test:

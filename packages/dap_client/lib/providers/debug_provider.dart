@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:core/core.dart';
 import 'package:flutter/foundation.dart';
@@ -28,6 +29,13 @@ class DebugProvider extends ChangeNotifier {
 
   // Breakpoints: absolute file path → list of 1-based line numbers.
   final Map<String, List<int>> _breakpoints = {};
+  // Exception breakpoint filters
+  bool _breakOnAllExceptions = false;
+  bool _breakOnUncaughtExceptions = true;
+
+  // Watch expressions: expression → evaluated result string
+  final List<String> _watchExpressions = [];
+  final Map<String, String> _watchResults = {};
 
   // State when paused
   List<DapThread> _threads = [];
@@ -75,6 +83,10 @@ class DebugProvider extends ChangeNotifier {
 
   List<int> breakpointsForFile(String filePath) =>
       List.unmodifiable(_breakpoints[filePath] ?? []);
+  bool get breakOnAllExceptions => _breakOnAllExceptions;
+  bool get breakOnUncaughtExceptions => _breakOnUncaughtExceptions;
+  List<String> get watchExpressions => List.unmodifiable(_watchExpressions);
+  Map<String, String> get watchResults => Map.unmodifiable(_watchResults);
 
   // ── Session lifecycle ─────────────────────────────────────────────────────
 
@@ -134,6 +146,52 @@ class DebugProvider extends ChangeNotifier {
     } catch (e) {
       _error = e.toString();
       debugPrint('[DAP] startSession error: $e');
+      await _cleanup();
+    }
+  }
+
+  /// Start a debug session with a DAP adapter running on a remote machine
+  /// over SSH. [remoteStdout] / [remoteStdin] are the SSH process stdio.
+  Future<void> startSessionRemote(
+    Project project, {
+    required Stream<Uint8List> remoteStdout,
+    required StreamSink<Uint8List> remoteStdin,
+    String platform = 'android',
+    DapConfig? dapConfig,
+  }) async {
+    if (_status != DebugStatus.idle) return;
+    _error = null;
+    _output = '';
+    _projectPath = project.path;
+    _platformArg = platform;
+    _dapConfig = dapConfig ?? _flutterFallbackDapConfig;
+    _status = DebugStatus.starting;
+    _isBuilding = true;
+    notifyListeners();
+
+    try {
+      _client = DapStdioClient();
+      await _client!.startRemote(remoteStdout, remoteStdin, onStderr: (line) {
+        _output += '[adapter] $line\n';
+        notifyListeners();
+      });
+      _eventSub = _client!.events.listen(_onEvent);
+
+      await _client!.sendRequest('initialize', {
+        'clientID': 'fl_ide',
+        'clientName': 'FL IDE',
+        'adapterID': _dapConfig.adapterId.isEmpty ? 'dart' : _dapConfig.adapterId,
+        'pathFormat': 'path',
+        'linesStartAt1': true,
+        'columnsStartAt1': true,
+        'supportsVariableType': true,
+        'supportsVariablePaging': false,
+        'supportsRunInTerminalRequest': false,
+        'supportsInvalidatedEvent': true,
+      }).timeout(const Duration(seconds: 10));
+    } catch (e) {
+      _error = e.toString();
+      debugPrint('[DAP SSH] startSessionRemote error: $e');
       await _cleanup();
     }
   }
@@ -214,6 +272,8 @@ class DebugProvider extends ChangeNotifier {
       for (final entry in _breakpoints.entries) {
         await _sendBreakpointsToAdapter(entry.key, entry.value);
       }
+      // 2b. Send exception breakpoints
+      await _sendExceptionBreakpoints();
       // 3. Configuration done
       await _client!.sendRequest('configurationDone')
           .timeout(const Duration(seconds: 10));
@@ -374,6 +434,64 @@ class DebugProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ── Exception breakpoints ─────────────────────────────────────────────────
+
+  void setBreakOnAllExceptions(bool value) {
+    _breakOnAllExceptions = value;
+    if (_client != null) _sendExceptionBreakpoints().ignore();
+    notifyListeners();
+  }
+
+  void setBreakOnUncaughtExceptions(bool value) {
+    _breakOnUncaughtExceptions = value;
+    if (_client != null) _sendExceptionBreakpoints().ignore();
+    notifyListeners();
+  }
+
+  Future<void> _sendExceptionBreakpoints() async {
+    if (_client == null) return;
+    try {
+      final filters = <String>[
+        if (_breakOnAllExceptions) 'all',
+        if (_breakOnUncaughtExceptions) 'uncaught',
+      ];
+      await _client!.sendRequest('setExceptionBreakpoints', {'filters': filters});
+    } catch (e) {
+      debugPrint('[DAP] setExceptionBreakpoints error: $e');
+    }
+  }
+
+  // ── Watch expressions ─────────────────────────────────────────────────────
+
+  void addWatch(String expression) {
+    if (expression.trim().isEmpty) return;
+    if (_watchExpressions.contains(expression)) return;
+    _watchExpressions.add(expression);
+    notifyListeners();
+    if (isPaused) _evaluateWatch(expression).ignore();
+  }
+
+  void removeWatch(String expression) {
+    _watchExpressions.remove(expression);
+    _watchResults.remove(expression);
+    notifyListeners();
+  }
+
+  Future<void> _evaluateWatch(String expression) async {
+    final result = await evaluate(expression);
+    _watchResults[expression] = result;
+    if (mounted) notifyListeners();
+  }
+
+  bool get mounted => true; // ChangeNotifier doesn't have mounted; used as guard
+
+  Future<void> evaluateAllWatches() async {
+    if (!isPaused || _watchExpressions.isEmpty) return;
+    for (final expr in _watchExpressions) {
+      await _evaluateWatch(expr);
+    }
+  }
+
   Future<void> _sendBreakpointsToAdapter(
       String filePath, List<int> lines) async {
     if (_client == null) return;
@@ -413,6 +531,8 @@ class DebugProvider extends ChangeNotifier {
       debugPrint('[DAP] fetchCallStack error: $e');
     }
     notifyListeners();
+    // Re-evaluate all watch expressions at the new stop location.
+    evaluateAllWatches().ignore();
   }
 
   Future<void> selectFrame(DapStackFrame frame) async {
@@ -539,6 +659,7 @@ class DebugProvider extends ChangeNotifier {
     _callStack = [];
     _scopes = [];
     _variables = [];
+    _watchResults.clear();
     _stopReason = null;
     _stoppedFile = null;
     _stoppedLine = null;

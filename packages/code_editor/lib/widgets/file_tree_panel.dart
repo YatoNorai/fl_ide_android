@@ -1,11 +1,23 @@
 import 'dart:io';
 
-import 'package:core/core.dart' show FileNode;
+import 'package:core/core.dart' show FileNode, showThemedDialog;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:ssh_pkg/ssh_pkg.dart';
 
 import '../providers/editor_provider.dart';
+
+/// Returns true when [path] belongs to a project hosted on the SSH remote.
+bool _isRemote(BuildContext ctx, String path) {
+  try {
+    final ssh = ctx.read<SshProvider>();
+    final rp = ssh.config?.remoteProjectsPath ?? '';
+    return ssh.isConnected && rp.isNotEmpty && path.startsWith(rp);
+  } catch (_) {
+    return false;
+  }
+}
 
 class FileTreePanel extends StatelessWidget {
   final VoidCallback? onFileSelected;
@@ -14,26 +26,26 @@ class FileTreePanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return Consumer<EditorProvider>(
-      builder: (context, editor, _) {
-        return ColoredBox(
-          color: cs.surfaceContainerLow,
-          child: editor.rootNode == null
-              ? Center(
-                  child: Text('No project open',
-                      style: TextStyle(
-                          color: cs.onSurfaceVariant, fontSize: 14)),
-                )
-              : SingleChildScrollView(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: _FileTreeNode(
-                    node: editor.rootNode!,
-                    depth: 0,
-                    onFileSelected: onFileSelected,
-                  ),
-                ),
-        );
-      },
+    // Only rebuild the tree when rootNode itself changes (project open/refresh).
+    // Active-file highlighting is handled per-leaf via context.select<>.
+    final rootNode = context.select<EditorProvider, FileNode?>(
+      (e) => e.rootNode,
+    );
+    return ColoredBox(
+      color: cs.surface,
+      child: rootNode == null
+          ? Center(
+              child: Text('No project open',
+                  style: TextStyle(color: cs.onSurfaceVariant, fontSize: 14)),
+            )
+          : SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: _FileTreeNode(
+                node: rootNode,
+                depth: 0,
+                onFileSelected: onFileSelected,
+              ),
+            ),
     );
   }
 }
@@ -45,7 +57,7 @@ class _FileTreeNode extends StatelessWidget {
   final int depth;
   final VoidCallback? onFileSelected;
   const _FileTreeNode(
-      {required this.node, required this.depth, this.onFileSelected});
+      {super.key, required this.node, required this.depth, this.onFileSelected});
 
   @override
   Widget build(BuildContext context) => node.isDirectory
@@ -88,6 +100,7 @@ class _DirectoryNode extends StatelessWidget {
         ),
         if (node.isExpanded)
           ...node.children.map((child) => _FileTreeNode(
+              key: ValueKey(child.path),
               node: child,
               depth: depth + 1,
               onFileSelected: onFileSelected)),
@@ -125,8 +138,11 @@ class _FileLeaf extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final editor = context.watch<EditorProvider>();
-    final isActive = editor.activeFile?.path == node.path;
+    // select<> only rebuilds this leaf when the active file path changes,
+    // not on every EditorProvider notification (tab reorder, dirty flag, etc.)
+    final isActive = context.select<EditorProvider, bool>(
+      (e) => e.activeFile?.path == node.path,
+    );
     return _TreeItem(
       node: node,
       depth: depth,
@@ -380,7 +396,7 @@ class _FileActionsSheet extends StatelessWidget {
 
   void _confirmDelete(BuildContext context) {
     Navigator.pop(context);
-    showDialog(
+    showThemedDialog(
       context: parentContext,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -397,7 +413,11 @@ class _FileActionsSheet extends StatelessWidget {
               Navigator.pop(ctx);
               try {
                 onCloseFile();
-                await File(file.path).delete();
+                if (_isRemote(parentContext, file.path)) {
+                  await parentContext.read<SshProvider>().deleteFile(file.path);
+                } else {
+                  await File(file.path).delete();
+                }
                 onRefresh();
               } catch (e) {
                 if (parentContext.mounted) {
@@ -416,7 +436,7 @@ class _FileActionsSheet extends StatelessWidget {
   void _showRename(BuildContext context) {
     Navigator.pop(context);
     final ctrl = TextEditingController(text: file.name);
-    showDialog(
+    showThemedDialog(
       context: parentContext,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -435,9 +455,17 @@ class _FileActionsSheet extends StatelessWidget {
               final newName = ctrl.text.trim();
               if (newName.isEmpty) return;
               Navigator.pop(ctx);
-              final parent = file.path.substring(0, file.path.lastIndexOf('/'));
+              final sep = file.path.contains('/') ? '/' : r'\';
+              final parent =
+                  file.path.substring(0, file.path.lastIndexOf(sep));
               try {
-                await File(file.path).rename('$parent/$newName');
+                if (_isRemote(parentContext, file.path)) {
+                  await parentContext
+                      .read<SshProvider>()
+                      .rename(file.path, '$parent/$newName');
+                } else {
+                  await File(file.path).rename('$parent/$newName');
+                }
                 onRefresh();
               } catch (e) {
                 if (parentContext.mounted) {
@@ -544,7 +572,7 @@ class _DirActionsSheet extends StatelessWidget {
 
   void _confirmDelete(BuildContext context) {
     Navigator.pop(context);
-    showDialog(
+    showThemedDialog(
       context: parentContext,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -562,7 +590,15 @@ class _DirActionsSheet extends StatelessWidget {
               Navigator.pop(ctx);
               try {
                 onCloseUnder(dir.path);
-                await Directory(dir.path).delete(recursive: true);
+                if (_isRemote(parentContext, dir.path)) {
+                  final ssh = parentContext.read<SshProvider>();
+                  final cmd = ssh.remoteIsWindows
+                      ? 'cmd /c rmdir /s /q "${dir.path}"'
+                      : 'rm -rf "${dir.path}"';
+                  await ssh.execute(cmd);
+                } else {
+                  await Directory(dir.path).delete(recursive: true);
+                }
                 onRefresh();
               } catch (e) {
                 if (parentContext.mounted) {
@@ -581,7 +617,7 @@ class _DirActionsSheet extends StatelessWidget {
   void _showNewItem(BuildContext context, {required bool isFile}) {
     Navigator.pop(context);
     final ctrl = TextEditingController();
-    showDialog(
+    showThemedDialog(
       context: parentContext,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -605,13 +641,25 @@ class _DirActionsSheet extends StatelessWidget {
               Navigator.pop(ctx);
               final newPath = '${dir.path}/$name';
               try {
-                if (isFile) {
-                  await File(newPath).create(recursive: true);
-                  onRefresh();
-                  await onOpenFile(newPath);
+                if (_isRemote(parentContext, dir.path)) {
+                  final ssh = parentContext.read<SshProvider>();
+                  if (isFile) {
+                    await ssh.writeFile(newPath, '');
+                    onRefresh();
+                    await onOpenFile(newPath);
+                  } else {
+                    await ssh.createDirectory(newPath);
+                    onRefresh();
+                  }
                 } else {
-                  await Directory(newPath).create(recursive: true);
-                  onRefresh();
+                  if (isFile) {
+                    await File(newPath).create(recursive: true);
+                    onRefresh();
+                    await onOpenFile(newPath);
+                  } else {
+                    await Directory(newPath).create(recursive: true);
+                    onRefresh();
+                  }
                 }
               } catch (e) {
                 if (parentContext.mounted) {
@@ -630,7 +678,7 @@ class _DirActionsSheet extends StatelessWidget {
   void _showRename(BuildContext context) {
     Navigator.pop(context);
     final ctrl = TextEditingController(text: dir.name);
-    showDialog(
+    showThemedDialog(
       context: parentContext,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -649,9 +697,17 @@ class _DirActionsSheet extends StatelessWidget {
               final newName = ctrl.text.trim();
               if (newName.isEmpty) return;
               Navigator.pop(ctx);
-              final parent = dir.path.substring(0, dir.path.lastIndexOf('/'));
+              final sep = dir.path.contains('/') ? '/' : r'\';
+              final parent =
+                  dir.path.substring(0, dir.path.lastIndexOf(sep));
               try {
-                await Directory(dir.path).rename('$parent/$newName');
+                if (_isRemote(parentContext, dir.path)) {
+                  await parentContext
+                      .read<SshProvider>()
+                      .rename(dir.path, '$parent/$newName');
+                } else {
+                  await Directory(dir.path).rename('$parent/$newName');
+                }
                 onRefresh();
               } catch (e) {
                 if (parentContext.mounted) {

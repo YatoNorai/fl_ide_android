@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:app_installer/app_installer.dart';
@@ -10,24 +11,30 @@ import 'package:core/core.dart';
 import 'package:fl_ide/screens/standalone_terminal_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:liquid_glass_renderer/liquid_glass_renderer.dart';
 import 'package:lsp_client/lsp_client.dart';
 import 'package:project_manager/project_manager.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:quill_code/quill_code.dart'
-    show DiagnosticSeverity, QuillActionsMenu, QuillThemeDark, SearchOptions;
+    show DiagnosticSeverity, QuillActionsMenu, SearchOptions;
 import 'package:sdk_manager/sdk_manager.dart';
 import 'package:terminal_pkg/terminal_pkg.dart';
+import 'package:ssh_pkg/ssh_pkg.dart';
+import 'package:oc_liquid_glass/oc_liquid_glass.dart';
 
-import '../app.dart' show showThemedDialog;
+import '../app.dart' show editorThemeFromScheme, showThemedDialog;
 import '../foreground_service.dart';
+import 'ai_chat_drawer.dart';
 import '../l10n/app_strings.dart';
 import '../providers/extensions_provider.dart';
 import '../providers/settings_provider.dart';
+import '../utils/ssh_lsp_bridge.dart';
 import '../widgets/web_preview_overlay.dart';
+import '../visual_editor/visual_editor_overlay.dart';
 import 'settings_screen.dart' show SettingsScreen;
 
-const _kDrawerWidth = 300.0;
+const _kDrawerWidth = 340.0;
 const _kRailWidth = 64.0;
 const _kSpecialChars = [
   '(', ')', '{', '}', '[', ']', ';', ':',
@@ -38,6 +45,18 @@ const _kSpecialChars = [
 
 // Init phases shown in the peek bar
 enum _InitPhase { creatingProject, loadingProject, startingLsp, syncingDeps, ready }
+
+// Shared liquid-glass shader settings used across AppBar, drawer, and bottom sheet.
+const _kGlassSettings = OCLiquidGlassSettings(
+  blurRadiusPx: 3.0,
+  refractStrength: -0.06,
+  distortFalloffPx: 18.0,
+  specStrength: 25,
+  specPower: 6.0,
+  specWidth: 0.35,
+  lightbandStrength: 0.18,
+  lightbandWidthPx: 5.0,
+);
 
 class WorkspaceScreen extends StatefulWidget {
   final Project project;
@@ -56,6 +75,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     with TickerProviderStateMixin {
   late final AnimationController _drawerCtrl;
   late final Animation<double> _drawerAnim;
+  late final AnimationController _aiDrawerCtrl;
+  late final Animation<double> _aiDrawerAnim;
   final _sheetKey = GlobalKey<_BottomSheetPanelState>();
   _InitPhase _initPhase = _InitPhase.loadingProject;
   bool _showWebPreview = false;
@@ -76,6 +97,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   // Cached provider reference — safe to use in dispose()
   DebugProvider? _debugProvider;
 
+  // SSH LSP bridge — closed on dispose
+  SshLspBridge? _sshLspBridge;
+
   @override
   void initState() {
     super.initState();
@@ -85,6 +109,14 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     );
     _drawerAnim = CurvedAnimation(
       parent: _drawerCtrl,
+      curve: Curves.easeInOut,
+    );
+    _aiDrawerCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 280),
+    );
+    _aiDrawerAnim = CurvedAnimation(
+      parent: _aiDrawerCtrl,
       curve: Curves.easeInOut,
     );
 
@@ -105,73 +137,207 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
         setState(() => _initPhase = _InitPhase.loadingProject);
       }
 
-      final editor = context.read<EditorProvider>();
-      await editor.loadProject(widget.project.path);
+      // ── SSH wait ────────────────────────────────────────────────────────
+      // Give the ChangeNotifierProxyProvider 300 ms to fire onSettingsReady()
+      // and start connecting. This is unconditional and cheap.
+      final ssh = context.read<SshProvider>();
+      await Future.delayed(const Duration(milliseconds: 300));
       if (!mounted) return;
-
-      // Prefer SdkConfig from installed JSON extension, fall back to SdkDefinition.
-      final loadedExt = context.read<ExtensionsProvider>().availableSdks
-          .where((e) => e.sdk == widget.project.sdk.name)
-          .firstOrNull;
-      final loadedCfg = loadedExt?.sdkConfig ??
-          SdkDefinition.forType(widget.project.sdk).sdkConfig;
-      final entryFile = '${widget.project.path}/${loadedCfg.defaultEntryFile}';
-      await editor.openFile(entryFile);
-      if (!mounted) return;
-
-      // Phase 2: starting LSP
-      setState(() => _initPhase = _InitPhase.startingLsp);
-      final settings = context.read<SettingsProvider>();
-      final lspProv = context.read<LspProvider>();
-      await lspProv.startForExtension(
-            loadedCfg.defaultEntryFile.split('.').last,
-            widget.project.path,
-            customPaths: settings.lspPaths,
-          );
-      if (!mounted) return;
-
-      if (lspProv.status == LspStatus.warming) {
-        // LSP process started — stay in startingLsp until the first diagnostics
-        // push arrives (proves completions are also working).
-        final activeCtrl = context.read<EditorProvider>().activeFile?.controller;
-        if (activeCtrl is LspAwareController) {
-          activeCtrl.onDiagnosticsReceived = () {
-            lspProv.markReady();
-            if (mounted) setState(() => _initPhase = _InitPhase.ready);
-          };
+      // If auto-connect kicked in, wait for it to finish (up to 8 s).
+      if (ssh.status == SshStatus.connecting) {
+        final sshDone = Completer<void>();
+        void onSsh() {
+          if (ssh.status != SshStatus.connecting && !sshDone.isCompleted) {
+            sshDone.complete();
+          }
         }
+        ssh.addListener(onSsh);
+        try {
+          await sshDone.future.timeout(const Duration(seconds: 8));
+        } catch (_) {}
+        ssh.removeListener(onSsh);
+      }
+
+      // Determine whether this project lives on the remote machine.
+      // Guard: remoteProjectsPath must be non-empty — startsWith('') is always
+      // true and would treat ALL local projects as remote.
+      final isRemoteProject = ssh.isConnected &&
+          ssh.config != null &&
+          ssh.config!.remoteProjectsPath.isNotEmpty &&
+          widget.project.path.startsWith(ssh.config!.remoteProjectsPath);
+
+      // ── Phase 1b: load file tree ─────────────────────────────────────────
+      final editor = context.read<EditorProvider>();
+      if (isRemoteProject) {
+        // Use SFTP for the remote project: listing + file read/write.
+        await editor.loadProjectRemote(
+          widget.project.path,
+          (path) async {
+            final entries = await ssh.listDirectory(path);
+            return entries
+                .map((e) => {
+                      'name': e.name,
+                      'path': e.path,
+                      'isDirectory': e.isDirectory,
+                    })
+                .toList();
+          },
+          readFile: ssh.readFile,
+          writeFile: ssh.writeFile,
+        );
+        // Remote files are opened on demand via SFTP — skip entry file open.
       } else {
-        // No LSP binary for this language — skip straight to ready.
-        setState(() => _initPhase = _InitPhase.ready);
+        await editor.loadProject(widget.project.path);
+        if (!mounted) return;
+
+        // Open the default entry file for local projects.
+        final loadedExt = context.read<ExtensionsProvider>().availableSdks
+            .where((e) => e.sdk == widget.project.sdk.name)
+            .firstOrNull;
+        final loadedCfg = loadedExt?.sdkConfig ??
+            SdkDefinition.forType(widget.project.sdk).sdkConfig;
+        final entryFile = '${widget.project.path}/${loadedCfg.defaultEntryFile}';
+        await editor.openFile(entryFile);
       }
+      if (!mounted) return;
 
-      // Start foreground service to prevent background kill
-      unawaited(FlutterForegroundTask.startService(
-        serviceId: 256,
-        notificationTitle: 'FL IDE',
-        notificationText: widget.project.name,
-        callback: fgServiceCallback,
-      ));
+      // Start foreground service to prevent background kill.
+      // Catch ServiceTimeoutException — the service may time out on first launch
+      // (Android needs a moment to bind). Non-fatal: SSH keepalive still works
+      // via WakeLock/WifiLock; the service is best-effort.
+      // ignore: unawaited_futures
+      _startForegroundService();
 
-      // Phase 3: create terminal and cd to project directory
+      // ── Phase 2: terminal ────────────────────────────────────────────────
+      // Terminal (and cd into project dir) is started BEFORE LSP so that for
+      // SSH projects the shell is already in the project directory when the
+      // LSP server receives the initialize request.
+      // Use SSH shell only for remote projects; local projects use PTY.
       final session = await context.read<TerminalProvider>().createSession(
-            label: widget.project.name,
-            workingDirectory: widget.project.path,
-          );
-      // Explicit cd ensures correct directory even if shell sources .bashrc
-      await Future.delayed(const Duration(milliseconds: 400));
-      if (mounted) {
+        label: widget.project.name,
+        workingDirectory: isRemoteProject ? null : widget.project.path,
+        sshSetup: isRemoteProject
+            ? (s) async {
+                final sshSession = await ssh.startShell();
+                final ctrl = StreamController<List<int>>();
+                ctrl.stream.listen(
+                    (bytes) => sshSession.stdin.add(Uint8List.fromList(bytes)));
+                s.attachRemote(
+                  remoteOutput: sshSession.stdout.cast<List<int>>(),
+                  remoteInput: ctrl.sink,
+                  doneFuture: sshSession.done,
+                  onResize: (w, h) => sshSession.resizeTerminal(w, h),
+                );
+              }
+            : null,
+      );
+      // For remote projects, cd into the project dir after the SSH shell is ready.
+      // Local projects already start in workingDirectory — no cd needed.
+      // A short settle delay is kept for local so the frame stabilises before
+      // LSP init (and as a mounted-check opportunity after the createSession await).
+      if (isRemoteProject) {
+        final shellDelay = ssh.remoteIsWindows
+            ? const Duration(milliseconds: 2500)
+            : const Duration(milliseconds: 1200);
+        await Future.delayed(shellDelay);
+        if (!mounted) return;
         session.writeCommand('cd "${widget.project.path}"');
+      } else {
+        await Future.delayed(const Duration(milliseconds: 300));
+        if (!mounted) return;
       }
 
-      // Show sync banner if the project has a dependency file.
-      // Prefer SdkConfig from installed JSON extension, fall back to SdkDefinition.
+      // ── Phase 3: LSP ──────────────────────────────────────────────────────
+      // LSP starts after the terminal has cd'd so the workspace is fully active.
+      setState(() => _initPhase = _InitPhase.startingLsp);
+      final lspProv = context.read<LspProvider>();
+
+      if (isRemoteProject) {
+        // Start the LSP server on the remote machine and bridge it via
+        // a local WebSocket server → QuillLspSocketConfig.
+        final remoteCmd = lspProv.lspRemoteCommandFor(
+            _sdkExtension(widget.project.sdk));
+        if (remoteCmd != null) {
+          try {
+            final sshSession = await ssh.startProcess(remoteCmd);
+            // Log stderr so we can see if the LSP process fails to start.
+            sshSession.stderr
+                .map((b) => utf8.decode(b, allowMalformed: true))
+                .expand((s) => s.split('\n'))
+                .where((l) => l.trim().isNotEmpty)
+                .listen((line) => debugPrint('[LSP SSH stderr] $line'));
+            _sshLspBridge = await SshLspBridge.start(
+              remoteStdout: sshSession.stdout,
+              remoteStdin: sshSession.stdin,
+            );
+            // Wait 600 ms — if the remote command exits immediately
+            // (command not found, wrong PATH, etc.) the bridge marks itself
+            // dead and we skip startForSocket entirely, avoiding the
+            // "Connection refused" crash in QuillCodeEditor.
+            await Future.delayed(const Duration(milliseconds: 600));
+            if (!mounted) return;
+            if (_sshLspBridge!.isAlive) {
+              lspProv.startForSocket(
+                _sshLspBridge!.wsUrl,
+                _sdkExtension(widget.project.sdk),
+                widget.project.path,
+              );
+              // Fallback: mark LSP ready after 30 s even if no diagnostics
+              // arrive (e.g. project has zero errors → callback never fires).
+              Future.delayed(const Duration(seconds: 30), () {
+                if (mounted) context.read<LspProvider>().markReady();
+              });
+            } else {
+              debugPrint('[LSP SSH] Remote LSP process exited immediately — skipping');
+              _sshLspBridge!.close();
+              _sshLspBridge = null;
+              lspProv.stop();
+            }
+          } catch (e) {
+            debugPrint('[LSP SSH] Failed to start: $e');
+          }
+        }
+        // _initPhase → ready (the bottom-panel progress bar clears separately
+        // when lspProv.markReady() is called from onDiagnosticsReceived or
+        // the 30 s fallback above).
+        setState(() => _initPhase = _InitPhase.ready);
+      } else {
+        // Local LSP
+        final settings = context.read<SettingsProvider>();
+        final loadedExt2 = context.read<ExtensionsProvider>().availableSdks
+            .where((e) => e.sdk == widget.project.sdk.name)
+            .firstOrNull;
+        final loadedCfg2 = loadedExt2?.sdkConfig ??
+            SdkDefinition.forType(widget.project.sdk).sdkConfig;
+        await lspProv.startForExtension(
+          loadedCfg2.defaultEntryFile.split('.').last,
+          widget.project.path,
+          customPaths: settings.lspPaths,
+        );
+        if (!mounted) return;
+
+        if (lspProv.status == LspStatus.warming) {
+          final activeCtrl = context.read<EditorProvider>().activeFile?.controller;
+          if (activeCtrl is LspAwareController) {
+            activeCtrl.onDiagnosticsReceived = () {
+              lspProv.markReady();
+              if (mounted) setState(() => _initPhase = _InitPhase.ready);
+            };
+          }
+        } else {
+          setState(() => _initPhase = _InitPhase.ready);
+        }
+      }
+
+      // Show sync banner if the project has a dependency file (local only).
       final ext = context.read<ExtensionsProvider>().availableSdks
           .where((e) => e.sdk == widget.project.sdk.name)
           .firstOrNull;
       final sdkCfg = ext?.sdkConfig ??
           SdkDefinition.forType(widget.project.sdk).sdkConfig;
-      if (sdkCfg.syncCommand.isNotEmpty && sdkCfg.syncTriggerFile.isNotEmpty) {
+      if (!isRemoteProject &&
+          sdkCfg.syncCommand.isNotEmpty &&
+          sdkCfg.syncTriggerFile.isNotEmpty) {
         final triggerPath =
             '${widget.project.path}/${sdkCfg.syncTriggerFile}';
         if (await File(triggerPath).exists()) {
@@ -179,7 +345,6 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
             setState(() {
               _syncCommand = sdkCfg.syncCommand;
               _syncTriggerPath = triggerPath;
-              // Banner shown only when the user saves the trigger file.
             });
           }
         }
@@ -215,6 +380,20 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
         saved == _syncTriggerPath &&
         !_syncBannerVisible) {
       setState(() => _syncBannerVisible = true);
+    }
+
+    // For SSH LSP (WebSocket) the entry file is never auto-opened, so
+    // onDiagnosticsReceived can't be set in _init().  Wire it up here
+    // whenever a new file is opened while LSP is still warming.
+    final lsp = context.read<LspProvider>();
+    if (lsp.status == LspStatus.warming) {
+      final ctrl = _editorProvider?.activeFile?.controller;
+      if (ctrl is LspAwareController && ctrl.onDiagnosticsReceived == null) {
+        ctrl.onDiagnosticsReceived = () {
+          lsp.markReady();
+          if (mounted) setState(() => _initPhase = _InitPhase.ready);
+        };
+      }
     }
   }
 
@@ -268,9 +447,45 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     _debugProvider?.removeListener(_onDebugChanged);
     _editorProvider?.removeListener(_onEditorChanged);
     _drawerCtrl.dispose();
+    _aiDrawerCtrl.dispose();
+    _sshLspBridge?.close();
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-    unawaited(FlutterForegroundTask.stopService());
+    _stopForegroundService();
     super.dispose();
+  }
+
+  Future<void> _startForegroundService() async {
+    try {
+      await FlutterForegroundTask.startService(
+        serviceId: 256,
+        notificationTitle: 'FL IDE',
+        notificationText: widget.project.name,
+        callback: fgServiceCallback,
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _stopForegroundService() async {
+    try {
+      if (await FlutterForegroundTask.isRunningService) {
+        await FlutterForegroundTask.stopService();
+      }
+    } catch (_) {}
+  }
+
+  static String _sdkExtension(SdkType sdk) {
+    switch (sdk) {
+      case SdkType.flutter:
+        return 'dart';
+      case SdkType.nodejs:
+      case SdkType.reactNative:
+        return 'js';
+      case SdkType.python:
+        return 'py';
+      case SdkType.androidSdk:
+      case SdkType.swift:
+        return 'dart'; // fallback — no LSP for these on remote
+    }
   }
 
   void _runSync() {
@@ -293,13 +508,15 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     });
   }
 
-  void _closeDrawer() => _drawerCtrl.reverse();
+  void _closeDrawer()    => _drawerCtrl.reverse();
+  void _closeAiDrawer()  => _aiDrawerCtrl.reverse();
   void _toggleDrawer() {
-    if (_drawerCtrl.isCompleted) {
-      _drawerCtrl.reverse();
-    } else {
-      _drawerCtrl.forward();
-    }
+    if (_drawerCtrl.isCompleted) _drawerCtrl.reverse();
+    else _drawerCtrl.forward();
+  }
+  void _toggleAiDrawer() {
+    if (_aiDrawerCtrl.isCompleted) _aiDrawerCtrl.reverse();
+    else _aiDrawerCtrl.forward();
   }
 
   void _expandBottomSheet() {
@@ -309,100 +526,157 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   @override
   Widget build(BuildContext context) {
     final keyboardVisible = MediaQuery.of(context).viewInsets.bottom > 150;
+    final liquidGlass = context.watch<SettingsProvider>().liquidGlass;
 
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (_, __) {
+        if (_aiDrawerCtrl.isCompleted) { _closeAiDrawer(); return; }
         if (_drawerCtrl.isCompleted) _closeDrawer();
       },
       child: Scaffold(
-        body: AnimatedBuilder(
-          animation: _drawerAnim,
-          builder: (context, _) {
-            final cs = Theme.of(context).colorScheme;
-            final v = _drawerAnim.value;
-            return Stack(
-              children: [
-                // ── Main content (AppBar + editor) slides right ────────────
-                Transform.translate(
-                  offset: Offset(v * _kDrawerWidth, 0),
-                  child: ColoredBox(
-                    color: cs.surface,
-                    child: SafeArea(
-                    child: Column(
-                      children: [
-                        _WorkspaceAppBar(
-                          project: widget.project,
-                          drawerAnim: _drawerAnim,
-                          onMenuTap: _toggleDrawer,
-                          onShowWebPreview: () {
-                            final url = context.read<DebugProvider>().webServerUrl;
-                            _showPreview(url: url);
-                          },
-                        ),
-                        Expanded(
-                          child: _MainContent(
-                            project: widget.project,
-                            sheetKey: _sheetKey,
-                            keyboardVisible: keyboardVisible,
-                            initPhase: _initPhase,
-                            syncBannerVisible: _syncBannerVisible,
-                            syncCommand: _syncCommand,
-                            onSyncIgnore: () => setState(() => _syncBannerVisible = false),
-                            onSyncRun: _runSync,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  ),
-                ),
-
-                // ── Drawer ────────────────────────────────────────────────
-                Positioned(
-                  left: 0,
-                  top: 0,
-                  bottom: 0,
-                  width: _kDrawerWidth,
-                  child: Transform.translate(
-                    offset: Offset((v - 1) * _kDrawerWidth, 0),
-                    child: ColoredBox(
-                      color: cs.surfaceContainerLow,
-                      child: Builder(builder: (context) {
-                        final pad = MediaQuery.of(context).padding;
-                        return Padding(
-                          padding: EdgeInsets.only(
-                              top: pad.top, bottom: pad.bottom),
-                          child: _DrawerContent(
-                            project: widget.project,
-                            onClose: _closeDrawer,
-                            onTabChange: (i) {
-                              _sheetKey.currentState?.selectToolTab(i);
-                              _closeDrawer();
-                              _expandBottomSheet();
-                            },
-                          ),
-                        );
-                      }),
-                    ),
-                  ),
-                ),
-
-                // ── Scrim ──────────────────────────────────────────────────
-                if (v > 0)
-                  Positioned.fill(
-                    left: _kDrawerWidth * v,
-                    child: GestureDetector(
-                      onTap: _closeDrawer,
+        // ── Performance: each drawer has its own AnimatedBuilder so they
+        //    don't trigger each other's rebuilds. AiChatDrawer lives as the
+        //    `child` of its builder — built ONCE, not reconstructed each frame.
+        body: Stack(
+          children: [
+            // ── Main content + left drawer ─────────────────────────────────
+            AnimatedBuilder(
+              animation: _drawerAnim,
+              child: _MainContent(
+                project: widget.project,
+                sheetKey: _sheetKey,
+                keyboardVisible: keyboardVisible,
+                liquidGlass: liquidGlass,
+                initPhase: _initPhase,
+                syncBannerVisible: _syncBannerVisible,
+                syncCommand: _syncCommand,
+                onSyncIgnore: () => setState(() => _syncBannerVisible = false),
+                onSyncRun: _runSync,
+              ),
+              builder: (context, mainChild) {
+                final cs    = Theme.of(context).colorScheme;
+                final leftV = _drawerAnim.value;
+                return Stack(
+                  children: [
+                    // Main content slides right when left drawer opens
+                    Transform.translate(
+                      offset: Offset(leftV * _kDrawerWidth, 0),
                       child: ColoredBox(
-                        color:
-                            Colors.black.withValues(alpha: v * 0.38),
+                        color: cs.surface,
+                        child: SafeArea(
+                          child: Column(
+                            children: [
+                              if (liquidGlass)
+                                LiquidGlassLayer(
+                                  child: LiquidGlass(
+                                    shape: LiquidRoundedSuperellipse(borderRadius: 30),
+                                    child: _WorkspaceAppBar(
+                                      project: widget.project,
+                                      drawerAnim: _drawerAnim,
+                                      onMenuTap: _toggleDrawer,
+                                      onAiTap: _toggleAiDrawer,
+                                      liquidGlass: true,
+                                      onShowWebPreview: () {
+                                        final url = context.read<DebugProvider>().webServerUrl;
+                                        _showPreview(url: url);
+                                      },
+                                    ),
+                                  ),
+                                )
+                              else
+                                _WorkspaceAppBar(
+                                  project: widget.project,
+                                  drawerAnim: _drawerAnim,
+                                  onMenuTap: _toggleDrawer,
+                                  onAiTap: _toggleAiDrawer,
+                                  liquidGlass: false,
+                                  onShowWebPreview: () {
+                                    final url = context.read<DebugProvider>().webServerUrl;
+                                    _showPreview(url: url);
+                                  },
+                                ),
+                              Expanded(child: mainChild!),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-              ],
-            );
-          },
+
+                    // Left drawer slides in from left
+                    Positioned(
+                      left: 0, top: 0, bottom: 0,
+                      width: _kDrawerWidth,
+                      child: Transform.translate(
+                        offset: Offset((leftV - 1) * _kDrawerWidth, 0),
+                        child: Builder(builder: (context) {
+                          final pad = MediaQuery.of(context).padding;
+                          final drawerContent = Padding(
+                            padding: EdgeInsets.only(
+                                top: pad.top, bottom: pad.bottom),
+                            child: _DrawerContent(
+                              project: widget.project,
+                              onClose: _closeDrawer,
+                              onTabChange: (i) {
+                                _sheetKey.currentState?.selectToolTab(i);
+                                _closeDrawer();
+                                _expandBottomSheet();
+                              },
+                            ),
+                          );
+                          if (liquidGlass) {
+                            return OCLiquidGlassGroup(
+                              settings: _kGlassSettings,
+                              child: OCLiquidGlass(
+                                color: cs.surfaceContainerLow
+                                    .withValues(alpha: 0.10),
+                                borderRadius: 0,
+                                child: drawerContent,
+                              ),
+                            );
+                          }
+                          return ColoredBox(
+                              color: cs.surface, child: drawerContent);
+                        }),
+                      ),
+                    ),
+
+                    // Left scrim — tap to close left drawer
+                    if (leftV > 0)
+                      Positioned.fill(
+                        left: _kDrawerWidth * leftV,
+                        child: GestureDetector(
+                          onTap: _closeDrawer,
+                          child: const ColoredBox(color: Colors.transparent),
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
+
+            // ── Right drawer (AI chat — full-screen) ──────────────────────
+            // Separate AnimatedBuilder: AiChatDrawer is the `child` so it is
+            // built once and never reconstructed during the slide animation.
+            Positioned.fill(
+              child: AnimatedBuilder(
+                animation: _aiDrawerAnim,
+                child: AiChatDrawer(
+                  onClose: _closeAiDrawer,
+                  project: widget.project,
+                ),
+                builder: (ctx, child) {
+                  final v = _aiDrawerAnim.value;
+                  if (v < 0.01) return const SizedBox.shrink();
+                  return Transform.translate(
+                    offset: Offset(
+                        (1 - v) * MediaQuery.sizeOf(ctx).width, 0),
+                    child: child,
+                  );
+                },
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -417,13 +691,17 @@ class _WorkspaceAppBar extends StatefulWidget {
   final Project project;
   final Animation<double> drawerAnim;
   final VoidCallback onMenuTap;
+  final VoidCallback onAiTap;
   final VoidCallback onShowWebPreview;
+  final bool liquidGlass;
 
   const _WorkspaceAppBar({
     required this.project,
     required this.drawerAnim,
     required this.onMenuTap,
+    required this.onAiTap,
     required this.onShowWebPreview,
+    required this.liquidGlass,
   });
 
   @override
@@ -474,6 +752,39 @@ class _WorkspaceAppBarState extends State<_WorkspaceAppBar> {
         .firstOrNull;
     final dapConfig = ext?.dapConfig ??
         SdkDefinition.forType(widget.project.sdk).dapConfig;
+
+    final ssh = context.read<SshProvider>();
+    final isRemoteProject = ssh.isConnected &&
+        ssh.config != null &&
+        ssh.config!.remoteProjectsPath.isNotEmpty &&
+        widget.project.path.startsWith(ssh.config!.remoteProjectsPath);
+
+    if (isRemoteProject) {
+      // Build the DAP adapter command for the remote machine.
+      // adapterBinary + adapterArgs, e.g. "dart debug_adapter".
+      final bin = dapConfig.adapterBinary.isNotEmpty
+          ? dapConfig.adapterBinary
+          : 'dart';
+      final args = dapConfig.adapterArgs.isNotEmpty
+          ? dapConfig.adapterArgs
+          : ['debug_adapter'];
+      final adapterCmd = [bin, ...args].join(' ');
+      try {
+        final sshSession = await ssh.startProcess(adapterCmd);
+        if (!context.mounted) return;
+        context.read<DebugProvider>().startSessionRemote(
+          widget.project,
+          remoteStdout: sshSession.stdout,
+          remoteStdin: sshSession.stdin,
+          platform: platform.name,
+          dapConfig: dapConfig,
+        );
+      } catch (e) {
+        debugPrint('[DAP SSH] Failed to start remote adapter: $e');
+      }
+      return;
+    }
+
     context.read<DebugProvider>().startSession(
           widget.project,
           platform: platform.name,
@@ -513,8 +824,7 @@ class _WorkspaceAppBarState extends State<_WorkspaceAppBar> {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return Material(
-      color: cs.surface,
-      
+      color: widget.liquidGlass ? Colors.transparent : cs.surface,
       child: SizedBox(
         height: kToolbarHeight + 3,
         child: Column(
@@ -723,7 +1033,7 @@ class _WorkspaceAppBarState extends State<_WorkspaceAppBar> {
               if (ctrl == null) return;
               final theme =
                   context.read<ExtensionsProvider>().activeEditorTheme ??
-                      QuillThemeDark.build();
+                      editorThemeFromScheme(Theme.of(context).colorScheme);
               QuillActionsMenu.show(context, ctrl, theme);
             },
             tooltip: 'Commands',
@@ -737,6 +1047,13 @@ class _WorkspaceAppBarState extends State<_WorkspaceAppBar> {
             tooltip: 'Search',
             constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
           ),
+        // ── AI chat ───────────────────────────────────────────────
+        IconButton(
+          icon: Icon(Icons.auto_awesome_rounded, color: cs.onSurface, size: 21),
+          onPressed: widget.onAiTap,
+          tooltip: 'Chat IA',
+          constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+        ),
         // ── 3-dot overflow menu ────────────────────────────────────
         PopupMenuButton<String>(
           icon: Icon(Icons.more_vert, color: cs.onSurface, size: 22),
@@ -762,12 +1079,14 @@ class _WorkspaceAppBarState extends State<_WorkspaceAppBar> {
                 if (ctrl == null) return;
                 final theme =
                     context.read<ExtensionsProvider>().activeEditorTheme ??
-                        QuillThemeDark.build();
+                        editorThemeFromScheme(Theme.of(context).colorScheme);
                 QuillActionsMenu.show(context, ctrl, theme);
               case 'hot_reload':
                 context.read<DebugProvider>().hotReload();
               case 'hot_restart':
                 context.read<DebugProvider>().restart();
+              case 'visual_editor':
+                openVisualEditor(context);
               case 'close':
                 _confirmCloseProject(context);
             }
@@ -826,6 +1145,13 @@ class _WorkspaceAppBarState extends State<_WorkspaceAppBar> {
                       icon: Icons.restart_alt_rounded, label: s.wsHotRestart),
                 ),
               const PopupMenuDivider(),
+              PopupMenuItem(
+                value: 'visual_editor',
+                height: 40,
+                child: _PopupItem(
+                    icon: Icons.auto_awesome_outlined,
+                    label: 'Visual Editor'),
+              ),
               PopupMenuItem(
                 value: 'close',
                 height: 40,
@@ -899,6 +1225,7 @@ class _MainContent extends StatefulWidget {
   final Project project;
   final GlobalKey<_BottomSheetPanelState> sheetKey;
   final bool keyboardVisible;
+  final bool liquidGlass;
   final _InitPhase initPhase;
   final bool syncBannerVisible;
   final String syncCommand;
@@ -909,6 +1236,7 @@ class _MainContent extends StatefulWidget {
     required this.project,
     required this.sheetKey,
     required this.keyboardVisible,
+    required this.liquidGlass,
     required this.initPhase,
     required this.syncBannerVisible,
     required this.syncCommand,
@@ -921,42 +1249,78 @@ class _MainContent extends StatefulWidget {
 }
 
 class _MainContentState extends State<_MainContent> {
+  final FocusNode _mainEditorFocusNode = FocusNode();
+  bool _mainEditorFocused = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _mainEditorFocusNode.addListener(_onMainEditorFocusChange);
+  }
+
+  void _onMainEditorFocusChange() {
+    final focused = _mainEditorFocusNode.hasFocus;
+    if (focused != _mainEditorFocused) {
+      setState(() => _mainEditorFocused = focused);
+    }
+  }
+
+  @override
+  void dispose() {
+    _mainEditorFocusNode.removeListener(_onMainEditorFocusChange);
+    _mainEditorFocusNode.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final settings = context.watch<SettingsProvider>();
+    final liquidGlass = widget.liquidGlass;
     return LayoutBuilder(
-      builder: (context, constraints) => Stack(
-        children: [
-          // ── Editor + overlay + bottom sheet (column) ─────────────────
-          Column(
-            children: [
-              Expanded(
-                child: EditorArea(
-                  editorTheme:
-                      context.watch<ExtensionsProvider>().activeEditorTheme,
-                  showSymbolBar: false,
-                  fontSize: settings.fontSize,
-                  fontFamily: settings.fontFamily,
-                  configureProps: settings.applyToProps,
+      builder: (context, constraints) {
+        final stack = Stack(
+          children: [
+            // ── Editor + overlay + bottom sheet (column) ─────────────────
+            Column(
+              children: [
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(
+                      bottom: _BottomSheetPanelState._kPeekBarH,
+                    ),
+                    child: Focus(
+                      focusNode: _mainEditorFocusNode,
+                      canRequestFocus: false,
+                      skipTraversal: true,
+                      child: EditorArea(
+                        editorTheme: context.watch<ExtensionsProvider>().activeEditorTheme ??
+                            editorThemeFromScheme(Theme.of(context).colorScheme),
+                        showSymbolBar: false,
+                        fontSize: settings.fontSize,
+                        fontFamily: settings.fontFamily,
+                        configureProps: settings.applyToProps,
+                      ),
+                    ),
+                  ),
                 ),
-              ),
-              // VS Code-style debug execution overlay
-              const _DebugExecutionOverlay(),
-            ],
-          ),
-          // ── Bottom sheet overlaid on top (draggable) ─────────────────
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: _BottomSheetPanel(
-              key: widget.sheetKey,
-              availableHeight: constraints.maxHeight,
-              project: widget.project,
-              keyboardVisible: widget.keyboardVisible,
-              initPhase: widget.initPhase,
+                // VS Code-style debug execution overlay
+                const _DebugExecutionOverlay(),
+              ],
             ),
-          ),
+            // ── Bottom sheet overlaid on top (draggable) ─────────────────
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: _BottomSheetPanel(
+                key: widget.sheetKey,
+                availableHeight: constraints.maxHeight,
+                project: widget.project,
+                keyboardVisible: widget.keyboardVisible && _mainEditorFocused,
+                liquidGlass: liquidGlass,
+                initPhase: widget.initPhase,
+              ),
+            ),
           // ── Sync banner: anchored just above the peek bar ─────────────
           Positioned(
             left: 0,
@@ -976,7 +1340,14 @@ class _MainContentState extends State<_MainContent> {
             ),
           ),
         ],
-      ),
+        );
+        // Wrap the whole stack in OCLiquidGlassGroup so that OCLiquidGlass
+        // descendants (bottom sheet) can see the editor pixels behind them.
+        if (liquidGlass) {
+          return OCLiquidGlassGroup(settings: _kGlassSettings, child: stack);
+        }
+        return stack;
+      },
     );
   }
 }
@@ -1061,7 +1432,7 @@ class _DrawerRail extends StatelessWidget {
     return SizedBox(
       width: _kRailWidth,
       child: Container(
-        color: cs.surfaceContainerLow,
+        color: cs.surface,
         child: Column(
           children: [
             const SizedBox(height: 16),
@@ -1162,6 +1533,7 @@ class _BottomSheetPanel extends StatefulWidget {
   final double availableHeight;
   final Project project;
   final bool keyboardVisible;
+  final bool liquidGlass;
   final _InitPhase initPhase;
 
   const _BottomSheetPanel({
@@ -1169,6 +1541,7 @@ class _BottomSheetPanel extends StatefulWidget {
     required this.availableHeight,
     required this.project,
     required this.keyboardVisible,
+    required this.liquidGlass,
     required this.initPhase,
   });
 
@@ -1274,8 +1647,16 @@ class _BottomSheetPanelState extends State<_BottomSheetPanel>
   @override
   void didUpdateWidget(_BottomSheetPanel old) {
     super.didUpdateWidget(old);
-    if (_height > widget.availableHeight) {
-      _height = widget.availableHeight;
+    if (widget.availableHeight == old.availableHeight) return;
+    // Was fully expanded before the resize (e.g. keyboard opened/closed).
+    final wasAtFull = _height >= old.availableHeight - 1;
+    if (wasAtFull) {
+      // Snap to the new full height so stage-3 is preserved.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _snapTo(widget.availableHeight);
+      });
+    } else if (_height > widget.availableHeight) {
+      setState(() => _height = widget.availableHeight);
     }
   }
 
@@ -1349,14 +1730,10 @@ class _BottomSheetPanelState extends State<_BottomSheetPanel>
             final bf = editor.bottomPanelFiles;
             final tabIdx = _combinedTabCtrl.index;
             final isFileTab = tabIdx < bf.length;
-            return SizedBox(
-              height: _height,
-              child: ClipRect(
-                child: Material(
-                  color: isDragOver
-                      ? cs.primaryContainer.withValues(alpha: 0.15)
-                      : cs.surfaceContainerLow,
-                  child: Column(
+            final panelColor = isDragOver
+                ? cs.primaryContainer.withValues(alpha: 0.15)
+                : cs.surface;
+            final panelContent = Column(
                     children: [
                       // ── Draggable header ─────────────────────────────
                       GestureDetector(
@@ -1404,7 +1781,7 @@ class _BottomSheetPanelState extends State<_BottomSheetPanel>
                             ),
                             // ── Single unified tab bar ──────────────────
                             ColoredBox(
-                              color: cs.surfaceContainerHigh,
+                              color: cs.surface,
                               child: TabBar(
                                 controller: _combinedTabCtrl,
                                 isScrollable: true,
@@ -1437,7 +1814,7 @@ class _BottomSheetPanelState extends State<_BottomSheetPanel>
                                             behavior: HitTestBehavior.opaque,
                                             onTap: () {
                                               final gIdx = editor.openFiles.indexOf(f);
-                                              if (gIdx != -1) editor.moveToPanel(gIdx, bottom: false);
+                                              if (gIdx != -1) editor.closeFile(gIdx);
                                             },
                                             child: Icon(Icons.close_rounded,
                                                 size: 12,
@@ -1464,7 +1841,8 @@ class _BottomSheetPanelState extends State<_BottomSheetPanel>
                         child: isFileTab
                             ? Consumer2<ExtensionsProvider, SettingsProvider>(
                                 builder: (c, ext, sett, _) => EditorArea(
-                                  editorTheme: ext.activeEditorTheme,
+                                  editorTheme: ext.activeEditorTheme ??
+                                      editorThemeFromScheme(Theme.of(c).colorScheme),
                                   showSymbolBar: false,
                                   fontSize: sett.fontSize,
                                   fontFamily: sett.fontFamily,
@@ -1476,7 +1854,10 @@ class _BottomSheetPanelState extends State<_BottomSheetPanel>
                             : IndexedStack(
                                 index: (tabIdx - bf.length).clamp(0, _kToolCount - 1),
                                 children: [
-                                  const TerminalTabs(),
+                                  TerminalTabs(
+                                    initialWorkDir: widget.project.path,
+                                    autoStart: false,
+                                  ),
                                   _ProblemsPanel(),
                                   const DebugVariablesPanel(),
                                   const DebugCallStackPanel(),
@@ -1485,9 +1866,26 @@ class _BottomSheetPanelState extends State<_BottomSheetPanel>
                               ),
                       ),
                     ],
-                  ),
-                ),
-              ),
+                  );  // panelContent Column
+            return SizedBox(
+              height: _height,
+              child: widget.liquidGlass
+                  ? OCLiquidGlass(
+                      height: _height,
+                      color: cs.surface.withValues(alpha: 0.08),
+                      borderRadius: 16.0,
+                      child: ClipRRect(
+                        borderRadius: const BorderRadius.vertical(
+                            top: Radius.circular(16)),
+                        child: panelContent,
+                      ),
+                    )
+                  : ClipRect(
+                      child: Material(
+                        color: panelColor,
+                        child: panelContent,
+                      ),
+                    ),
             );
           },
         );

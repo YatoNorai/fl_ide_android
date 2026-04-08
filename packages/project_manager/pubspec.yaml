@@ -19,6 +19,7 @@ dependencies:
     path: ../sdk_manager
   provider: ^6.1.2
   shared_preferences: ^2.3.0
+  google_fonts: ^8.0.2
   path: ^1.9.0
 
 dev_dependencies:

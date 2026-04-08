@@ -1,8 +1,7 @@
-import 'dart:ui';
-
+import 'package:fl_ide/widgets/animated_toggle.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:sdk_manager/sdk_manager.dart';
 
@@ -10,6 +9,24 @@ import '../app.dart' show showThemedDialog;
 import '../l10n/app_strings.dart';
 import '../models/extension_theme_meta.dart';
 import '../providers/extensions_provider.dart';
+import '../widgets/settings_page_widgets.dart';
+
+
+class ExtensionsSettingsPage extends StatelessWidget {
+  const ExtensionsSettingsPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final s = AppStrings.of(context);
+    return SettingsPageScaffold(
+      title: s.extensions,
+      canPop: false,
+      onBackPressed: () => Navigator.of(context).pop(),
+      onSystemBack: () => Navigator.of(context).pop(),
+      child: const ExtensionsPageContent(),
+    );
+  }
+}
 
 // ── Extensions page content ─────────────────────────────────────────────────
 // Designed to live inside the Settings CustomScrollView (shrinkWrap).
@@ -25,16 +42,27 @@ class ExtensionsPageContent extends StatefulWidget {
 class _ExtensionsPageContentState extends State<ExtensionsPageContent>
     with SingleTickerProviderStateMixin {
   late final TabController _tab;
+  int _tabIndex = 0;
 
   @override
   void initState() {
     super.initState();
     _tab = TabController(length: 3, vsync: this);
-    _tab.addListener(() => setState(() {}));
+    // Only rebuild when animation finishes (indexIsChanging == false),
+    // not on every intermediate frame during the tab slide animation.
+    _tab.addListener(_onTabChanged);
+  }
+
+  void _onTabChanged() {
+    if (_tab.indexIsChanging) return;
+    if (_tab.index != _tabIndex) {
+      setState(() => _tabIndex = _tab.index);
+    }
   }
 
   @override
   void dispose() {
+    _tab.removeListener(_onTabChanged);
     _tab.dispose();
     super.dispose();
   }
@@ -65,10 +93,10 @@ class _ExtensionsPageContentState extends State<ExtensionsPageContent>
             ),
             splashBorderRadius: BorderRadius.circular(20),
             labelStyle:
-                const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-            unselectedLabelStyle: const TextStyle(fontSize: 13),
+                GoogleFonts.openSans(fontSize: 13, fontWeight: FontWeight.w600),
+            unselectedLabelStyle: GoogleFonts.openSans(fontSize: 13),
             tabs: [
-              Tab(icon: const Icon(Icons.store_outlined, size: 18), text: s.extStore),
+              Tab(icon: const Icon(Icons.color_lens_rounded, size: 18), text: s.extStore),
               Tab(icon: const Icon(Icons.extension_outlined, size: 18), text: s.extSdks),
               Tab(icon: const Icon(Icons.download_done_outlined, size: 18), text: s.extInstalledTab),
             ],
@@ -76,13 +104,17 @@ class _ExtensionsPageContentState extends State<ExtensionsPageContent>
         ),
         const SizedBox(height: 8),
 
-        // ── Content for selected tab ────────────────────────────────────────
-        if (_tab.index == 0)
-          const _StoreContent()
-        else if (_tab.index == 1)
-          const _SdkContent()
-        else
-          const _InstalledContent(),
+        // ── IndexedStack keeps all 3 tab bodies alive ───────────────────────
+        // Invisible tabs are not painted but their widget trees stay in memory,
+        // so returning to a tab is instant (no reload, scroll position preserved).
+        IndexedStack(
+          index: _tabIndex,
+          children: const [
+            _StoreContent(),
+            _SdkContent(),
+            _InstalledContent(),
+          ],
+        ),
 
         const SizedBox(height: 32),
       ],
@@ -118,7 +150,7 @@ class _StoreContent extends StatelessWidget {
                   const SizedBox(height: 12),
                   Text(prov.indexError!,
                       textAlign: TextAlign.center,
-                      style: const TextStyle(color: Colors.grey)),
+                      style:  GoogleFonts.openSans(color: Colors.grey)),
                   const SizedBox(height: 16),
                   ElevatedButton.icon(
                     onPressed: prov.fetchIndex,
@@ -157,18 +189,18 @@ class _StoreContent extends StatelessWidget {
 
   List<Widget> _group(BuildContext context, ExtensionsProvider prov,
       List<ExtensionThemeMeta> themes) {
-    return themes.asMap().entries.map((e) {
-      final i = e.key;
+    return List.generate(themes.length, (i) {
       return _ThemeCard(
-        meta: e.value,
+        key: ValueKey(themes[i].id),
+        meta: themes[i],
         borderRadius: BorderRadius.vertical(
-          top: i == 0 ? const Radius.circular(30) : const Radius.circular(10),
+          top: i == 0 ? const Radius.circular(30) : const Radius.circular(5),
           bottom: i == themes.length - 1
               ? const Radius.circular(30)
-              : const Radius.circular(10),
+              : const Radius.circular(5),
         ),
       );
-    }).toList();
+    });
   }
 }
 
@@ -193,10 +225,10 @@ class _InstalledContent extends StatelessWidget {
                       size: 40, color: Colors.grey),
                   const SizedBox(height: 12),
                   Text(s.extNoExtensions,
-                      style: const TextStyle(color: Colors.grey)),
+                      style:  GoogleFonts.openSans(color: Colors.grey)),
                   const SizedBox(height: 4),
                   Text(s.extGoToStore,
-                      style: const TextStyle(
+                      style:  GoogleFonts.openSans(
                           color: Colors.grey, fontSize: 12)),
                 ],
               ),
@@ -223,20 +255,18 @@ class _InstalledContent extends StatelessWidget {
             ],
             if (inactive.isNotEmpty) ...[
               _sectionLabel(context, s.extInstalledSection),
-              ...inactive.asMap().entries.map((e) {
-                final i = e.key;
-                return _InstalledCard(
-                  meta: e.value,
-                  borderRadius: BorderRadius.vertical(
-                    top: i == 0
-                        ? const Radius.circular(30)
-                        : const Radius.circular(10),
-                    bottom: i == inactive.length - 1
-                        ? const Radius.circular(30)
-                        : const Radius.circular(10),
-                  ),
-                );
-              }),
+              ...List.generate(inactive.length, (i) => _InstalledCard(
+                key: ValueKey(inactive[i].id),
+                meta: inactive[i],
+                borderRadius: BorderRadius.vertical(
+                  top: i == 0
+                      ? const Radius.circular(30)
+                      : const Radius.circular(5),
+                  bottom: i == inactive.length - 1
+                      ? const Radius.circular(30)
+                      : const Radius.circular(5),
+                ),
+              )),
               const SizedBox(height: 32),
             ],
           ],
@@ -251,126 +281,131 @@ class _InstalledContent extends StatelessWidget {
 class _ThemeCard extends StatelessWidget {
   final ExtensionThemeMeta meta;
   final BorderRadiusGeometry borderRadius;
-  const _ThemeCard({required this.meta, required this.borderRadius});
+  const _ThemeCard({super.key, required this.meta, required this.borderRadius});
 
   @override
   Widget build(BuildContext context) {
     final s = AppStrings.of(context);
-    return Consumer<ExtensionsProvider>(
-      builder: (context, prov, _) {
-        final installed = prov.isInstalled(meta.id);
-        final downloading = prov.isDownloading(meta.id);
-        final active = prov.isActive(meta.id);
-        final colors = Theme.of(context).colorScheme;
-
-        return Card(
-          elevation: 0,
-          color: colors.surfaceTint.withValues(alpha: 0.1),
-          shape: RoundedRectangleBorder(borderRadius: borderRadius),
-          margin: const EdgeInsets.symmetric(vertical: 2),
-          child: ListTile(
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            leading: _ThemeAvatar(meta: meta),
-            title: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              child: Row(
-                children: [
-                  Flexible(
-                    child: Text(meta.name,
-                        style: const TextStyle(fontWeight: FontWeight.w500)),
-                  ),
-                  if (active) ...[
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: colors.primaryContainer,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(s.extActive,
-                          style: TextStyle(
-                              fontSize: 10,
-                              color: colors.onPrimaryContainer)),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            subtitle: Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Text(
-                meta.dark ? s.extDarkThemeLabel : s.extLightThemeLabel,
-                style: const TextStyle(fontSize: 12, color: Colors.grey),
-              ),
-            ),
-            trailing: downloading
-                ? const SizedBox(
-                    width: 24,
-                    height: 24,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : installed
-                    ? IconButton(
-                        icon: Icon(Icons.check_circle,
-                            color: colors.primary),
-                        tooltip: s.extInstalled2,
-                        onPressed: () =>
-                            _showOptions(context, prov, meta, active, s),
-                      )
-                    : IconButton(
-                        icon: const Icon(Icons.download_outlined),
-                        tooltip: s.extInstall,
-                        onPressed: () =>
-                            _confirmInstall(context, prov, meta, s),
-                      ),
-          ),
-        );
-      },
+    // Select only the 3 booleans this card cares about — rebuilds only when
+    // install/download/active state for THIS specific theme changes.
+    final id = meta.id;
+    final (:installed, :downloading, :active) =
+        context.select<ExtensionsProvider, ({bool installed, bool downloading, bool active})>(
+      (p) => (
+        installed: p.isInstalled(id),
+        downloading: p.isDownloading(id),
+        active: p.isActive(id),
+      ),
     );
-  }
-
-  void _confirmInstall(BuildContext context, ExtensionsProvider prov,
-      ExtensionThemeMeta meta, AppStrings s) {
-    showThemedDialog(
-      context: context,
-      builder: (ctx) => RepaintBoundary(
-                  child: BackdropFilter(
-                      filter: ImageFilter.blur(sigmaX: 8, sigmaY: 10),
-                      child: AlertDialog(
-            title: Text('${s.extInstallQ} "${meta.name}"'),
-            content: Text(s.extInstallBody),
-            actions: [
-              TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: Text(s.cancel)),
-              FilledButton(
-                onPressed: () {
-                  Navigator.pop(ctx);
-                  prov.downloadTheme(meta).then((_) {
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                          content: Text('"${meta.name}" ${s.extInstalled2.toLowerCase()}!'),
-                          behavior: SnackBarBehavior.floating));
-                    }
-                  });
-                },
-                child: Text(s.extInstall),
+    final colors = Theme.of(context).colorScheme;
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: borderRadius),
+      margin: const EdgeInsets.symmetric(vertical: 1),
+      child: ListTile(
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        leading: _ThemeAvatar(meta: meta),
+        title: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 5),
+          child: Row(
+            children: [
+              Flexible(
+                child: Text(meta.name,
+                    style: GoogleFonts.openSans(fontWeight: FontWeight.w500)),
               ),
+              if (active) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: colors.primaryContainer,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(s.extActive,
+                      style: GoogleFonts.openSans(
+                          fontSize: 10,
+                          color: colors.onPrimaryContainer)),
+                ),
+              ],
             ],
           ),
         ),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(bottom: 5),
+          child: Text(
+            meta.dark ? s.extDarkThemeLabel : s.extLightThemeLabel,
+            style: GoogleFonts.openSans(fontSize: 12, color: Colors.grey),
+          ),
+        ),
+        trailing: downloading
+            ? const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : installed
+                ? IconButton(
+                    icon: Icon(Icons.check_circle, color: colors.primary),
+                    tooltip: s.extInstalled2,
+                    onPressed: () => _showOptions(context, meta, active, s),
+                  )
+                : IconButton(
+                    icon: const Icon(Icons.file_download_outlined),
+                    tooltip: s.extInstall,
+                    onPressed: () => _confirmInstall(context, meta, s),
+                  ),
+        onTap: () {
+          if (installed) {
+            _showOptions(context, meta, active, s);
+          } else {
+            _confirmInstall(context, meta, s);
+          }
+        },
       ),
     );
   }
 
-  void _showOptions(BuildContext context, ExtensionsProvider prov,
+  void _confirmInstall(BuildContext context,
+      ExtensionThemeMeta meta, AppStrings s) {
+    final prov = context.read<ExtensionsProvider>();
+    showThemedDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+              title: Text('${s.extInstallQ} "${meta.name}"'),
+               shape: RoundedRectangleBorder(side: BorderSide(color: Colors.grey, width: 0.2), borderRadius: BorderRadiusGeometry.circular(30)),
+              content: Text(s.extInstallBody),
+              actions: [
+                TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(s.cancel)),
+                FilledButton(
+                  onPressed: () {
+            Navigator.pop(ctx);
+            prov.downloadTheme(meta).then((_) {
+              if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('"${meta.name}" ${s.extInstalled2.toLowerCase()}!'),
+          behavior: SnackBarBehavior.floating));
+              }
+            });
+                  },
+                  child: Text(s.extInstall),
+                ),
+              ],
+            ),
+    );
+  }
+
+  void _showOptions(BuildContext context,
       ExtensionThemeMeta meta, bool active, AppStrings s) {
+    final prov = context.read<ExtensionsProvider>();
     final colors = Theme.of(context).colorScheme;
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
+    //    side: BorderSide(color: Colors.grey, width: 0.2),
+        
           borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
       builder: (ctx) => Column(
         mainAxisSize: MainAxisSize.min,
@@ -395,7 +430,7 @@ class _ThemeCard extends StatelessWidget {
           ),
           ListTile(
             leading: const Icon(Icons.delete_outline, color: Colors.red),
-            title: Text(s.delete, style: const TextStyle(color: Colors.red)),
+            title: Text(s.delete, style:  GoogleFonts.openSans(color: Colors.red)),
             onTap: () {
               Navigator.pop(ctx);
               prov.deleteTheme(meta.id);
@@ -413,88 +448,89 @@ class _ThemeCard extends StatelessWidget {
 class _InstalledCard extends StatelessWidget {
   final ExtensionThemeMeta meta;
   final BorderRadiusGeometry borderRadius;
-  const _InstalledCard({required this.meta, required this.borderRadius});
+  const _InstalledCard({super.key, required this.meta, required this.borderRadius});
 
   @override
   Widget build(BuildContext context) {
     final s = AppStrings.of(context);
-    return Consumer<ExtensionsProvider>(
-      builder: (context, prov, _) {
-        final active = prov.isActive(meta.id);
-        final colors = Theme.of(context).colorScheme;
-
-        return Card(
-          elevation: 0,
-          color: active
-              ? colors.primaryContainer.withValues(alpha: 0.3)
-              : colors.surfaceTint.withValues(alpha: 0.1),
-          shape: RoundedRectangleBorder(borderRadius: borderRadius),
-          margin: const EdgeInsets.symmetric(vertical: 2),
-          child: ListTile(
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            leading: _ThemeAvatar(meta: meta),
-            title: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              child: Text(meta.name,
-                  style: const TextStyle(fontWeight: FontWeight.w500)),
-            ),
-            subtitle: Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Text(
-                meta.dark ? s.extDarkThemeLabel : s.extLightThemeLabel,
-                style: const TextStyle(fontSize: 12, color: Colors.grey),
+    final active = context.select<ExtensionsProvider, bool>(
+      (p) => p.isActive(meta.id),
+    );
+    final colors = Theme.of(context).colorScheme;
+    return Card(
+      color: active
+          ? colors.primaryContainer.withValues(alpha: 0.3)
+          : null,
+      shape: RoundedRectangleBorder(borderRadius: borderRadius),
+      margin: const EdgeInsets.symmetric(vertical: 1),
+      child: ListTile(
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        leading: _ThemeAvatar(meta: meta),
+        title: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 5),
+          child: Text(meta.name,
+              style: GoogleFonts.openSans(fontWeight: FontWeight.w500)),
+        ),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(bottom: 5),
+          child: Text(
+            meta.dark ? s.extDarkThemeLabel : s.extLightThemeLabel,
+            style: GoogleFonts.openSans(fontSize: 12, color: Colors.grey),
+          ),
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 51,
+              height: 30,
+              child: AnimatedToggle(
+                value: active,
+                onChanged: (val) {
+                  final prov = context.read<ExtensionsProvider>();
+                  if (val) {
+                    prov.activateTheme(meta.id);
+                  } else {
+                    prov.deactivateTheme();
+                  }
+                },
               ),
             ),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Switch(
-                  value: active,
-                  onChanged: (val) => val
-                      ? prov.activateTheme(meta.id)
-                      : prov.deactivateTheme(),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.delete_outline,
-                      color: Colors.grey, size: 20),
-                  tooltip: s.delete,
-                  onPressed: () => _confirmDelete(context, prov, meta, s),
-                ),
-              ],
+            IconButton(
+              icon: const Icon(Icons.delete_outline,
+                  color: Colors.grey, size: 20),
+              tooltip: s.delete,
+              onPressed: () => _confirmDelete(context, meta, s),
             ),
-          ),
-        );
-      },
+          ],
+        ),
+      ),
     );
   }
 
-  void _confirmDelete(BuildContext context, ExtensionsProvider prov,
+  void _confirmDelete(BuildContext context,
       ExtensionThemeMeta meta, AppStrings s) {
+    final prov = context.read<ExtensionsProvider>();
     showThemedDialog(
       context: context,
-      builder: (ctx) => RepaintBoundary(
-                  child: BackdropFilter(
-                      filter: ImageFilter.blur(sigmaX: 8, sigmaY: 10),
-                      child: AlertDialog(
-            title: Text('${s.extDeleteQ.replaceAll('?', '')} "${meta.name}"?'),
-            content: Text(s.extDeleteBody),
-            actions: [
-              TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: Text(s.cancel)),
-              FilledButton(
-                style: FilledButton.styleFrom(backgroundColor: Colors.red),
-                onPressed: () {
-                  Navigator.pop(ctx);
-                  prov.deleteTheme(meta.id);
-                },
-                child: Text(s.delete),
-              ),
-            ],
-          ),
-        ),
-      ),
+      builder: (ctx) => AlertDialog(
+              title: Text('${s.extDeleteQ.replaceAll('?', '')} "${meta.name}"?'),
+              content: Text(s.extDeleteBody),
+              actions: [
+                TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(s.cancel)),
+                FilledButton(
+                  style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                  onPressed: () {
+            Navigator.pop(ctx);
+            prov.deleteTheme(meta.id);
+                  },
+                  child: Text(s.delete),
+                ),
+              ],
+            ),
     );
   }
 }
@@ -527,7 +563,7 @@ class _SdkContent extends StatelessWidget {
                   const SizedBox(height: 12),
                   Text(prov.sdkIndexError!,
                       textAlign: TextAlign.center,
-                      style: const TextStyle(color: Colors.grey)),
+                      style:  GoogleFonts.openSans(color: Colors.grey)),
                   const SizedBox(height: 16),
                   ElevatedButton.icon(
                     onPressed: prov.fetchSdkIndex,
@@ -550,20 +586,18 @@ class _SdkContent extends StatelessWidget {
         final sdks = prov.availableSdks;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: sdks.asMap().entries.map((e) {
-            final i = e.key;
-            return _SdkCard(
-              ext: e.value,
-              borderRadius: BorderRadius.vertical(
-                top: i == 0
-                    ? const Radius.circular(30)
-                    : const Radius.circular(10),
-                bottom: i == sdks.length - 1
-                    ? const Radius.circular(30)
-                    : const Radius.circular(10),
-              ),
-            );
-          }).toList(),
+          children: List.generate(sdks.length, (i) => _SdkCard(
+            key: ValueKey(sdks[i].sdk),
+            ext: sdks[i],
+            borderRadius: BorderRadius.vertical(
+              top: i == 0
+                  ? const Radius.circular(30)
+                  : const Radius.circular(5),
+              bottom: i == sdks.length - 1
+                  ? const Radius.circular(30)
+                  : const Radius.circular(5),
+            ),
+          )),
         );
       },
     );
@@ -573,7 +607,7 @@ class _SdkContent extends StatelessWidget {
 class _SdkCard extends StatelessWidget {
   final SdkExtension ext;
   final BorderRadiusGeometry borderRadius;
-  const _SdkCard({required this.ext, required this.borderRadius});
+  const _SdkCard({super.key, required this.ext, required this.borderRadius});
 
   @override
   Widget build(BuildContext context) {
@@ -582,12 +616,10 @@ class _SdkCard extends StatelessWidget {
     final installed = ext.isInstalled;
 
     return Card(
-      elevation: 0,
-      color: colors.surfaceTint.withValues(alpha: 0.1),
       shape: RoundedRectangleBorder(borderRadius: borderRadius),
-      margin: const EdgeInsets.symmetric(vertical: 2),
+      margin: const EdgeInsets.symmetric(vertical: 1),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -600,7 +632,7 @@ class _SdkCard extends StatelessWidget {
                   height: 40,
                   decoration: BoxDecoration(
                     color: colors.primaryContainer.withValues(alpha: 0.6),
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(5),
                   ),
                   child: Icon(Icons.extension_rounded,
                       size: 20, color: colors.primary),
@@ -611,7 +643,7 @@ class _SdkCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(ext.displayName,
-                          style: const TextStyle(
+                          style:  GoogleFonts.openSans(
                               fontSize: 14, fontWeight: FontWeight.w600)),
                       const SizedBox(height: 4),
                       Wrap(
@@ -640,7 +672,7 @@ class _SdkCard extends StatelessWidget {
                             size: 11, color: colors.primary),
                         const SizedBox(width: 3),
                         Text(s.extInstalled2,
-                            style: TextStyle(
+                            style: GoogleFonts.openSans(
                                 fontSize: 10,
                                 fontWeight: FontWeight.w600,
                                 color: colors.primary)),
@@ -652,7 +684,7 @@ class _SdkCard extends StatelessWidget {
             const SizedBox(height: 10),
             // Description
             Text(ext.description,
-                style: TextStyle(
+                style: GoogleFonts.openSans(
                     fontSize: 12,
                     color: colors.onSurface.withValues(alpha: 0.6),
                     height: 1.45)),
@@ -665,7 +697,7 @@ class _SdkCard extends StatelessWidget {
                     color: colors.onSurface.withValues(alpha: 0.4)),
                 const SizedBox(width: 4),
                 Text(ext.packageAuthor.name,
-                    style: TextStyle(
+                    style: GoogleFonts.openSans(
                         fontSize: 11,
                         color: colors.onSurface.withValues(alpha: 0.5))),
                 const SizedBox(width: 10),
@@ -674,7 +706,7 @@ class _SdkCard extends StatelessWidget {
                     color: colors.onSurface.withValues(alpha: 0.4)),
                 const SizedBox(width: 4),
                 Text('${ext.jsonAuthor.name} · ${ext.jsonAuthor.date}',
-                    style: TextStyle(
+                    style: GoogleFonts.openSans(
                         fontSize: 11,
                         color: colors.onSurface.withValues(alpha: 0.5))),
                 const Spacer(),
@@ -692,7 +724,7 @@ class _SdkCard extends StatelessWidget {
                           horizontal: 14, vertical: 8),
                       minimumSize: Size.zero,
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      textStyle: const TextStyle(
+                      textStyle:  GoogleFonts.openSans(
                           fontSize: 12, fontWeight: FontWeight.w600),
                     ),
                     icon: const Icon(Icons.delete_outline_rounded, size: 14),
@@ -711,7 +743,7 @@ class _SdkCard extends StatelessWidget {
                           horizontal: 14, vertical: 8),
                       minimumSize: Size.zero,
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      textStyle: const TextStyle(
+                      textStyle:  GoogleFonts.openSans(
                           fontSize: 12, fontWeight: FontWeight.w600),
                     ),
                     icon: const Icon(Icons.download_rounded, size: 14),
@@ -742,7 +774,7 @@ class _MiniChip extends StatelessWidget {
         border: Border.all(color: colors.outline.withValues(alpha: 0.2)),
       ),
       child: Text(label,
-          style: TextStyle(
+          style: GoogleFonts.openSans(
               fontSize: 10,
               fontWeight: FontWeight.w600,
               color: colors.onSurface.withValues(alpha: 0.6))),
@@ -772,12 +804,13 @@ class _ThemeAvatar extends StatelessWidget {
 }
 
 Widget _sectionLabel(BuildContext context, String label) {
+  final colors = Theme.of(context).colorScheme;
   return Padding(
     padding: const EdgeInsets.symmetric(vertical: 10),
     child: Text(
       label,
-      style: const TextStyle(
-        color: Colors.grey,
+      style:  GoogleFonts.openSans(
+        color: colors.primary,
         fontWeight: FontWeight.w600,
         fontSize: 14,
       ),

@@ -13,20 +13,32 @@ enum SettingsPage {
   runDebug,
   extensions,
   ai,
+  ssh,
   about,
 }
 
 class SettingsProvider extends ChangeNotifier {
+  // ── Static warm-up cache ──────────────────────────────────────────────────
+  /// Populated by [warmUp] in main() before runApp so the constructor can
+  /// initialise synchronously, eliminating the theme flash on first build.
+  static SharedPreferences? _warmPrefs;
+
+  /// Call once in main() before runApp to pre-warm SharedPreferences.
+  static Future<void> warmUp() async {
+    _warmPrefs = await SharedPreferences.getInstance();
+  }
   // ── General ───────────────────────────────────────────────────────────────
   static const _kFollowSystem      = 'followSystemTheme';
   static const _kUseDarkMode       = 'useDarkMode';
   static const _kUseAmoled         = 'useAmoled';
   static const _kUseDynamicColors  = 'useDynamicColors';
+  static const _kLiquidGlass       = 'liquidGlass';
 
   bool _followSystemTheme  = true;
   bool _useDarkMode        = false;
   bool _useAmoled          = false;
-  bool _useDynamicColors   = false;
+  bool _useDynamicColors   = true;
+  bool _liquidGlass        = false;
 
   // ── Editor ────────────────────────────────────────────────────────────────
   static const _kFontSize                 = 'ed_fontSize';
@@ -51,6 +63,7 @@ class SettingsProvider extends ChangeNotifier {
   static const _kHighlightActiveBlock   = 'ed_highlightActiveBlock';
   static const _kLineHighlightStyle     = 'ed_lineHighlightStyle';
   static const _kShowDiagnosticIndicators = 'ed_showDiagnosticIndicators';
+  static const _kShowEditorStatusBar      = 'ed_showStatusBar';
   static const _kReadOnly               = 'ed_readOnly';
   static const _kFontFamily             = 'ed_fontFamily';
 
@@ -76,6 +89,7 @@ class SettingsProvider extends ChangeNotifier {
   bool   _highlightActiveBlock  = true;
   String _lineHighlightStyle    = 'fill';
   bool   _showDiagnosticIndicators = true;
+  bool   _showEditorStatusBar      = true;
   bool   _readOnly              = false;
   String _fontFamily            = 'monospace';
 
@@ -104,6 +118,7 @@ class SettingsProvider extends ChangeNotifier {
   bool         get useDarkMode        => _useDarkMode;
   bool         get useAmoled          => _useAmoled;
   bool         get useDynamicColors   => _useDynamicColors;
+  bool         get liquidGlass        => _liquidGlass;
 
   // ── Getters: Editor ───────────────────────────────────────────────────────
   double get fontSize               => _fontSize;
@@ -128,6 +143,7 @@ class SettingsProvider extends ChangeNotifier {
   bool   get highlightActiveBlock  => _highlightActiveBlock;
   String get lineHighlightStyle    => _lineHighlightStyle;
   bool   get showDiagnosticIndicators => _showDiagnosticIndicators;
+  bool   get showEditorStatusBar      => _showEditorStatusBar;
   bool   get readOnly              => _readOnly;
   String get fontFamily            => _fontFamily;
 
@@ -150,16 +166,43 @@ class SettingsProvider extends ChangeNotifier {
   // ── Navigation getter ─────────────────────────────────────────────────────
   SettingsPage get currentPage => _currentPage;
 
+  /// Cached SharedPreferences instance — avoids re-acquiring on every setter.
+  SharedPreferences? _prefs;
+
+  /// Returns the cached prefs, acquiring once if not yet available.
+  Future<SharedPreferences> _getPrefs() async =>
+      _prefs ??= await _getPrefs();
+
   SettingsProvider() {
-    _load();
+    if (_warmPrefs != null) {
+      _prefs = _warmPrefs; // reuse the pre-warmed instance
+      _loadFrom(_warmPrefs!);
+      // _loaded already set to true; no notifyListeners needed in constructor
+    } else {
+      _loadAsync();
+    }
   }
 
-  Future<void> _load() async {
-    final p = await SharedPreferences.getInstance();
+  /// Synchronous init from pre-warmed prefs (called from constructor).
+  void _loadFrom(SharedPreferences p) {
+    _applyPrefs(p);
+    _loaded = true;
+    // Don't call notifyListeners() — widget tree not yet attached.
+  }
+
+  Future<void> _loadAsync() async {
+    final p = await _getPrefs();
+    _applyPrefs(p);
+    _loaded = true;
+    notifyListeners();
+  }
+
+  void _applyPrefs(SharedPreferences p) {
     _followSystemTheme  = p.getBool(_kFollowSystem)      ?? true;
     _useDarkMode        = p.getBool(_kUseDarkMode)       ?? false;
     _useAmoled          = p.getBool(_kUseAmoled)         ?? false;
-    _useDynamicColors   = p.getBool(_kUseDynamicColors)  ?? false;
+    _useDynamicColors   = p.getBool(_kUseDynamicColors)  ?? true;
+    _liquidGlass        = p.getBool(_kLiquidGlass)       ?? false;
 
     _fontSize               = p.getDouble(_kFontSize)                ?? 14.0;
     _wordWrap               = p.getBool(_kWordWrap)                  ?? false;
@@ -183,6 +226,7 @@ class SettingsProvider extends ChangeNotifier {
     _highlightActiveBlock  = p.getBool(_kHighlightActiveBlock)      ?? true;
     _lineHighlightStyle    = p.getString(_kLineHighlightStyle)       ?? 'fill';
     _showDiagnosticIndicators = p.getBool(_kShowDiagnosticIndicators) ?? true;
+    _showEditorStatusBar      = p.getBool(_kShowEditorStatusBar)      ?? true;
     _readOnly              = p.getBool(_kReadOnly)                   ?? false;
     _fontFamily            = p.getString(_kFontFamily)               ?? 'monospace';
 
@@ -204,14 +248,21 @@ class SettingsProvider extends ChangeNotifier {
 
     _language       = p.getString(_kLanguage)       ?? '';
     _onboardingDone = p.getBool(_kOnboardingDone)   ?? false;
-    _loaded = true;
-    notifyListeners();
+
+    _sshEnabled      = p.getBool(_kSshEnabled)             ?? false;
+    _sshHost         = p.getString(_kSshHost)               ?? '';
+    _sshPort         = p.getInt(_kSshPort)                   ?? 22;
+    _sshUsername     = p.getString(_kSshUsername)           ?? '';
+    _sshPassword     = p.getString(_kSshPassword)           ?? '';
+    _sshKeyPath      = p.getString(_kSshKeyPath)            ?? '';
+    _sshUseKey       = p.getBool(_kSshUseKey)               ?? false;
+    _sshProjectsPath = p.getString(_kSshProjectsPath)       ?? '';
   }
 
   // ── Language setters ──────────────────────────────────────────────────────
   Future<void> setLanguage(String langCode) async {
     _language = langCode;
-    final p = await SharedPreferences.getInstance();
+    final p = await _getPrefs();
     await p.setString(_kLanguage, langCode);
     notifyListeners();
   }
@@ -219,7 +270,7 @@ class SettingsProvider extends ChangeNotifier {
   // ── Onboarding setters ────────────────────────────────────────────────────
   Future<void> setOnboardingDone() async {
     _onboardingDone = true;
-    final p = await SharedPreferences.getInstance();
+    final p = await _getPrefs();
     await p.setBool(_kOnboardingDone, true);
     notifyListeners();
   }
@@ -238,7 +289,7 @@ class SettingsProvider extends ChangeNotifier {
   // ── General setters ───────────────────────────────────────────────────────
   Future<void> setFollowSystemTheme(bool val) async {
     _followSystemTheme = val;
-    final p = await SharedPreferences.getInstance();
+    final p = await _getPrefs();
     await p.setBool(_kFollowSystem, val);
     notifyListeners();
   }
@@ -246,7 +297,7 @@ class SettingsProvider extends ChangeNotifier {
   Future<void> setUseDarkMode(bool val) async {
     _useDarkMode = val;
     if (val) _followSystemTheme = false;
-    final p = await SharedPreferences.getInstance();
+    final p = await _getPrefs();
     await p.setBool(_kUseDarkMode, val);
     if (val) await p.setBool(_kFollowSystem, false);
     notifyListeners();
@@ -254,183 +305,197 @@ class SettingsProvider extends ChangeNotifier {
 
   Future<void> setUseAmoled(bool val) async {
     _useAmoled = val;
-    final p = await SharedPreferences.getInstance();
+    final p = await _getPrefs();
     await p.setBool(_kUseAmoled, val);
     notifyListeners();
   }
 
   Future<void> setUseDynamicColors(bool val) async {
     _useDynamicColors = val;
-    final p = await SharedPreferences.getInstance();
+    final p = await _getPrefs();
     await p.setBool(_kUseDynamicColors, val);
+    notifyListeners();
+  }
+
+  Future<void> setLiquidGlass(bool val) async {
+    _liquidGlass = val;
+    final p = await _getPrefs();
+    await p.setBool(_kLiquidGlass, val);
     notifyListeners();
   }
 
   // ── Editor setters ────────────────────────────────────────────────────────
   Future<void> setFontSize(double val) async {
     _fontSize = val;
-    final p = await SharedPreferences.getInstance();
+    final p = await _getPrefs();
     await p.setDouble(_kFontSize, val);
     notifyListeners();
   }
 
   Future<void> setWordWrap(bool val) async {
     _wordWrap = val;
-    final p = await SharedPreferences.getInstance();
+    final p = await _getPrefs();
     await p.setBool(_kWordWrap, val);
     notifyListeners();
   }
 
   Future<void> setAutoIndent(bool val) async {
     _autoIndent = val;
-    final p = await SharedPreferences.getInstance();
+    final p = await _getPrefs();
     await p.setBool(_kAutoIndent, val);
     notifyListeners();
   }
 
   Future<void> setSymbolPairAutoClose(bool val) async {
     _symbolPairAutoClose = val;
-    final p = await SharedPreferences.getInstance();
+    final p = await _getPrefs();
     await p.setBool(_kSymbolPairAutoClose, val);
     notifyListeners();
   }
 
   Future<void> setAutoCompletion(bool val) async {
     _autoCompletion = val;
-    final p = await SharedPreferences.getInstance();
+    final p = await _getPrefs();
     await p.setBool(_kAutoCompletion, val);
     notifyListeners();
   }
 
   Future<void> setFormatOnSave(bool val) async {
     _formatOnSave = val;
-    final p = await SharedPreferences.getInstance();
+    final p = await _getPrefs();
     await p.setBool(_kFormatOnSave, val);
     notifyListeners();
   }
 
   Future<void> setStickyScroll(bool val) async {
     _stickyScroll = val;
-    final p = await SharedPreferences.getInstance();
+    final p = await _getPrefs();
     await p.setBool(_kStickyScroll, val);
     notifyListeners();
   }
 
   Future<void> setTabSize(int val) async {
     _tabSize = val;
-    final p = await SharedPreferences.getInstance();
+    final p = await _getPrefs();
     await p.setInt(_kTabSize, val);
     notifyListeners();
   }
 
   Future<void> setUseSpaces(bool val) async {
     _useSpaces = val;
-    final p = await SharedPreferences.getInstance();
+    final p = await _getPrefs();
     await p.setBool(_kUseSpaces, val);
     notifyListeners();
   }
 
   Future<void> setCursorBlinkMs(int val) async {
     _cursorBlinkMs = val;
-    final p = await SharedPreferences.getInstance();
+    final p = await _getPrefs();
     await p.setInt(_kCursorBlinkMs, val);
     notifyListeners();
   }
 
   Future<void> setShowLineNumbers(bool val) async {
     _showLineNumbers = val;
-    final p = await SharedPreferences.getInstance();
+    final p = await _getPrefs();
     await p.setBool(_kShowLineNumbers, val);
     notifyListeners();
   }
 
   Future<void> setFixedGutter(bool val) async {
     _fixedGutter = val;
-    final p = await SharedPreferences.getInstance();
+    final p = await _getPrefs();
     await p.setBool(_kFixedGutter, val);
     notifyListeners();
   }
 
   Future<void> setShowMinimap(bool val) async {
     _showMinimap = val;
-    final p = await SharedPreferences.getInstance();
+    final p = await _getPrefs();
     await p.setBool(_kShowMinimap, val);
     notifyListeners();
   }
 
   Future<void> setShowSymbolBar(bool val) async {
     _showSymbolBar = val;
-    final p = await SharedPreferences.getInstance();
+    final p = await _getPrefs();
     await p.setBool(_kShowSymbolBar, val);
     notifyListeners();
   }
 
   Future<void> setShowLightbulb(bool val) async {
     _showLightbulb = val;
-    final p = await SharedPreferences.getInstance();
+    final p = await _getPrefs();
     await p.setBool(_kShowLightbulb, val);
     notifyListeners();
   }
 
   Future<void> setShowFoldArrows(bool val) async {
     _showFoldArrows = val;
-    final p = await SharedPreferences.getInstance();
+    final p = await _getPrefs();
     await p.setBool(_kShowFoldArrows, val);
     notifyListeners();
   }
 
   Future<void> setShowBlockLines(bool val) async {
     _showBlockLines = val;
-    final p = await SharedPreferences.getInstance();
+    final p = await _getPrefs();
     await p.setBool(_kShowBlockLines, val);
     notifyListeners();
   }
 
   Future<void> setShowIndentDots(bool val) async {
     _showIndentDots = val;
-    final p = await SharedPreferences.getInstance();
+    final p = await _getPrefs();
     await p.setBool(_kShowIndentDots, val);
     notifyListeners();
   }
 
   Future<void> setHighlightCurrentLine(bool val) async {
     _highlightCurrentLine = val;
-    final p = await SharedPreferences.getInstance();
+    final p = await _getPrefs();
     await p.setBool(_kHighlightCurrentLine, val);
     notifyListeners();
   }
 
   Future<void> setHighlightActiveBlock(bool val) async {
     _highlightActiveBlock = val;
-    final p = await SharedPreferences.getInstance();
+    final p = await _getPrefs();
     await p.setBool(_kHighlightActiveBlock, val);
     notifyListeners();
   }
 
   Future<void> setLineHighlightStyle(String val) async {
     _lineHighlightStyle = val;
-    final p = await SharedPreferences.getInstance();
+    final p = await _getPrefs();
     await p.setString(_kLineHighlightStyle, val);
     notifyListeners();
   }
 
   Future<void> setShowDiagnosticIndicators(bool val) async {
     _showDiagnosticIndicators = val;
-    final p = await SharedPreferences.getInstance();
+    final p = await _getPrefs();
     await p.setBool(_kShowDiagnosticIndicators, val);
+    notifyListeners();
+  }
+
+  Future<void> setShowEditorStatusBar(bool val) async {
+    _showEditorStatusBar = val;
+    final p = await _getPrefs();
+    await p.setBool(_kShowEditorStatusBar, val);
     notifyListeners();
   }
 
   Future<void> setReadOnly(bool val) async {
     _readOnly = val;
-    final p = await SharedPreferences.getInstance();
+    final p = await _getPrefs();
     await p.setBool(_kReadOnly, val);
     notifyListeners();
   }
 
   Future<void> setFontFamily(String val) async {
     _fontFamily = val;
-    final p = await SharedPreferences.getInstance();
+    final p = await _getPrefs();
     await p.setString(_kFontFamily, val);
     notifyListeners();
   }
@@ -438,7 +503,7 @@ class SettingsProvider extends ChangeNotifier {
   // ── Run & Debug setters ───────────────────────────────────────────────────
   Future<void> setDebugPlatform(String sdkTypeName, String platformName) async {
     _debugPlatforms[sdkTypeName] = platformName;
-    final p = await SharedPreferences.getInstance();
+    final p = await _getPrefs();
     await p.setString(_kDebugPlatforms, jsonEncode(_debugPlatforms));
     notifyListeners();
   }
@@ -449,7 +514,7 @@ class SettingsProvider extends ChangeNotifier {
     } else {
       _lspPaths[ext.toLowerCase()] = path.trim();
     }
-    final p = await SharedPreferences.getInstance();
+    final p = await _getPrefs();
     await p.setString(_kLspPaths, jsonEncode(_lspPaths));
     notifyListeners();
   }
@@ -476,6 +541,7 @@ class SettingsProvider extends ChangeNotifier {
     props.highlightActiveBlock  = _highlightActiveBlock;
     props.lineHighlightStyle    = _parseLineHighlightStyle(_lineHighlightStyle);
     props.showDiagnosticIndicators = _showDiagnosticIndicators;
+    props.showStatusBar            = _showEditorStatusBar;
     props.readOnly              = _readOnly;
   }
 
@@ -486,5 +552,89 @@ class SettingsProvider extends ChangeNotifier {
       case 'none':      return LineHighlightStyle.none;
       default:          return LineHighlightStyle.fill;
     }
+  }
+
+  // ── SSH ───────────────────────────────────────────────────────────────────
+  static const _kSshEnabled      = 'ssh_enabled';
+  static const _kSshHost         = 'ssh_host';
+  static const _kSshPort         = 'ssh_port';
+  static const _kSshUsername     = 'ssh_username';
+  static const _kSshPassword     = 'ssh_password';
+  static const _kSshKeyPath      = 'ssh_keyPath';
+  static const _kSshUseKey       = 'ssh_useKey';
+  static const _kSshProjectsPath = 'ssh_projectsPath';
+
+  bool   _sshEnabled      = false;
+  String _sshHost         = '';
+  int    _sshPort         = 22;
+  String _sshUsername     = '';
+  String _sshPassword     = '';
+  String _sshKeyPath      = '';
+  bool   _sshUseKey       = false;
+  String _sshProjectsPath = '';
+
+  bool   get sshEnabled      => _sshEnabled;
+  String get sshHost         => _sshHost;
+  int    get sshPort         => _sshPort;
+  String get sshUsername     => _sshUsername;
+  String get sshPassword     => _sshPassword;
+  String get sshKeyPath      => _sshKeyPath;
+  bool   get sshUseKey       => _sshUseKey;
+  String get sshProjectsPath => _sshProjectsPath;
+
+  Future<void> setSshEnabled(bool v) async {
+    _sshEnabled = v;
+    final p = await _getPrefs();
+    await p.setBool(_kSshEnabled, v);
+    notifyListeners();
+  }
+
+  Future<void> setSshHost(String v) async {
+    _sshHost = v;
+    final p = await _getPrefs();
+    await p.setString(_kSshHost, v);
+    notifyListeners();
+  }
+
+  Future<void> setSshPort(int v) async {
+    _sshPort = v;
+    final p = await _getPrefs();
+    await p.setInt(_kSshPort, v);
+    notifyListeners();
+  }
+
+  Future<void> setSshUsername(String v) async {
+    _sshUsername = v;
+    final p = await _getPrefs();
+    await p.setString(_kSshUsername, v);
+    notifyListeners();
+  }
+
+  Future<void> setSshPassword(String v) async {
+    _sshPassword = v;
+    final p = await _getPrefs();
+    await p.setString(_kSshPassword, v);
+    notifyListeners();
+  }
+
+  Future<void> setSshKeyPath(String v) async {
+    _sshKeyPath = v;
+    final p = await _getPrefs();
+    await p.setString(_kSshKeyPath, v);
+    notifyListeners();
+  }
+
+  Future<void> setSshUseKey(bool v) async {
+    _sshUseKey = v;
+    final p = await _getPrefs();
+    await p.setBool(_kSshUseKey, v);
+    notifyListeners();
+  }
+
+  Future<void> setSshProjectsPath(String v) async {
+    _sshProjectsPath = v;
+    final p = await _getPrefs();
+    await p.setString(_kSshProjectsPath, v);
+    notifyListeners();
   }
 }

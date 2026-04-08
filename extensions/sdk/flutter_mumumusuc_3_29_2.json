@@ -54,8 +54,8 @@
     },
     {
       "type": "shell",
-      "command": "flutter --version 2>&1",
-      "description": "Verifying Flutter installation"
+      "command": "CI=true FLUTTER_SUPPRESS_ANALYTICS=1 flutter --version 2>&1",
+      "description": "Verifying Flutter installation (CI mode skips update check)"
     }
   ],
   "cleanup_steps": [

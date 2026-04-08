@@ -8,14 +8,27 @@ class ProjectTemplate {
 
   /// [overrideNewProjectCmd] — when provided (e.g. from an installed JSON
   /// extension) it replaces the hardcoded [SdkDefinition.newProjectCmd].
+  /// [remoteIsWindows] — when true, generates cmd.exe-compatible commands.
   String createCommand(String projectName, String parentDir,
-      {String? overrideNewProjectCmd}) {
+      {String? overrideNewProjectCmd, bool remoteIsWindows = false}) {
     final def = SdkDefinition.forType(sdk);
     final raw = overrideNewProjectCmd ?? def.newProjectCmd;
-    final cmd = raw.replaceAll(r'$name', projectName);
+
+    // Replace $name and fix mkdir for Windows (no -p flag in cmd.exe).
+    final cmd = raw
+        .replaceAll(r'$name', projectName)
+        .replaceAll('mkdir -p ', remoteIsWindows ? 'mkdir ' : 'mkdir -p ');
+
     final projectPath = '$parentDir/$projectName';
-    final base = 'cd "$parentDir" && $cmd';
-    if (sdk == SdkType.flutter) {
+
+    // PowerShell (Windows SSH default) uses ';' as separator and its built-in
+    // 'cd' handles drive changes natively — no '/d' flag or '&&' needed.
+    final base = remoteIsWindows
+        ? 'cd "$parentDir"; $cmd'
+        : 'cd "$parentDir" && $cmd';
+
+    // Termux/Android-specific gradle fixes are only needed on Linux.
+    if (sdk == SdkType.flutter && !remoteIsWindows) {
       return '$base && ${_flutterAndroidFixes(projectPath)}';
     }
     return base;

@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "sdk": "androidSdk",
-  "sdk_version": "latest",
+  "sdk_version": "35.0.0",
   "display_name": "Android SDK (termux-android-sdk)",
-  "description": "Android SDK for Termux by mumumusuc. Includes sdkmanager, platform-tools, build-tools and Gradle. Required for building native Android apps and Flutter APKs.",
+  "description": "Android SDK for Termux by mumumusuc. Includes build-tools 35, platform-tools, NDK 27 and CMake. All bundled in the .deb — no sdkmanager downloads required.",
   "package": {
     "type": "deb",
     "url": "https://github.com/mumumusuc/termux-android-sdk/releases/download/35.0.0/android-sdk_35.0.0_aarch64.deb",
@@ -17,23 +17,23 @@
   },
   "json_author": {
     "name": "Yato",
-    "date": "2026-03-26"
+    "date": "2026-04-08"
   },
   "install_steps": [
     {
       "type": "shell",
-      "command": "pkg update -y 2>&1 && pkg install -y openjdk-17 wget 2>&1",
-      "description": "Installing Java 17 and wget"
+      "command": "apt-get update -y 2>&1 && apt-get install -y openjdk-17 2>&1",
+      "description": "Installing Java 17 (required by sdkmanager)"
     },
     {
       "type": "shell",
       "command": "dpkg -i $DOWNLOAD_PATH 2>&1; apt-get install -f -y 2>&1; dpkg -l android-sdk 2>&1 | grep -q '^ii' || (echo 'ERROR: android-sdk package not installed' && exit 1)",
-      "description": "Installing Android SDK .deb"
+      "description": "Installing Android SDK .deb (includes build-tools 35, NDK, CMake)"
     },
     {
       "type": "shell",
-      "command": "grep -qxF 'export ANDROID_HOME=\"$PREFIX/opt/android-sdk\"' $HOME/.bashrc || echo 'export ANDROID_HOME=\"$PREFIX/opt/android-sdk\"' >> $HOME/.bashrc && grep -qxF 'export PATH=\"$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools\"' $HOME/.bashrc || echo 'export PATH=\"$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools\"' >> $HOME/.bashrc",
-      "description": "Adding Android SDK to .bashrc"
+      "command": "grep -qxF 'export ANDROID_HOME=\"$PREFIX/opt/android-sdk\"' $HOME/.bashrc || echo 'export ANDROID_HOME=\"$PREFIX/opt/android-sdk\"' >> $HOME/.bashrc && grep -qxF 'export ANDROID_NDK_HOME=\"$PREFIX/opt/android-ndk\"' $HOME/.bashrc || echo 'export ANDROID_NDK_HOME=\"$PREFIX/opt/android-ndk\"' >> $HOME/.bashrc && grep -qxF 'export PATH=\"$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools\"' $HOME/.bashrc || echo 'export PATH=\"$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools\"' >> $HOME/.bashrc",
+      "description": "Adding ANDROID_HOME, ANDROID_NDK_HOME and PATH to .bashrc"
     },
     {
       "type": "shell",
@@ -44,18 +44,18 @@
   "config_steps": [
     {
       "type": "shell",
-      "command": "yes | sdkmanager --licenses 2>&1 || true",
+      "command": "JAVA_TOOL_OPTIONS=\"-Xmx512m -Dhttps.protocols=TLSv1.2,TLSv1.3\" yes | sdkmanager --no_https --licenses 2>&1 || true",
       "description": "Accepting Android SDK licenses"
     },
     {
       "type": "shell",
-      "command": "sdkmanager \"platform-tools\" \"platforms;android-34\" \"build-tools;34.0.0\" 2>&1",
-      "description": "Installing platform-tools, Android 34 and build-tools"
+      "command": "apt-get install -y android-tools 2>&1 && adb version 2>&1",
+      "description": "Installing adb (android-tools) and verifying"
     },
     {
       "type": "shell",
-      "command": "pkg install -y android-tools 2>&1 && adb version 2>&1",
-      "description": "Installing ARM64 adb via android-tools and verifying"
+      "command": "test -d \"$ANDROID_HOME/build-tools/35.0.0\" && echo 'build-tools/35.0.0 OK' || echo 'WARNING: build-tools/35.0.0 not found, check $ANDROID_HOME' && test -d \"$PREFIX/opt/android-ndk\" && echo 'NDK OK' || echo 'WARNING: NDK not found'",
+      "description": "Verifying build-tools and NDK are present"
     }
   ],
   "cleanup_steps": [
@@ -73,7 +73,7 @@
     },
     {
       "type": "shell",
-      "command": "pkg uninstall -y android-tools 2>&1 || true",
+      "command": "apt-get remove -y android-tools 2>&1 || true",
       "description": "Removing android-tools (adb)"
     },
     {
@@ -83,12 +83,12 @@
     },
     {
       "type": "shell",
-      "command": "rm -rf \"$ANDROID_HOME\" 2>&1 || true",
-      "description": "Removing Android SDK directory"
+      "command": "rm -rf \"$ANDROID_HOME\" \"$PREFIX/opt/android-ndk\" 2>&1 || true",
+      "description": "Removing Android SDK and NDK directories"
     },
     {
       "type": "shell",
-      "command": "sed -i '/ANDROID_HOME/d; /cmdline-tools/d' $HOME/.bashrc 2>&1 || true",
+      "command": "sed -i '/ANDROID_HOME/d; /ANDROID_NDK_HOME/d; /cmdline-tools/d' $HOME/.bashrc 2>&1 || true",
       "description": "Cleaning .bashrc"
     }
   ],

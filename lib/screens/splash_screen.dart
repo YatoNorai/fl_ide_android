@@ -1,5 +1,6 @@
 import 'package:animated_text_kit/animated_text_kit.dart';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 /// Terminal-style splash screen with animated typing text.
 /// Calls [onFinished] when the animation completes.
@@ -18,11 +19,11 @@ class SplashScreen extends StatelessWidget {
           child: AnimatedTextKit(
             animatedTexts: [
               TyperAnimatedText(
-                'Initializing FL IDE...',
-                textStyle: const TextStyle(
+                'Initializing L A Y E R...',
+                textStyle:  GoogleFonts.openSans(
                   fontSize: 24.0,
                   color: Colors.lightGreenAccent,
-                  fontFamily: 'monospace',
+               
                 ),
                 speed: const Duration(milliseconds: 80),
               ),
