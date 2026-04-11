@@ -869,6 +869,13 @@ class _WorkspaceAppBarState extends State<_WorkspaceAppBar> {
       return;
     }
 
+    // Android native has no DAP adapter — run Gradle build instead.
+    if (!dapConfig.hasDap && widget.project.sdk == SdkType.androidSdk) {
+      final buildCmd = SdkDefinition.forType(SdkType.androidSdk).buildCommand;
+      context.read<DebugProvider>().startBuildSession(widget.project, buildCmd);
+      return;
+    }
+
     final ssh = context.read<SshProvider>();
     final isRemoteProject = ssh.isConnected &&
         ssh.config != null &&

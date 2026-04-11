@@ -284,6 +284,70 @@ class DebugProvider extends ChangeNotifier {
     } catch (_) {}
   }
 
+  /// Start a generic build session (e.g. `./gradlew assembleDebug` for Android).
+  /// Used for SDKs that have no DAP adapter but need a build/run command.
+  Future<void> startBuildSession(Project project, String buildCommand) async {
+    if (_status != DebugStatus.idle) return;
+    _error = null;
+    _output = '';
+    _projectPath = project.path;
+    _status = DebugStatus.starting;
+    _isBuilding = true;
+    notifyListeners();
+
+    try {
+      _output += 'Running: $buildCommand\n\n';
+      notifyListeners();
+
+      final parts = buildCommand.split(' ');
+      _metroProcess = await Process.start(
+        parts.first,
+        parts.skip(1).toList(),
+        workingDirectory: project.path,
+        environment: RuntimeEnvir.baseEnv,
+        runInShell: true,
+      );
+
+      _status = DebugStatus.running;
+      notifyListeners();
+
+      void handleLine(String line) {
+        _output += '$line\n';
+        if (_isBuilding) {
+          if (line.contains('BUILD SUCCESSFUL')) {
+            _isBuilding = false;
+          } else if (line.contains('BUILD FAILED') || line.contains('FAILURE:')) {
+            _isBuilding = false;
+            _error = 'Build failed. See output for details.';
+          }
+        }
+        notifyListeners();
+      }
+
+      _metroProcess!.stdout
+          .transform(const Utf8Decoder(allowMalformed: true))
+          .transform(const LineSplitter())
+          .listen(handleLine);
+      _metroProcess!.stderr
+          .transform(const Utf8Decoder(allowMalformed: true))
+          .transform(const LineSplitter())
+          .listen(handleLine);
+
+      _metroProcess!.exitCode.then((code) {
+        _isBuilding = false;
+        if (code != 0 && _error == null) {
+          _error = 'Build exited with code $code.';
+          notifyListeners();
+        }
+        Future.microtask(_cleanup);
+      });
+    } catch (e) {
+      _error = e.toString();
+      debugPrint('[Build] startBuildSession error: $e');
+      await _cleanup();
+    }
+  }
+
   /// Start a Metro bundler session for React Native / Expo projects.
   /// This is used instead of a DAP session when no DAP adapter is available.
   Future<void> startMetroSession(Project project) async {

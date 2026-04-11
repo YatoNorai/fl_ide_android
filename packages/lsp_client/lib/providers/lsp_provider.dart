@@ -42,9 +42,20 @@ class LspProvider extends ChangeNotifier {
       {Map<String, String>? customPaths}) async {
     final cmd = _lspServerCommand(extension, customPaths: customPaths);
     if (cmd == null) {
-      _status = LspStatus.stopped;
-      _lspConfig = null;
-      notifyListeners();
+      // Known language but binary not installed → show error so the user
+      // knows why there is no LSP support, instead of silently stopping.
+      const _knownLangs = {'dart', 'js', 'jsx', 'ts', 'tsx', 'py',
+          'kt', 'kotlin', 'java', 'go', 'swift'};
+      if (_knownLangs.contains(extension.toLowerCase())) {
+        _status = LspStatus.error;
+        _error = _missingBinaryMessage(extension);
+        _lspConfig = null;
+        notifyListeners();
+      } else {
+        _status = LspStatus.stopped;
+        _lspConfig = null;
+        notifyListeners();
+      }
       return;
     }
 
@@ -215,7 +226,9 @@ class LspProvider extends ChangeNotifier {
           debugPrint('[LspProvider] bash not found');
           return null;
         }
-        return [bash3, ktlsBin];
+        // kotlin-language-server defaults to TCP on port 16718.
+        // --stdio makes it use stdin/stdout (required for QuillLspStdioConfig).
+        return [bash3, ktlsBin, '--stdio'];
 
       // ── Java (Eclipse JDT Language Server) ────────────────────────────────
       case 'java':
@@ -246,23 +259,48 @@ class LspProvider extends ChangeNotifier {
     }
   }
 
+  /// Returns a short human-readable message when a known LSP binary is missing.
+  String _missingBinaryMessage(String ext) {
+    switch (ext.toLowerCase()) {
+      case 'java':
+        return 'Java LSP (jdtls) not found.\n'
+            'Install the Android SDK extension and run its install steps.';
+      case 'kt':
+      case 'kotlin':
+        return 'Kotlin LSP not found.\n'
+            'Install the Android SDK extension and run its install steps.';
+      case 'go':
+        return 'Go LSP (gopls) not found.\n'
+            'Run: go install golang.org/x/tools/gopls@latest';
+      case 'swift':
+        return 'Swift LSP (sourcekit-lsp) not found.\n'
+            'Run: pkg install swift';
+      default:
+        return 'LSP server not installed for .$ext files.';
+    }
+  }
+
   /// Constructs the full [java, ...args] command to launch jdtls by scanning
   /// the jdtls installation directory for the versioned launcher jar.
   ///
   /// Returns null and logs if jdtls is not installed or Java is missing.
   List<String>? _jdtlsCommand() {
+    final bash = RuntimeEnvir.bashPath;
+    final dataDir = RuntimeEnvir.jdtlsDataPath;
+
+    // 1. Prefer the wrapper script — it's always created by the install step
+    //    and handles classpath/config automatically.
+    final wrapper = RuntimeEnvir.jdtlsBin;
+    if (File(wrapper).existsSync()) {
+      if (!File(bash).existsSync()) return null;
+      Directory(dataDir).createSync(recursive: true);
+      return [bash, wrapper, '-data', dataDir];
+    }
+
+    // 2. Fall back to direct launcher JAR invocation.
     final jdtlsHome = RuntimeEnvir.jdtlsHome;
     final pluginsDir = Directory('$jdtlsHome/plugins');
     if (!pluginsDir.existsSync()) {
-      // Try the wrapper script installed by the extension as a fallback.
-      final wrapper = RuntimeEnvir.jdtlsBin;
-      if (File(wrapper).existsSync()) {
-        final bash = RuntimeEnvir.bashPath;
-        if (!File(bash).existsSync()) return null;
-        final dataDir = RuntimeEnvir.jdtlsDataPath;
-        Directory(dataDir).createSync(recursive: true);
-        return [bash, wrapper, '-data', dataDir];
-      }
       debugPrint('[LspProvider] jdtls not found at $jdtlsHome.'
           ' Install via Android SDK extension.');
       return null;
@@ -301,7 +339,6 @@ class LspProvider extends ChangeNotifier {
       return null;
     }
 
-    final dataDir = RuntimeEnvir.jdtlsDataPath;
     Directory(dataDir).createSync(recursive: true);
 
     return [
