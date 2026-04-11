@@ -221,7 +221,7 @@ class DebugProvider extends ChangeNotifier {
       'supportsVariablePaging': false,
       'supportsRunInTerminalRequest': false,
       'supportsInvalidatedEvent': true,
-    }).timeout(const Duration(seconds: 10));
+    }).timeout(const Duration(seconds: 30));
     // _onInitialized() handles steps 2-4 when 'initialized' event arrives.
   }
 

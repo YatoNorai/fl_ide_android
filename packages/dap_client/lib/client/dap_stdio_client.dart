@@ -135,10 +135,12 @@ class DapStdioClient implements DapClientBase {
         try {
           _expectedLength = _parseContentLength(header);
         } on FormatException catch (e) {
-          // Non-DAP output (e.g. startup warnings) — discard buffer and resync.
-          debugPrint('[DAP] invalid header, discarding buffer: $e\n  header: $header');
-          _buf.clear();
-          return;
+          // Not a valid DAP header (e.g. startup warning from dlv).
+          // Skip past this \r\n\r\n and keep scanning — the real DAP
+          // frame may be sitting right after this garbage line.
+          debugPrint('[DAP] invalid header, skipping: $e\n  header: $header');
+          _buf.removeRange(0, headerEnd + 4);
+          continue;
         }
         _buf.removeRange(0, headerEnd + 4); // +4 for \r\n\r\n
       }
