@@ -17,7 +17,7 @@ import 'package:project_manager/project_manager.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:quill_code/quill_code.dart'
-    show DiagnosticSeverity, QuillActionsMenu, SearchOptions;
+    show CharPosition, DiagnosticSeverity, QuillActionsMenu, QuillCodeController, SearchOptions;
 import 'package:sdk_manager/sdk_manager.dart';
 import 'package:terminal_pkg/terminal_pkg.dart';
 import 'package:ssh_pkg/ssh_pkg.dart';
@@ -196,8 +196,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
             .firstOrNull;
         final loadedCfg = loadedExt?.sdkConfig ??
             SdkDefinition.forType(widget.project.sdk).sdkConfig;
-        final entryFile = '${widget.project.path}/${loadedCfg.defaultEntryFile}';
-        await editor.openFile(entryFile);
+        await _openEntryFile(editor, widget.project.path, loadedCfg);
       }
       if (!mounted) return;
 
@@ -245,6 +244,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
       } else {
         await Future.delayed(const Duration(milliseconds: 300));
         if (!mounted) return;
+        session.writeCommand('cd "${widget.project.path}"');
       }
 
       // ── Phase 3: LSP ──────────────────────────────────────────────────────
@@ -302,15 +302,17 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
         // the 30 s fallback above).
         setState(() => _initPhase = _InitPhase.ready);
       } else {
-        // Local LSP
+        // Local LSP — derive language from the file that actually opened,
+        // falling back to the SDK extension (e.g. tsx for React Native).
+        // This handles cases where App.tsx doesn't exist but app/index.js does.
         final settings = context.read<SettingsProvider>();
-        final loadedExt2 = context.read<ExtensionsProvider>().availableSdks
-            .where((e) => e.sdk == widget.project.sdk.name)
-            .firstOrNull;
-        final loadedCfg2 = loadedExt2?.sdkConfig ??
-            SdkDefinition.forType(widget.project.sdk).sdkConfig;
+        final openedExt = context.read<EditorProvider>().activeFile?.extension;
+        final lspExt = (openedExt != null && openedExt.isNotEmpty)
+            ? openedExt
+            : _sdkExtension(widget.project.sdk);
+        _lspStartedExt = lspExt; // prevent auto-restart for this extension
         await lspProv.startForExtension(
-          loadedCfg2.defaultEntryFile.split('.').last,
+          lspExt,
           widget.project.path,
           customPaths: settings.lspPaths,
         );
@@ -372,6 +374,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     editor.addListener(_onEditorChanged);
   }
 
+  // Extension of the file the LSP was last started for — used to detect
+  // when the user switches to a different language and we need to restart.
+  String _lspStartedExt = '';
+
   void _onEditorChanged() {
     if (!mounted) return;
     final saved = _editorProvider?.lastSavedPath;
@@ -382,10 +388,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
       setState(() => _syncBannerVisible = true);
     }
 
+    final lsp = context.read<LspProvider>();
+
     // For SSH LSP (WebSocket) the entry file is never auto-opened, so
     // onDiagnosticsReceived can't be set in _init().  Wire it up here
     // whenever a new file is opened while LSP is still warming.
-    final lsp = context.read<LspProvider>();
     if (lsp.status == LspStatus.warming) {
       final ctrl = _editorProvider?.activeFile?.controller;
       if (ctrl is LspAwareController && ctrl.onDiagnosticsReceived == null) {
@@ -394,6 +401,23 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
           if (mounted) setState(() => _initPhase = _InitPhase.ready);
         };
       }
+    }
+
+    // Auto-restart LSP when the user opens a file whose language has no running
+    // LSP yet (e.g. entry file was .xml/.kts but user navigates to .kt/.java).
+    // Only restart if: LSP is stopped AND the new extension differs from the
+    // last one we tried (prevents a restart loop on rapid file switches).
+    final newExt = _editorProvider?.activeFile?.extension ?? '';
+    if (newExt.isNotEmpty &&
+        newExt != _lspStartedExt &&
+        lsp.status == LspStatus.stopped) {
+      _lspStartedExt = newExt;
+      final settings = context.read<SettingsProvider>();
+      lsp.startForExtension(
+        newExt,
+        widget.project.path,
+        customPaths: settings.lspPaths,
+      );
     }
   }
 
@@ -409,8 +433,6 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   }
 
   void _showPreview({String? url}) {
-    final mq = MediaQuery.of(context);
-    final initialPos = Offset(16, mq.padding.top + kToolbarHeight + 3 + 10);
     _webPreviewEntry?.remove();
     final resolvedUrl = url ?? _webPreviewUrl ?? 'http://localhost:${DebugProvider.webServerPort}';
     // Re-inject DebugProvider so the overlay toolbar can access it.
@@ -422,7 +444,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
         child: WebPreviewOverlay(
           url: resolvedUrl,
           onClose: _hidePreview,
-          initialPos: initialPos,
+          navigatorContext: context,
         ),
       ),
     );
@@ -473,18 +495,87 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     } catch (_) {}
   }
 
+  /// Tries to open the project's default entry file, falling back to a list of
+  /// common alternatives. Handles Expo Router (app/index.tsx), classic Expo
+  /// (App.tsx / App.js), plain React Native (index.js), Node (index.js), etc.
+  static Future<void> _openEntryFile(
+      EditorProvider editor, String projectPath, SdkConfig cfg) async {
+    // Primary candidate from SDK config
+    final primary = '$projectPath/${cfg.defaultEntryFile}';
+    // Build a list of fallbacks without duplicates
+    final candidates = <String>[
+      primary,
+      '$projectPath/app/index.tsx',
+      '$projectPath/app/index.ts',
+      '$projectPath/app/index.js',
+      '$projectPath/App.tsx',
+      '$projectPath/App.ts',
+      '$projectPath/App.js',
+      '$projectPath/index.tsx',
+      '$projectPath/index.ts',
+      '$projectPath/index.js',
+      '$projectPath/src/App.tsx',
+      '$projectPath/src/App.js',
+      '$projectPath/src/index.tsx',
+      '$projectPath/src/index.js',
+      '$projectPath/main.dart',
+      '$projectPath/Sources/main.swift',
+      '$projectPath/app/src/main/java/MainActivity.kt',
+    ];
+    for (final path in candidates) {
+      if (await File(path).exists()) {
+        await editor.openFile(path);
+        return;
+      }
+    }
+    // Android native: package directory varies — scan kotlin/java source trees
+    // for the first .kt or .java file (e.g. app/src/main/kotlin/com/…/MainActivity.kt).
+    for (final srcDir in [
+      '$projectPath/app/src/main/kotlin',
+      '$projectPath/app/src/main/java',
+    ]) {
+      final dir = Directory(srcDir);
+      if (!dir.existsSync()) continue;
+      try {
+        final files = dir
+            .listSync(recursive: true)
+            .whereType<File>()
+            .where((f) => f.path.endsWith('.kt') || f.path.endsWith('.java'))
+            .toList()
+          ..sort((a, b) => a.path.compareTo(b.path));
+        if (files.isNotEmpty) {
+          await editor.openFile(files.first.path);
+          return;
+        }
+      } catch (_) {}
+    }
+    // Last resort: open the first non-hidden file at the project root
+    try {
+      final dir = Directory(projectPath);
+      final entries = dir.listSync(recursive: false)
+          .whereType<File>()
+          .where((f) => !f.path.split('/').last.startsWith('.'))
+          .toList();
+      if (entries.isNotEmpty) await editor.openFile(entries.first.path);
+    } catch (_) {}
+  }
+
   static String _sdkExtension(SdkType sdk) {
     switch (sdk) {
       case SdkType.flutter:
         return 'dart';
       case SdkType.nodejs:
-      case SdkType.reactNative:
         return 'js';
+      case SdkType.reactNative:
+        return 'tsx';
       case SdkType.python:
         return 'py';
       case SdkType.androidSdk:
+        return 'kt'; // Kotlin is the primary Android language
       case SdkType.swift:
-        return 'dart'; // fallback — no LSP for these on remote
+        return 'swift';
+      case SdkType.go:
+        return 'go';
     }
   }
 
@@ -740,18 +831,43 @@ class _WorkspaceAppBarState extends State<_WorkspaceAppBar> {
     // Save (+ format) all open files before building.
     await context.read<EditorProvider>().saveAllFiles(format: settings.formatOnSave);
     if (!context.mounted) return;
+
     final platforms = supportedPlatforms(widget.project.sdk);
+    if (platforms.isEmpty) return;
+
+    // Show platform-picker dialog so the user can choose between
+    // android / web / linux every time they hit play.
     final savedName = settings.debugPlatformFor(widget.project.sdk.name);
-    final platform = savedName != null
+    final initialPlatform = savedName != null
         ? platforms.firstWhere((p) => p.name == savedName,
             orElse: () => platforms.first)
         : platforms.first;
+
+    final platform = platforms.length == 1
+        ? platforms.first
+        : await showThemedDialog<BuildPlatform>(
+            context: context,
+            builder: (ctx) => _PlatformPickerDialog(
+              platforms: platforms,
+              initial: initialPlatform,
+            ),
+          );
+
+    if (platform == null || !context.mounted) return;
+    settings.setDebugPlatform(widget.project.sdk.name, platform.name);
+
     // Prefer DapConfig from installed JSON extension, fall back to SdkDefinition.
     final ext = context.read<ExtensionsProvider>().availableSdks
         .where((e) => e.sdk == widget.project.sdk.name)
         .firstOrNull;
     final dapConfig = ext?.dapConfig ??
         SdkDefinition.forType(widget.project.sdk).dapConfig;
+
+    // React Native has no DAP adapter — launch Metro bundler as a run session.
+    if (!dapConfig.hasDap && widget.project.sdk == SdkType.reactNative) {
+      context.read<DebugProvider>().startMetroSession(widget.project);
+      return;
+    }
 
     final ssh = context.read<SshProvider>();
     final isRemoteProject = ssh.isConnected &&
@@ -760,14 +876,8 @@ class _WorkspaceAppBarState extends State<_WorkspaceAppBar> {
         widget.project.path.startsWith(ssh.config!.remoteProjectsPath);
 
     if (isRemoteProject) {
-      // Build the DAP adapter command for the remote machine.
-      // adapterBinary + adapterArgs, e.g. "dart debug_adapter".
-      final bin = dapConfig.adapterBinary.isNotEmpty
-          ? dapConfig.adapterBinary
-          : 'dart';
-      final args = dapConfig.adapterArgs.isNotEmpty
-          ? dapConfig.adapterArgs
-          : ['debug_adapter'];
+      final bin = dapConfig.adapterBinary.isNotEmpty ? dapConfig.adapterBinary : 'dart';
+      final args = dapConfig.adapterArgs.isNotEmpty ? dapConfig.adapterArgs : ['debug_adapter'];
       final adapterCmd = [bin, ...args].join(' ');
       try {
         final sshSession = await ssh.startProcess(adapterCmd);
@@ -786,10 +896,10 @@ class _WorkspaceAppBarState extends State<_WorkspaceAppBar> {
     }
 
     context.read<DebugProvider>().startSession(
-          widget.project,
-          platform: platform.name,
-          dapConfig: dapConfig,
-        );
+      widget.project,
+      platform: platform.name,
+      dapConfig: dapConfig,
+    );
   }
 
   void _showWebPreview(BuildContext context) {
@@ -843,9 +953,11 @@ class _WorkspaceAppBarState extends State<_WorkspaceAppBar> {
               builder: (context, dbg, _) =>
                   (dbg.status == DebugStatus.starting || dbg.isBuilding)
                       ? LinearProgressIndicator(
+                          year2023: true,
                           color: cs.primary,
                           backgroundColor: Colors.transparent,
                           minHeight: 3,
+                          borderRadius: BorderRadius.circular(10),
                         )
                       : const SizedBox(height: 3),
             ),
@@ -931,7 +1043,7 @@ class _WorkspaceAppBarState extends State<_WorkspaceAppBar> {
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
+           /*    Text(
                 'FL IDE',
                 style: TextStyle(
                   color: cs.onSurface,
@@ -939,12 +1051,12 @@ class _WorkspaceAppBarState extends State<_WorkspaceAppBar> {
                   fontWeight: FontWeight.bold,
                   height: 1.1,
                 ),
-              ),
+              ), */
               Text(
                 widget.project.name,
                 style: TextStyle(
-                  color: cs.onSurfaceVariant,
-                  fontSize: 11,
+                  color: cs.onSurface,
+                  fontSize: 15,
                   height: 1.2,
                 ),
                 overflow: TextOverflow.ellipsis,
@@ -1087,6 +1199,8 @@ class _WorkspaceAppBarState extends State<_WorkspaceAppBar> {
                 context.read<DebugProvider>().restart();
               case 'visual_editor':
                 openVisualEditor(context);
+              case 'repair_android':
+                _repairAndroidProject(context);
               case 'close':
                 _confirmCloseProject(context);
             }
@@ -1145,13 +1259,23 @@ class _WorkspaceAppBarState extends State<_WorkspaceAppBar> {
                       icon: Icons.restart_alt_rounded, label: s.wsHotRestart),
                 ),
               const PopupMenuDivider(),
-              PopupMenuItem(
-                value: 'visual_editor',
-                height: 40,
-                child: _PopupItem(
-                    icon: Icons.auto_awesome_outlined,
-                    label: 'Visual Editor'),
-              ),
+              if (context.read<EditorProvider>().activeFile?.extension == 'dart')
+                PopupMenuItem(
+                  value: 'visual_editor',
+                  height: 40,
+                  child: _PopupItem(
+                      icon: Icons.auto_awesome_outlined,
+                      label: 'Visual Editor'),
+                ),
+              if (widget.project.sdk == SdkType.flutter ||
+                  widget.project.sdk == SdkType.androidSdk)
+                PopupMenuItem(
+                  value: 'repair_android',
+                  height: 40,
+                  child: _PopupItem(
+                      icon: Icons.build_circle_outlined,
+                      label: 'Reparar Android (Termux)'),
+                ),
               PopupMenuItem(
                 value: 'close',
                 height: 40,
@@ -1167,6 +1291,37 @@ class _WorkspaceAppBarState extends State<_WorkspaceAppBar> {
       ],
     );
   }
+}
+
+/// Patches an existing Flutter or native-Android project's gradle.properties:
+///  • Lowers Gradle JVM heap to -Xmx512m (prevents OOM-killer on Termux)
+///  • Injects android.aapt2FromMavenOverride pointing to the local ARM64 aapt2
+void _repairAndroidProject(BuildContext context) {
+  final project = context.read<ProjectManagerProvider>().activeProject;
+  if (project == null) return;
+
+  final script = project.sdk == SdkType.flutter
+      ? ProjectTemplate.repairFlutterAndroid(project.path)
+      : ProjectTemplate.repairNativeAndroid(project.path);
+
+  final termProv = context.read<TerminalProvider>();
+  final sessions = termProv.sessions;
+  if (sessions.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Abra o terminal primeiro antes de reparar.'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+    return;
+  }
+  sessions.first.writeCommand(script);
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(
+      content: Text('Executando reparação Android no terminal…'),
+      behavior: SnackBarBehavior.floating,
+    ),
+  );
 }
 
 Future<void> _confirmCloseProject(BuildContext context) async {
@@ -1278,35 +1433,38 @@ class _MainContentState extends State<_MainContent> {
     final liquidGlass = widget.liquidGlass;
     return LayoutBuilder(
       builder: (context, constraints) {
+        // The debug execution bar (36px) is positioned just above the peek bar
+        // as a Positioned widget so it never shifts the editor layout.
+        // The editor's bottom padding grows by that same 36px when DAP is
+        // active, keeping code lines clear of the bar.
+        const debugBarH = 36.0;
+        final isDebugActive =
+            context.select<DebugProvider, bool>((d) => d.isActive);
+        // When the debug bar is visible (36px), grow the editor's bottom
+        // padding so code lines stay clear of it.
+        final editorBottomPad = _BottomSheetPanelState._kPeekBarH ;
+
         final stack = Stack(
           children: [
-            // ── Editor + overlay + bottom sheet (column) ─────────────────
-            Column(
-              children: [
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.only(
-                      bottom: _BottomSheetPanelState._kPeekBarH,
-                    ),
-                    child: Focus(
-                      focusNode: _mainEditorFocusNode,
-                      canRequestFocus: false,
-                      skipTraversal: true,
-                      child: EditorArea(
-                        editorTheme: context.watch<ExtensionsProvider>().activeEditorTheme ??
-                            editorThemeFromScheme(Theme.of(context).colorScheme),
-                        showSymbolBar: false,
-                        fontSize: settings.fontSize,
-                        fontFamily: settings.fontFamily,
-                        configureProps: settings.applyToProps,
-                      ),
-                    ),
-                  ),
+            // ── Editor (full height, dynamic bottom padding) ──────────────
+            Padding(
+              padding: EdgeInsets.only(bottom: editorBottomPad),
+              child: Focus(
+                focusNode: _mainEditorFocusNode,
+                canRequestFocus: false,
+                skipTraversal: true,
+                child: EditorArea(
+                  editorTheme: context.watch<ExtensionsProvider>().activeEditorTheme ??
+                      editorThemeFromScheme(Theme.of(context).colorScheme),
+                  showSymbolBar: false,
+                  fontSize: settings.fontSize,
+                  fontFamily: settings.fontFamily,
+                  configureProps: settings.applyToProps,
                 ),
-                // VS Code-style debug execution overlay
-                const _DebugExecutionOverlay(),
-              ],
+              ),
             ),
+            // ── Floating debug execution bar ─────────────────────────────
+            const _DebugExecutionOverlay(),
             // ── Bottom sheet overlaid on top (draggable) ─────────────────
             Positioned(
               left: 0,
@@ -1748,13 +1906,15 @@ class _BottomSheetPanelState extends State<_BottomSheetPanel>
                             Consumer2<LspProvider, DebugProvider>(
                               builder: (c, lsp, dbg, _) {
                                 final loading = lsp.status == LspStatus.starting ||
-                                    lsp.status == LspStatus.warming ||
+                                    lsp.status == LspStatus.warming /* ||
                                     dbg.status == DebugStatus.starting ||
-                                    dbg.isBuilding;
+                                    dbg.isBuilding */;
                                 return loading
                                     ? LinearProgressIndicator(
+                                      year2023: true,
                                         minHeight: 2,
                                         backgroundColor: cs.outlineVariant,
+                                        borderRadius: BorderRadius.circular(10),
                                       )
                                     : const SizedBox.shrink();
                               },
@@ -1858,10 +2018,21 @@ class _BottomSheetPanelState extends State<_BottomSheetPanel>
                                     initialWorkDir: widget.project.path,
                                     autoStart: false,
                                   ),
-                                  _ProblemsPanel(),
+                                  const _ProblemsPanel(),
                                   const DebugVariablesPanel(),
                                   const DebugCallStackPanel(),
-                                  const DebugOutputPanel(),
+                                  DebugOutputPanel(
+                                    onNavigate: (path, line) async {
+                                      final editor = context.read<EditorProvider>();
+                                      await editor.openFile(path);
+                                      final f = editor.openFiles
+                                          .where((f) => f.path == path)
+                                          .firstOrNull;
+                                      f?.controller?.cursor.moveTo(
+                                        CharPosition(line - 1, 0),
+                                      );
+                                    },
+                                  ),
                                 ],
                               ),
                       ),
@@ -1910,10 +2081,10 @@ class _PeekBar extends StatelessWidget {
     switch (initPhase) {
       case _InitPhase.creatingProject:
         label = s.peekCreatingProject;
-        showProgress = false;
+        showProgress = true;
       case _InitPhase.loadingProject:
         label = s.peekLoadingProject;
-        showProgress = false;
+        showProgress = true;
       case _InitPhase.startingLsp:
         label = s.peekStartingLsp;
         showProgress = true;
@@ -1939,12 +2110,24 @@ class _PeekBar extends StatelessWidget {
               fontWeight: FontWeight.w600,
             ),
           ),
-          const SizedBox(height: 3),
-          Text(
-            showProgress ? '...' : s.peekSwipeUp,
-            textAlign: TextAlign.center,
-            style: TextStyle(color: cs.onSurfaceVariant, fontSize: 10),
-          ),
+          const SizedBox(height: 4),
+          if (showProgress)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: LinearProgressIndicator(
+                year2023: true,
+                minHeight: 2,
+                borderRadius: BorderRadius.circular(10),
+                color: cs.primary,
+                backgroundColor: cs.outlineVariant,
+              ),
+            )
+          else
+            Text(
+              s.peekSwipeUp,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: cs.onSurfaceVariant, fontSize: 10),
+            ),
         ],
       ),
     );
@@ -2067,55 +2250,206 @@ class _SpecialCharsBar extends StatelessWidget {
 
 // ── Problems panel ────────────────────────────────────────────────────────────
 
+// ── Diagnostic data model ─────────────────────────────────────────────────────
+
+class _DiagItem {
+  final String filePath;
+  final String fileName;
+  final dynamic diagnostic; // DiagnosticRegion-like
+  int get line => (diagnostic.range.start.line as int);
+  int get col  => (diagnostic.range.start.column as int);
+  DiagnosticSeverity get severity => diagnostic.severity as DiagnosticSeverity;
+  String get message => diagnostic.message as String;
+  _DiagItem({required this.filePath, required this.fileName, required this.diagnostic});
+}
+
+// ── Problems Panel ────────────────────────────────────────────────────────────
+
 class _ProblemsPanel extends StatelessWidget {
+  const _ProblemsPanel();
+
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
     return Consumer<EditorProvider>(
       builder: (context, editor, _) {
-        final ctrl = editor.activeFile?.controller;
-        if (ctrl == null) {
-          return _PanelPlaceholder(
-              icon: Icons.info_outline, text: 'No file open');
+        final files = editor.openFiles;
+        if (files.isEmpty) {
+          return const _PanelPlaceholder(
+            icon: Icons.folder_open_outlined,
+            text: 'No files open',
+          );
         }
-        return ListenableBuilder(
-          listenable: ctrl,
+
+        // Merge all controllers into one Listenable so we rebuild when any
+        // file's diagnostics change.
+        final ctrls = files
+            .map((f) => f.controller)
+            .whereType<QuillCodeController>()
+            .toList();
+
+        return AnimatedBuilder(
+          animation: Listenable.merge(ctrls),
           builder: (context, _) {
-            final diagnostics = ctrl.diagnostics.all;
-            if (diagnostics.isEmpty) {
+            final cs = Theme.of(context).colorScheme;
+
+            // Aggregate diagnostics from all open files.
+            final items = <_DiagItem>[];
+            for (final f in files) {
+              final ctrl = f.controller;
+              if (ctrl == null) continue;
+              for (final d in ctrl.diagnostics.all) {
+                items.add(_DiagItem(
+                  filePath: f.path,
+                  fileName: f.name,
+                  diagnostic: d,
+                ));
+              }
+            }
+
+            if (items.isEmpty) {
               return _PanelPlaceholder(
                 icon: Icons.check_circle_outline,
                 iconColor: cs.primary,
                 text: 'No problems',
               );
             }
+
+            // Errors first, then warnings, then info
+            items.sort((a, b) => a.severity.index.compareTo(b.severity.index));
+
             return ListView.separated(
-              itemCount: diagnostics.length,
+              padding: const EdgeInsets.only(bottom: 8),
+              itemCount: items.length,
               separatorBuilder: (_, __) =>
                   Divider(color: cs.outlineVariant, height: 1),
               itemBuilder: (context, i) {
-                final d = diagnostics[i];
-                final isError = d.severity == DiagnosticSeverity.error;
-                return ListTile(
-                  dense: true,
-                  leading: Icon(
-                    isError
-                        ? Icons.error_outline
-                        : Icons.warning_amber_outlined,
-                    size: 16,
-                    color: isError ? cs.error : cs.tertiary,
+                final item = items[i];
+                final isError = item.severity == DiagnosticSeverity.error;
+                final isWarning = item.severity == DiagnosticSeverity.warning;
+                final iconColor = isError
+                    ? cs.error
+                    : isWarning
+                        ? cs.tertiary
+                        : cs.primary;
+                final icon = isError
+                    ? Icons.error_outline
+                    : isWarning
+                        ? Icons.warning_amber_outlined
+                        : Icons.info_outline;
+                return InkWell(
+                  onTap: () => _showDiagMenu(context, item, editor),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 8),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(icon, size: 14, color: iconColor),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                item.message,
+                                style: TextStyle(
+                                    color: cs.onSurface, fontSize: 12),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                '${item.fileName}  ·  Line ${item.line + 1}',
+                                style: TextStyle(
+                                    color: cs.onSurfaceVariant, fontSize: 10),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                  title: Text(d.message,
-                      style: TextStyle(color: cs.onSurface, fontSize: 12)),
-                  subtitle: Text('Line ${d.range.start.line + 1}',
-                      style:
-                          TextStyle(color: cs.onSurfaceVariant, fontSize: 11)),
                 );
               },
             );
           },
         );
       },
+    );
+  }
+
+  void _showDiagMenu(
+    BuildContext context,
+    _DiagItem item,
+    EditorProvider editor,
+  ) {
+    final cs = Theme.of(context).colorScheme;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (sheetCtx) => Container(
+        margin: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: cs.surface,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 12),
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: cs.onSurface.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Text(
+                item.message,
+                style: TextStyle(
+                    color: cs.onSurface,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600),
+              ),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: Icon(Icons.content_copy, size: 18, color: cs.primary),
+              title: const Text('Copiar mensagem'),
+              onTap: () {
+                Navigator.pop(sheetCtx);
+                Clipboard.setData(ClipboardData(
+                    text:
+                        '${item.fileName}:${item.line + 1}: ${item.message}'));
+              },
+            ),
+            ListTile(
+              leading:
+                  Icon(Icons.my_location_rounded, size: 18, color: cs.primary),
+              title: const Text('Ir para o local'),
+              subtitle: Text(
+                '${item.fileName} — Linha ${item.line + 1}, Col ${item.col + 1}',
+                style: const TextStyle(fontSize: 11),
+              ),
+              onTap: () async {
+                Navigator.pop(sheetCtx);
+                await editor.openFile(item.filePath);
+                final f = editor.openFiles
+                    .where((f) => f.path == item.filePath)
+                    .firstOrNull;
+                f?.controller?.cursor.moveTo(
+                  CharPosition(item.line, item.col),
+                );
+              },
+            ),
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -2146,129 +2480,311 @@ class _PanelPlaceholder extends StatelessWidget {
 
 // ── VS Code-style debug execution overlay ─────────────────────────────────────
 //
-// Appears at the bottom of the editor (above the bottom sheet) when a DAP
-// session is active. Shows status, current stopped location, and quick actions.
+// ── Platform picker dialog ────────────────────────────────────────────────────
 
-class _DebugExecutionOverlay extends StatelessWidget {
-  const _DebugExecutionOverlay();
+class _PlatformPickerDialog extends StatefulWidget {
+  final List<BuildPlatform> platforms;
+  final BuildPlatform initial;
+
+  const _PlatformPickerDialog({
+    required this.platforms,
+    required this.initial,
+  });
+
+  @override
+  State<_PlatformPickerDialog> createState() => _PlatformPickerDialogState();
+}
+
+class _PlatformPickerDialogState extends State<_PlatformPickerDialog> {
+  late BuildPlatform _selected;
+
+  @override
+  void initState() {
+    super.initState();
+    _selected = widget.initial;
+  }
+
+  static IconData _iconFor(BuildPlatform p) => switch (p) {
+    BuildPlatform.android || BuildPlatform.apk => Icons.android_rounded,
+    BuildPlatform.web => Icons.language_rounded,
+    BuildPlatform.linux => Icons.computer_rounded,
+    _ => Icons.play_circle_outline_rounded,
+  };
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<DebugProvider>(
-      builder: (context, dbg, _) {
-        if (!dbg.isActive) return const SizedBox.shrink();
-        final cs = Theme.of(context).colorScheme;
-        final paused = dbg.isPaused;
-
-        // Status colour: orange when paused, green when running
-        final statusColor = paused ? Colors.orange : Colors.green;
-
-        String statusText;
-        if (paused && dbg.stoppedFile != null && dbg.stoppedLine != null) {
-          final fileName = dbg.stoppedFile!.split('/').last;
-          statusText = 'Paused at $fileName:${dbg.stoppedLine}';
-        } else if (paused) {
-          statusText = 'Paused — ${dbg.stopReason ?? 'breakpoint'}';
-        } else if (dbg.status == DebugStatus.starting) {
-          statusText = 'Starting debug session…';
-        } else {
-          statusText = 'Running';
-        }
-
-        return Material(
-          elevation: 4,
-          color: cs.surfaceContainerHighest,
-          child: Container(
-            height: 36,
-            decoration: BoxDecoration(
-              border: Border(
-                top: BorderSide(color: statusColor, width: 2),
+    final cs = Theme.of(context).colorScheme;
+    return AlertDialog(
+      title: Row(
+        children: [
+          Icon(Icons.bug_report_rounded, color: cs.primary, size: 20),
+          const SizedBox(width: 8),
+          const Text('Selecionar dispositivo'),
+        ],
+      ),
+      contentPadding: const EdgeInsets.symmetric(vertical: 8),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: widget.platforms.map((p) {
+          final selected = p == _selected;
+          return InkWell(
+            onTap: () => setState(() => _selected = p),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                children: [
+                  Icon(
+                    _iconFor(p),
+                    color: selected ? cs.primary : cs.onSurfaceVariant,
+                    size: 22,
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Text(
+                      p.label,
+                      style: TextStyle(
+                        color: selected ? cs.primary : cs.onSurface,
+                        fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+                  if (selected)
+                    Icon(Icons.check_circle_rounded,
+                        size: 18, color: cs.primary),
+                ],
               ),
             ),
-            padding: const EdgeInsets.symmetric(horizontal: 10),
+          );
+        }).toList(),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton.icon(
+          icon: const Icon(Icons.play_arrow_rounded, size: 18),
+          label: const Text('Executar'),
+          onPressed: () => Navigator.pop(context, _selected),
+        ),
+      ],
+    );
+  }
+}
+
+// Appears at the bottom of the editor (above the bottom sheet) when a DAP
+// session is active. Shows status, current stopped location, and quick actions.
+
+class _DebugExecutionOverlay extends StatefulWidget {
+  const _DebugExecutionOverlay();
+
+  @override
+  State<_DebugExecutionOverlay> createState() => _DebugExecutionOverlayState();
+}
+
+class _DebugExecutionOverlayState extends State<_DebugExecutionOverlay> {
+  // Start near top-left, below the status bar area
+  Offset _pos = const Offset(16, 48);
+
+  void _onPan(DragUpdateDetails d, Size screen) {
+    setState(() {
+      final nx = (_pos.dx + d.delta.dx).clamp(0.0, screen.width - 10);
+      final ny = (_pos.dy + d.delta.dy).clamp(0.0, screen.height - 10);
+      _pos = Offset(nx, ny);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Wrap in a full-area Stack so Positioned works freely.
+    // Touches on the transparent background pass through to the workspace.
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Consumer<DebugProvider>(
+          builder: (context, dbg, _) {
+            if (!dbg.isActive) return const SizedBox.shrink();
+            return _FloatingDebugBar(
+              dbg: dbg,
+              pos: _pos,
+              onPan: (d) => _onPan(d, MediaQuery.of(context).size),
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+// ── Floating debug bar pill ───────────────────────────────────────────────────
+
+class _FloatingDebugBar extends StatelessWidget {
+  final DebugProvider dbg;
+  final Offset pos;
+  final ValueChanged<DragUpdateDetails> onPan;
+
+  const _FloatingDebugBar({
+    required this.dbg,
+    required this.pos,
+    required this.onPan,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final paused = dbg.isPaused;
+    final isMetro = dbg.isMetroSession;
+
+    final statusColor = dbg.status == DebugStatus.starting
+        ? Colors.blueGrey
+        : paused
+            ? Colors.orange
+            : Colors.green;
+
+    final String statusText;
+    if (dbg.status == DebugStatus.starting) {
+      statusText = isMetro ? 'Metro…' : 'Iniciando…';
+    } else if (paused && dbg.stoppedFile != null) {
+      statusText = '${dbg.stoppedFile!.split('/').last}:${dbg.stoppedLine}';
+    } else if (paused) {
+      statusText = dbg.stopReason ?? 'Pausado';
+    } else {
+      statusText = isMetro ? 'Metro' : 'Rodando';
+    }
+
+    return Positioned(
+      left: pos.dx,
+      top: pos.dy,
+      child: GestureDetector(
+        onPanUpdate: onPan,
+        child: Material(
+          elevation: 10,
+          borderRadius: BorderRadius.circular(14),
+          color: cs.surfaceContainerHighest,
+          shadowColor: Colors.black.withValues(alpha: 0.4),
+          child: Container(
+            height: 38,
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: statusColor.withValues(alpha: 0.5),
+                width: 1.5,
+              ),
+            ),
             child: Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                // Status dot
+                // ── Drag handle ──────────────────────────────────────────
+                Icon(
+                  Icons.drag_indicator_rounded,
+                  size: 16,
+                  color: cs.onSurfaceVariant.withValues(alpha: 0.45),
+                ),
+                const SizedBox(width: 4),
+
+                // ── Status dot ───────────────────────────────────────────
                 Container(
-                  width: 8,
-                  height: 8,
+                  width: 7,
+                  height: 7,
                   decoration: BoxDecoration(
                     color: statusColor,
                     shape: BoxShape.circle,
                   ),
                 ),
-                const SizedBox(width: 8),
-                Icon(Icons.bug_report_rounded,
-                    size: 13, color: cs.primary),
-                const SizedBox(width: 4),
-                Expanded(
+                const SizedBox(width: 5),
+
+                // ── Status label ─────────────────────────────────────────
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 88),
                   child: Text(
                     statusText,
                     style: TextStyle(
                       fontSize: 11,
+                      fontWeight: FontWeight.w600,
                       color: cs.onSurface,
-                      fontWeight: FontWeight.w500,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                // Quick actions
-                _OverlayBtn(
-                  icon: Icons.play_arrow_rounded,
-                  tooltip: 'Continue',
-                  enabled: paused,
-                  color: Colors.green,
-                  onTap: () => dbg.continueExec(),
+
+                // ── Divider ──────────────────────────────────────────────
+                Container(
+                  width: 1,
+                  height: 20,
+                  margin: const EdgeInsets.symmetric(horizontal: 6),
+                  color: cs.outlineVariant.withValues(alpha: 0.5),
                 ),
-                _OverlayBtn(
-                  icon: Icons.pause_rounded,
-                  tooltip: 'Pause',
-                  enabled: dbg.isRunning,
-                  onTap: () => dbg.pause(),
-                ),
-                _OverlayBtn(
-                  icon: Icons.redo_rounded,
-                  tooltip: 'Step Over',
-                  enabled: paused,
-                  onTap: () => dbg.stepOver(),
-                ),
-                _OverlayBtn(
-                  icon: Icons.south_rounded,
-                  tooltip: 'Step In',
-                  enabled: paused,
-                  onTap: () => dbg.stepIn(),
-                ),
-                _OverlayBtn(
-                  icon: Icons.north_rounded,
-                  tooltip: 'Step Out',
-                  enabled: paused,
-                  onTap: () => dbg.stepOut(),
-                ),
-                _OverlayBtn(
-                  icon: Icons.electric_bolt_rounded,
-                  tooltip: 'Hot Reload',
-                  enabled: dbg.isRunning,
-                  color: Colors.orange,
-                  onTap: () => dbg.hotReload(),
-                ),
-                _OverlayBtn(
-                  icon: Icons.refresh_rounded,
-                  tooltip: 'Restart',
-                  enabled: paused || dbg.isRunning,
-                  onTap: () => dbg.restart(),
-                ),
+
+                // ── Context-sensitive buttons ────────────────────────────
+                if (!isMetro && paused) ...[
+                  _OverlayBtn(
+                    icon: Icons.play_arrow_rounded,
+                    tooltip: 'Continuar',
+                    color: Colors.green,
+                    onTap: dbg.continueExec,
+                  ),
+                  _OverlayBtn(
+                    icon: Icons.redo_rounded,
+                    tooltip: 'Step Over',
+                    onTap: dbg.stepOver,
+                  ),
+                  _OverlayBtn(
+                    icon: Icons.south_rounded,
+                    tooltip: 'Step In',
+                    onTap: dbg.stepIn,
+                  ),
+                  _OverlayBtn(
+                    icon: Icons.north_rounded,
+                    tooltip: 'Step Out',
+                    onTap: dbg.stepOut,
+                  ),
+                ] else if (!isMetro && dbg.isRunning) ...[
+                  _OverlayBtn(
+                    icon: Icons.pause_rounded,
+                    tooltip: 'Pausar',
+                    onTap: dbg.pause,
+                  ),
+                  _OverlayBtn(
+                    icon: Icons.electric_bolt_rounded,
+                    tooltip: 'Hot Reload',
+                    color: Colors.orange,
+                    onTap: dbg.hotReload,
+                  ),
+                  _OverlayBtn(
+                    icon: Icons.refresh_rounded,
+                    tooltip: 'Restart',
+                    onTap: dbg.restart,
+                  ),
+                ] else if (isMetro && dbg.isRunning) ...[
+                  _OverlayBtn(
+                    icon: Icons.electric_bolt_rounded,
+                    tooltip: 'Recarregar Bundle',
+                    color: Colors.orange,
+                    onTap: dbg.hotReload,
+                  ),
+                  _OverlayBtn(
+                    icon: Icons.refresh_rounded,
+                    tooltip: 'Reiniciar Metro',
+                    onTap: dbg.restart,
+                  ),
+                ],
+
+                // ── Stop — always shown ──────────────────────────────────
                 _OverlayBtn(
                   icon: Icons.stop_rounded,
-                  tooltip: 'Stop',
-                  enabled: true,
+                  tooltip: 'Parar',
                   color: cs.error,
-                  onTap: () => dbg.stopSession(),
+                  onTap: dbg.stopSession,
                 ),
+
+                const SizedBox(width: 2),
               ],
             ),
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 }
@@ -2276,14 +2792,12 @@ class _DebugExecutionOverlay extends StatelessWidget {
 class _OverlayBtn extends StatelessWidget {
   final IconData icon;
   final String tooltip;
-  final bool enabled;
   final Color? color;
   final VoidCallback onTap;
 
   const _OverlayBtn({
     required this.icon,
     required this.tooltip,
-    required this.enabled,
     required this.onTap,
     this.color,
   });
@@ -2295,15 +2809,11 @@ class _OverlayBtn extends StatelessWidget {
     return Tooltip(
       message: tooltip,
       child: InkWell(
-        onTap: enabled ? onTap : null,
-        borderRadius: BorderRadius.circular(4),
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(6),
         child: Padding(
-          padding: const EdgeInsets.all(4),
-          child: Icon(
-            icon,
-            size: 16,
-            color: enabled ? c : c.withValues(alpha: 0.25),
-          ),
+          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 6),
+          child: Icon(icon, size: 17, color: c),
         ),
       ),
     );

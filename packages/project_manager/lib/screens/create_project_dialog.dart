@@ -11,7 +11,23 @@ import 'package:provider/provider.dart';
 import 'package:sdk_manager/sdk_manager.dart';
 import 'package:terminal_pkg/terminal_pkg.dart';
 
+import '../project_template.dart';
 import '../providers/project_manager_provider.dart';
+
+// Min SDK API level → Android version name
+const _kMinSdkVersions = <int, String>{
+  21: 'Android 5.0 (Lollipop)',
+  23: 'Android 6.0 (Marshmallow)',
+  24: 'Android 7.0 (Nougat)',
+  26: 'Android 8.0 (Oreo)',
+  28: 'Android 9 (Pie)',
+  29: 'Android 10',
+  30: 'Android 11',
+  31: 'Android 12',
+  33: 'Android 13 (Tiramisu)',
+  34: 'Android 14',
+  35: 'Android 15',
+};
 
 /// Full-screen project creation form.
 class CreateProjectScreen extends StatefulWidget {
@@ -54,6 +70,15 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
   ValueNotifier<double>? _progressNotifier;
   Timer? _progressTimer;
 
+  // Android-specific options
+  String _androidLanguage = 'Kotlin';
+  int _androidMinSdk = 24;
+  AndroidTemplate _androidTemplate = AndroidTemplate.emptyActivity;
+  // Flutter-specific options
+  FlutterTemplate _flutterTemplate = FlutterTemplate.counterApp;
+  // React Native-specific options
+  ReactNativeTemplate _rnTemplate = ReactNativeTemplate.blank;
+
   // SDKs that use a package/bundle identifier
   static const _pkgSdks = {SdkType.flutter, SdkType.androidSdk, SdkType.reactNative};
 
@@ -92,12 +117,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
     _nameCtrl.addListener(_syncPackage);
   }
 
-  /// Returns 'application', 'application_1', 'application_2', … whichever
-  /// is the first name whose folder does not yet exist in the projects dir.
-  /// For remote projects, skips local FS check.
   String _nextAvailableName() {
     if (widget.remoteProjectsPath != null) return 'application';
-    final base = 'application';
+    const base = 'application';
     final dir = RuntimeEnvir.projectsPath;
     if (!Directory('$dir/$base').existsSync()) return base;
     for (int i = 1; ; i++) {
@@ -120,22 +142,50 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
     _packageCtrl.dispose();
     _progressTimer?.cancel();
     _progressNotifier?.dispose();
-    // Complete the creation completer so the awaiting callback doesn't hang
-    // if the screen is dismissed early (e.g. Android back button).
     _createDone?.complete();
     _termProvider.dispose();
     super.dispose();
   }
 
+  Future<void> _pickLanguage() async {
+    final result = await _showFrostedPicker<String>(
+      context: context,
+      title: 'Linguagem',
+      items: const ['Kotlin', 'Java'],
+      current: _androidLanguage,
+      label: (v) => v,
+    );
+    if (result != null && mounted) {
+      setState(() {
+        _androidLanguage = result;
+        if (result == 'Java' &&
+            _androidTemplate == AndroidTemplate.emptyCompose) {
+          _androidTemplate = AndroidTemplate.emptyActivity;
+        }
+      });
+    }
+  }
+
+  Future<void> _pickMinSdk() async {
+    final result = await _showFrostedPicker<int>(
+      context: context,
+      title: 'SDK Mínimo',
+      items: _kMinSdkVersions.keys.toList(),
+      current: _androidMinSdk,
+      label: (v) => 'API $v  ·  ${_kMinSdkVersions[v] ?? ''}',
+    );
+    if (result != null && mounted) {
+      setState(() => _androidMinSdk = result);
+    }
+  }
+
   Future<void> _pickSdk() async {
-    // When SSH is active, show the SDKs detected on the remote machine.
-    // Fall back to locally installed SDKs.
     final options = widget.isSshActive && _remoteSdkTypes.isNotEmpty
         ? _remoteSdkTypes
         : context.read<SdkManagerProvider>().installedSdks;
     if (options.isEmpty) return;
 
-    final result = await showThemedDialog<SdkType>(
+    final result = await showDialog<SdkType>(
       context: context,
       builder: (ctx) => _SdkPickerDialog(
         options: options,
@@ -147,7 +197,6 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
 
   void _showProgressDialog(String name) {
     _progressNotifier = ValueNotifier(0.0);
-    // Animate: exponential approach toward 85% while work runs in background.
     _progressTimer = Timer.periodic(const Duration(milliseconds: 150), (_) {
       if (_progressNotifier == null) return;
       final remaining = 0.85 - _progressNotifier!.value;
@@ -180,12 +229,17 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
     setState(() => _creating = true);
     _showProgressDialog(name);
 
-    // Prefer the installed JSON extension's newProjectCmd if available.
     final extProv = context.read<ExtensionsProvider>();
     final ext = extProv.availableSdks
         .where((e) => e.sdk == _selectedSdk!.name)
         .firstOrNull;
-    final overrideCmd = ext?.sdkConfig?.newProjectCmd;
+    final rawOverride = ext?.sdkConfig?.newProjectCmd ?? '';
+    final overrideCmd = (rawOverride.isNotEmpty &&
+            !(_selectedSdk == SdkType.reactNative &&
+                (rawOverride.contains('--no-install') ||
+                    rawOverride.contains('--template'))))
+        ? rawOverride
+        : null;
 
     final pm = context.read<ProjectManagerProvider>();
     final project = await pm.createProject(
@@ -194,6 +248,11 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
       newProjectCmd: overrideCmd,
       projectsBasePath: widget.remoteProjectsPath,
       remoteIsWindows: widget.remoteIsWindows,
+      androidLanguage: _androidLanguage.toLowerCase(),
+      androidMinSdk: _androidMinSdk,
+      androidTemplate: _androidTemplate,
+      flutterTemplate: _flutterTemplate,
+      rnTemplate: _rnTemplate,
       runInTerminal: (script) async {
         await _termProvider.createSession(
           label: 'Criando $name',
@@ -202,28 +261,22 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
         final session = _termProvider.active;
         if (session == null) return;
 
-        if (widget.sshTerminalSetup != null) {
-          // Set up exit listener BEFORE writing the command to avoid a race
-          // where the shell exits before the listener is registered.
-          _createDone = Completer<void>();
-          final prev = session.onExit;
-          session.onExit = (code) {
-            prev?.call(code);
+        _createDone = Completer<void>();
+        final prev = session.onExit;
+        session.onExit = (code) {
+          prev?.call(code);
+          if (!_createDone!.isCompleted) _createDone!.complete();
+        };
+
+        session.writeCommand('$script; exit');
+
+        await _createDone!.future.timeout(
+          const Duration(minutes: 8),
+          onTimeout: () {
             if (!_createDone!.isCompleted) _createDone!.complete();
-          };
-
-          // Append exit so the shell closes when the create command finishes,
-          // letting onExit fire to signal completion.
-          // Both PowerShell (Windows SSH default) and POSIX shells use ';'.
-          session.writeCommand('$script; exit');
-
-          // Wait for the shell to exit (= create command completed).
-          await _createDone!.future;
-          _createDone = null;
-        } else {
-          // Local: just write the command; terminal stays open for user to see output.
-          session.writeCommand(script);
-        }
+          },
+        );
+        _createDone = null;
       },
     );
 
@@ -244,27 +297,24 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
         : sdkMgr.installedSdks.isEmpty);
 
     return Scaffold(
-    //  backgroundColor: cs.surface,
       appBar: AppBar(
-      ///  backgroundColor: cs.surface,
         elevation: 0,
         scrolledUnderElevation: 0,
         automaticallyImplyLeading: false,
-        title:  Text(
-  "L A Y E R",
-  style: GoogleFonts.montserrat( // Ou .inter, .poppins, etc.
-    fontSize: 18,
-    fontWeight: FontWeight.w400,
-    letterSpacing: 5.0,
-  //  color: Colors.white.withOpacity(0.9),
-  ),
-),
+        title: Text(
+          'L A Y E R',
+          style: GoogleFonts.montserrat(
+            fontSize: 18,
+            fontWeight: FontWeight.w400,
+            letterSpacing: 5.0,
+          ),
+        ),
         centerTitle: true,
       ),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Title ───────────────────────────────────────────────────────
+          // ── Title ──────────────────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
             child: Text(
@@ -277,7 +327,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
             ),
           ),
 
-          // ── Scrollable fields ────────────────────────────────────────────
+          // ── Scrollable fields ───────────────────────────────────────────────
           Expanded(
             child: SingleChildScrollView(
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
@@ -285,7 +335,8 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   // SSH indicator banner
-                  if (widget.isSshActive && widget.remoteProjectsPath != null) ...[
+                  if (widget.isSshActive &&
+                      widget.remoteProjectsPath != null) ...[
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
@@ -311,7 +362,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                     const SizedBox(height: 12),
                   ],
 
-                  // SDK selector tile
+                  // SDK selector
                   if (detecting)
                     _SdkDetectingTile()
                   else if (noSdks)
@@ -324,32 +375,13 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
 
                   const SizedBox(height: 16),
 
-                  // Project name field
+                  // Project name
                   TextField(
                     controller: _nameCtrl,
                     enabled: !_creating,
-                    style: GoogleFonts.openSans(color: cs.onSurface, fontSize: 15),
-                    decoration: InputDecoration(
-                      labelText: s.projectName,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: cs.outline),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide:
-                            BorderSide(color: cs.primary, width: 2),
-                      ),
-                      disabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: cs.outlineVariant),
-                      ),
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 14),
-                    ),
+                    style:
+                        GoogleFonts.openSans(color: cs.onSurface, fontSize: 15),
+                    decoration: _inputDeco(context, s.projectName),
                     onChanged: (_) => setState(() {}),
                   ),
 
@@ -359,27 +391,135 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                     TextField(
                       controller: _packageCtrl,
                       enabled: !_creating,
-                      style: GoogleFonts.openSans(color: cs.onSurface, fontSize: 15),
-                      decoration: InputDecoration(
-                        labelText: s.packageName,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide(color: cs.outline),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide:
-                              BorderSide(color: cs.primary, width: 2),
-                        ),
-                        disabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide(color: cs.outlineVariant),
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 14),
+                      style: GoogleFonts.openSans(
+                          color: cs.onSurface, fontSize: 15),
+                      decoration: _inputDeco(context, s.packageName),
+                    ),
+                  ],
+
+                  // ── Flutter template picker ──────────────────────────────
+                  if (_selectedSdk == SdkType.flutter) ...[
+                    const SizedBox(height: 20),
+                    Text('Template',
+                        style: GoogleFonts.openSans(
+                            color: cs.onSurfaceVariant, fontSize: 12)),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      height: 196,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        clipBehavior: Clip.none,
+                        itemCount: FlutterTemplate.values.length,
+                        separatorBuilder: (_, __) =>
+                            const SizedBox(width: 12),
+                        itemBuilder: (ctx, i) {
+                          final t = FlutterTemplate.values[i];
+                          return _TemplateCard(
+                            label: t.label,
+                            description: t.description,
+                            preview: _FlutterTemplatePreview(template: t),
+                            selected: _flutterTemplate == t,
+                            onTap: _creating
+                                ? null
+                                : () => setState(() => _flutterTemplate = t),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+
+                  // ── React Native template picker ──────────────────────────
+                  if (_selectedSdk == SdkType.reactNative) ...[
+                    const SizedBox(height: 20),
+                    Text('Template',
+                        style: GoogleFonts.openSans(
+                            color: cs.onSurfaceVariant, fontSize: 12)),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      height: 196,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        clipBehavior: Clip.none,
+                        itemCount: ReactNativeTemplate.values.length,
+                        separatorBuilder: (_, __) =>
+                            const SizedBox(width: 12),
+                        itemBuilder: (ctx, i) {
+                          final t = ReactNativeTemplate.values[i];
+                          return _TemplateCard(
+                            label: t.label,
+                            description: t.description,
+                            preview: _RnTemplatePreview(template: t),
+                            selected: _rnTemplate == t,
+                            onTap: _creating
+                                ? null
+                                : () => setState(() => _rnTemplate = t),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+
+                  // ── Android-specific options ─────────────────────────────
+                  if (_selectedSdk == SdkType.androidSdk) ...[
+                    const SizedBox(height: 16),
+
+                    // Language picker
+                    _SelectTile(
+                      label: 'Linguagem',
+                      valueText: _androidLanguage,
+                      enabled: !_creating,
+                      onTap: _creating ? null : _pickLanguage,
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    // Min SDK picker
+                    _SelectTile(
+                      label: 'SDK Mínimo',
+                      valueText:
+                          'API $_androidMinSdk  ·  ${_kMinSdkVersions[_androidMinSdk] ?? ''}',
+                      enabled: !_creating,
+                      onTap: _creating ? null : _pickMinSdk,
+                    ),
+
+                    const SizedBox(height: 20),
+
+                    // Template section header
+                    Text(
+                      'Template',
+                      style: GoogleFonts.openSans(
+                        color: cs.onSurfaceVariant,
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+
+                    // Template picker (horizontal scroll)
+                    SizedBox(
+                      height: 196,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        clipBehavior: Clip.none,
+                        itemCount: AndroidTemplate.values.length,
+                        separatorBuilder: (_, __) =>
+                            const SizedBox(width: 12),
+                        itemBuilder: (ctx, i) {
+                          final t = AndroidTemplate.values[i];
+                          final disabled = _creating ||
+                              (t == AndroidTemplate.emptyCompose &&
+                                  _androidLanguage == 'Java');
+                          return _TemplateCard(
+                            label: t.label,
+                            description: t.description,
+                            preview: _AndroidTemplatePreview(template: t),
+                            selected: _androidTemplate == t,
+                            disabled: disabled,
+                            disabledReason: 'Kotlin only',
+                            onTap: disabled
+                                ? null
+                                : () => setState(() => _androidTemplate = t),
+                          );
+                        },
                       ),
                     ),
                   ],
@@ -390,7 +530,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
             ),
           ),
 
-          // ── Bottom buttons ───────────────────────────────────────────────
+          // ── Bottom buttons ─────────────────────────────────────────────────
           SafeArea(
             top: false,
             child: Padding(
@@ -402,22 +542,18 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                     onPressed:
                         _creating ? null : () => Navigator.pop(context),
                     style: OutlinedButton.styleFrom(
-                  //    padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(18)),
                     ),
                     child: Text(s.cancel),
                   ),
-                  
                   FilledButton(
                     onPressed: _canCreate ? _create : null,
                     style: FilledButton.styleFrom(
-                     // padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 14),
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(18)),
                     ),
-                    child: Text(
-                        _creating ? s.creating : s.createProject),
+                    child: Text(_creating ? s.creating : s.createProject),
                   ),
                 ],
               ),
@@ -427,9 +563,31 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
       ),
     );
   }
+
+  InputDecoration _inputDeco(BuildContext context, String label) {
+    final cs = Theme.of(context).colorScheme;
+    return InputDecoration(
+      labelText: label,
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: cs.outline),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: cs.primary, width: 2),
+      ),
+      disabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: cs.outlineVariant),
+      ),
+      contentPadding:
+          const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+    );
+  }
 }
 
-// ── SDK selector tile ─────────────────────────────────────────────────────────
+// ── SDK selector tile ──────────────────────────────────────────────────────────
 
 class _SdkSelectorTile extends StatelessWidget {
   final SdkType? selected;
@@ -458,9 +616,7 @@ class _SdkSelectorTile extends StatelessWidget {
                   Text(
                     'SDK',
                     style: GoogleFonts.openSans(
-                      color: cs.onSurfaceVariant,
-                      fontSize: 12,
-                    ),
+                        color: cs.onSurfaceVariant, fontSize: 12),
                   ),
                   const SizedBox(height: 2),
                   Text(
@@ -477,6 +633,174 @@ class _SdkSelectorTile extends StatelessWidget {
                 ],
               ),
             ),
+            Icon(Icons.arrow_drop_down_rounded, color: cs.onSurfaceVariant),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Frosted picker dialog ──────────────────────────────────────────────────────
+
+Future<T?> _showFrostedPicker<T>({
+  required BuildContext context,
+  required String title,
+  required List<T> items,
+  required T current,
+  required String Function(T) label,
+}) {
+  final cs = Theme.of(context).colorScheme;
+  return showDialog<T>(
+    context: context,
+    barrierColor: Colors.transparent,
+    builder: (ctx) => Stack(
+      children: [
+        // Frosted backdrop — tap outside to dismiss
+        GestureDetector(
+          onTap: () => Navigator.pop(ctx),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
+            child: Container(
+              color: Colors.black.withValues(alpha: 0.35),
+            ),
+          ),
+        ),
+        // Centered dialog card
+        Center(
+          child: Material(
+            type: MaterialType.transparency,
+            child: Container(
+              constraints:
+                  const BoxConstraints(maxWidth: 320, maxHeight: 480),
+              margin: const EdgeInsets.symmetric(horizontal: 24),
+              decoration: BoxDecoration(
+                color: cs.surface,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.22),
+                    blurRadius: 36,
+                    offset: const Offset(0, 10),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 18, 20, 12),
+                    child: Text(
+                      title,
+                      style: GoogleFonts.openSans(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: cs.onSurface,
+                      ),
+                    ),
+                  ),
+                  Divider(height: 1, color: cs.outlineVariant),
+                  Flexible(
+                    child: ListView(
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      shrinkWrap: true,
+                      children: items.map((item) {
+                        final isSel = item == current;
+                        return InkWell(
+                          onTap: () => Navigator.pop(ctx, item),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 20, vertical: 13),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    label(item),
+                                    style: GoogleFonts.openSans(
+                                      fontSize: 14,
+                                      fontWeight: isSel
+                                          ? FontWeight.w600
+                                          : FontWeight.normal,
+                                      color: isSel
+                                          ? cs.primary
+                                          : cs.onSurface,
+                                    ),
+                                  ),
+                                ),
+                                if (isSel)
+                                  Icon(Icons.check_rounded,
+                                      size: 18, color: cs.primary),
+                              ],
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+// ── Select tile (opens frosted picker) ────────────────────────────────────────
+
+class _SelectTile extends StatelessWidget {
+  final String label;
+  final String valueText;
+  final bool enabled;
+  final VoidCallback? onTap;
+
+  const _SelectTile({
+    required this.label,
+    required this.valueText,
+    this.enabled = true,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          border: Border.all(
+              color: enabled ? cs.outline : cs.outlineVariant),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: GoogleFonts.openSans(
+                        color: cs.onSurfaceVariant, fontSize: 12),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    valueText,
+                    style: GoogleFonts.openSans(
+                      color: enabled
+                          ? cs.onSurface
+                          : cs.onSurfaceVariant,
+                      fontSize: 15,
+                    ),
+                  ),
+                ],
+              ),
+            ),
             Icon(Icons.arrow_drop_down_rounded,
                 color: cs.onSurfaceVariant),
           ],
@@ -486,7 +810,753 @@ class _SdkSelectorTile extends StatelessWidget {
   }
 }
 
-// ── SDK picker dialog ─────────────────────────────────────────────────────────
+// ── Generic template card ──────────────────────────────────────────────────────
+
+class _TemplateCard extends StatelessWidget {
+  final String label;
+  final String description;
+  final Widget preview;
+  final bool selected;
+  final bool disabled;
+  final String? disabledReason;
+  final VoidCallback? onTap;
+
+  const _TemplateCard({
+    required this.label,
+    required this.description,
+    required this.preview,
+    required this.selected,
+    this.disabled = false,
+    this.disabledReason,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        width: 140,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: selected
+                ? cs.primary
+                : disabled
+                    ? cs.outlineVariant.withValues(alpha: 0.4)
+                    : cs.outlineVariant,
+            width: selected ? 2 : 1,
+          ),
+          color: selected
+              ? cs.primaryContainer.withValues(alpha: 0.25)
+              : cs.surfaceContainerLowest,
+        ),
+        child: Opacity(
+          opacity: disabled ? 0.4 : 1.0,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Preview area (60%)
+              Expanded(
+                flex: 3,
+                child: ClipRRect(
+                  borderRadius:
+                      const BorderRadius.vertical(top: Radius.circular(13)),
+                  child: preview,
+                ),
+              ),
+              // Text area (40%)
+              Expanded(
+                flex: 2,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 6),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              label,
+                              style: GoogleFonts.openSans(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                                color: selected ? cs.primary : cs.onSurface,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (selected)
+                            Icon(Icons.check_circle_rounded,
+                                size: 14, color: cs.primary),
+                        ],
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        description,
+                        style: GoogleFonts.openSans(
+                          fontSize: 10,
+                          color: cs.onSurfaceVariant,
+                          height: 1.3,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (disabled && disabledReason != null) ...[
+                        const SizedBox(height: 3),
+                        Text(
+                          disabledReason!,
+                          style: GoogleFonts.openSans(
+                            fontSize: 9,
+                            color: cs.error,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Template visual previews ───────────────────────────────────────────────────
+
+// Shared helpers
+Widget _previewBar({double width = 58, double height = 7, Color? color}) =>
+    Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: color ?? const Color(0xFFBDBDBD),
+        borderRadius: BorderRadius.circular(4),
+      ),
+    );
+
+Widget _previewAppBar({Color color = const Color(0xFF1565C0)}) => Container(
+      height: 24,
+      color: color,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: Row(
+        children: [
+          Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.8),
+                  shape: BoxShape.circle)),
+          const SizedBox(width: 6),
+          Container(
+              width: 46,
+              height: 5,
+              decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.55),
+                  borderRadius: BorderRadius.circular(3))),
+        ],
+      ),
+    );
+
+Widget _previewBottomNavBar(
+        {int tabs = 3, Color active = const Color(0xFF1565C0)}) =>
+    Container(
+      height: 32,
+      decoration: const BoxDecoration(
+          color: Colors.white,
+          boxShadow: [
+            BoxShadow(color: Colors.black12, blurRadius: 6, offset: Offset(0, -2))
+          ]),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: List.generate(tabs, (i) {
+          final isActive = i == 0;
+          return Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                  width: 20,
+                  height: 12,
+                  decoration: BoxDecoration(
+                      color: isActive ? active : const Color(0xFFBDBDBD),
+                      borderRadius: BorderRadius.circular(4))),
+              const SizedBox(height: 2),
+              Container(
+                  width: 24,
+                  height: 4,
+                  decoration: BoxDecoration(
+                      color: isActive ? active : const Color(0xFFBDBDBD),
+                      borderRadius: BorderRadius.circular(2))),
+            ],
+          );
+        }),
+      ),
+    );
+
+// ── Android previews ──────────────────────────────────────────────────────────
+
+class _AndroidTemplatePreview extends StatelessWidget {
+  final AndroidTemplate template;
+  const _AndroidTemplatePreview({required this.template});
+
+  @override
+  Widget build(BuildContext context) => switch (template) {
+    AndroidTemplate.emptyActivity    => _empty(),
+    AndroidTemplate.basicViews       => _basicViews(),
+    AndroidTemplate.emptyCompose     => _compose(),
+    AndroidTemplate.bottomNavigation => _bottomNav(),
+    AndroidTemplate.loginActivity    => _login(),
+    AndroidTemplate.scrollingActivity => _scrolling(),
+    AndroidTemplate.navigationDrawer => _navDrawer(),
+  };
+
+  Widget _empty() => Container(
+      color: const Color(0xFFF5F5F5),
+      child: Center(child: _previewBar()));
+
+  Widget _basicViews() => Column(children: [
+      _previewAppBar(),
+      Expanded(
+        child: Container(
+          color: const Color(0xFFF5F5F5),
+          child: Stack(children: [
+            Center(child: _previewBar()),
+            Positioned(
+              right: 10, bottom: 10,
+              child: Container(
+                width: 22, height: 22,
+                decoration: const BoxDecoration(
+                    color: Color(0xFFFB8C00), shape: BoxShape.circle,
+                    boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2))]),
+                child: const Icon(Icons.add, size: 13, color: Colors.white),
+              ),
+            ),
+          ]),
+        ),
+      ),
+    ]);
+
+  Widget _compose() => Container(
+      decoration: const BoxDecoration(
+          gradient: LinearGradient(
+              begin: Alignment.topLeft, end: Alignment.bottomRight,
+              colors: [Color(0xFF6750A4), Color(0xFF7C4DFF)])),
+      child: Center(
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Container(
+            width: 30, height: 30,
+            decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.4), width: 1.5)),
+            child: const Icon(Icons.widgets_rounded, size: 16, color: Colors.white),
+          ),
+          const SizedBox(height: 8),
+          _previewBar(width: 54, color: Colors.white.withValues(alpha: 0.75)),
+          const SizedBox(height: 4),
+          _previewBar(width: 36, color: Colors.white.withValues(alpha: 0.4)),
+        ]),
+      ));
+
+  Widget _bottomNav() => Column(children: [
+      Expanded(child: Container(color: const Color(0xFFF5F5F5),
+          child: Center(child: _previewBar()))),
+      _previewBottomNavBar(),
+    ]);
+
+  Widget _login() => Container(
+      color: const Color(0xFFF5F5F5),
+      padding: const EdgeInsets.all(10),
+      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        _previewBar(width: 40, height: 9, color: const Color(0xFF424242)),
+        const SizedBox(height: 10),
+        Container(height: 18, decoration: BoxDecoration(
+            border: Border.all(color: const Color(0xFF9E9E9E)),
+            borderRadius: BorderRadius.circular(4),
+            color: Colors.white)),
+        const SizedBox(height: 6),
+        Container(height: 18, decoration: BoxDecoration(
+            border: Border.all(color: const Color(0xFF9E9E9E)),
+            borderRadius: BorderRadius.circular(4),
+            color: Colors.white)),
+        const SizedBox(height: 10),
+        Container(height: 20, decoration: BoxDecoration(
+            color: const Color(0xFF1565C0),
+            borderRadius: BorderRadius.circular(4)),
+          child: Center(child: _previewBar(width: 36, height: 5, color: Colors.white)),
+        ),
+      ]));
+
+  Widget _scrolling() => Column(children: [
+      Container(
+        height: 48,
+        color: const Color(0xFF1565C0),
+        alignment: Alignment.bottomLeft,
+        padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+        child: _previewBar(width: 52, color: Colors.white.withValues(alpha: 0.8)),
+      ),
+      Expanded(
+        child: Container(
+          color: const Color(0xFFF5F5F5),
+          padding: const EdgeInsets.all(8),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            _previewBar(width: 80, height: 5),
+            const SizedBox(height: 4),
+            _previewBar(width: 60, height: 5),
+            const SizedBox(height: 4),
+            _previewBar(width: 70, height: 5),
+          ]),
+        ),
+      ),
+    ]);
+
+  Widget _navDrawer() => Row(children: [
+      Container(
+        width: 50,
+        color: const Color(0xFFFAFAFA),
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Container(height: 20, color: const Color(0xFF1565C0).withValues(alpha: 0.15),
+              margin: const EdgeInsets.only(bottom: 6)),
+          ...List.generate(3, (_) => Container(
+              height: 12, margin: const EdgeInsets.only(bottom: 4),
+              color: const Color(0xFFBDBDBD))),
+        ]),
+      ),
+      Expanded(
+        child: Column(children: [
+          _previewAppBar(),
+          Expanded(child: Container(color: const Color(0xFFF5F5F5),
+              child: Center(child: _previewBar()))),
+        ]),
+      ),
+    ]);
+}
+
+// ── Flutter previews ──────────────────────────────────────────────────────────
+
+class _FlutterTemplatePreview extends StatelessWidget {
+  final FlutterTemplate template;
+  const _FlutterTemplatePreview({required this.template});
+
+  @override
+  Widget build(BuildContext context) => switch (template) {
+    FlutterTemplate.counterApp   => _counter(),
+    FlutterTemplate.emptyApp     => _empty(),
+    FlutterTemplate.materialApp  => _material(),
+    FlutterTemplate.bottomNavApp => _bottomNav(),
+    FlutterTemplate.drawerApp    => _drawer(),
+    FlutterTemplate.loginScreen  => _login(),
+    FlutterTemplate.listApp      => _listView(),
+    FlutterTemplate.tabsApp      => _tabs(),
+  };
+
+  Widget _counter() => Column(children: [
+      _previewAppBar(color: const Color(0xFF1565C0)),
+      Expanded(
+        child: Container(
+          color: const Color(0xFFF5F5F5),
+          child: Stack(children: [
+            Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              _previewBar(width: 40, height: 5),
+              const SizedBox(height: 6),
+              Container(width: 28, height: 28,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: const Color(0xFF1565C0), width: 2)),
+                child: Center(child: _previewBar(width: 14, height: 5,
+                    color: const Color(0xFF1565C0)))),
+            ])),
+            Positioned(right: 10, bottom: 10,
+              child: Container(width: 22, height: 22,
+                decoration: const BoxDecoration(
+                    color: Color(0xFF1565C0), shape: BoxShape.circle),
+                child: const Icon(Icons.add, size: 13, color: Colors.white))),
+          ]),
+        ),
+      ),
+    ]);
+
+  Widget _empty() => Container(
+      color: const Color(0xFFF5F5F5),
+      child: Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        const Icon(Icons.flutter_dash, size: 28, color: Color(0xFF54C5F8)),
+        const SizedBox(height: 6),
+        _previewBar(width: 48),
+      ])));
+
+  Widget _material() => Column(children: [
+      _previewAppBar(color: const Color(0xFF6750A4)),
+      Expanded(
+        child: Container(
+          color: const Color(0xFFF3F0FA),
+          padding: const EdgeInsets.all(8),
+          child: Column(children: [
+            Container(height: 22, margin: const EdgeInsets.only(bottom: 6),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(6),
+                boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 3)]),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Row(children: [
+                Container(width: 8, height: 8, decoration: BoxDecoration(
+                    color: const Color(0xFF6750A4), shape: BoxShape.circle)),
+                const SizedBox(width: 6),
+                _previewBar(width: 40, height: 5),
+              ])),
+            Container(height: 22,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(6),
+                boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 3)]),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Row(children: [
+                Container(width: 8, height: 8, decoration: BoxDecoration(
+                    color: const Color(0xFF7D5260), shape: BoxShape.circle)),
+                const SizedBox(width: 6),
+                _previewBar(width: 36, height: 5),
+              ])),
+          ]),
+        ),
+      ),
+    ]);
+
+  Widget _bottomNav() => Column(children: [
+      _previewAppBar(color: const Color(0xFF6750A4)),
+      Expanded(child: Container(color: const Color(0xFFF5F5F5),
+          child: Center(child: _previewBar()))),
+      _previewBottomNavBar(active: const Color(0xFF6750A4)),
+    ]);
+
+  Widget _drawer() => Row(children: [
+      // Narrow drawer panel
+      Container(
+        width: 44,
+        color: const Color(0xFFF7F5FF),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Container(height: 28,
+              color: const Color(0xFF3F2C91).withValues(alpha: 0.12)),
+          const SizedBox(height: 6),
+          ...List.generate(3, (i) => Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+            child: Container(
+              height: 10,
+              decoration: BoxDecoration(
+                color: i == 0
+                    ? const Color(0xFF3F2C91).withValues(alpha: 0.3)
+                    : const Color(0xFFBDBDBD),
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+          )),
+        ]),
+      ),
+      // Main area
+      Expanded(child: Column(children: [
+        _previewAppBar(color: const Color(0xFF3F2C91)),
+        Expanded(child: Container(color: const Color(0xFFF5F5F5),
+            child: Center(child: _previewBar()))),
+      ])),
+    ]);
+
+  Widget _login() => Container(
+      color: const Color(0xFFF5F5F5),
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        Container(width: 28, height: 28,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: const Color(0xFF6750A4).withValues(alpha: 0.15),
+          ),
+          child: const Icon(Icons.lock_rounded,
+              size: 15, color: Color(0xFF6750A4)),
+        ),
+        const SizedBox(height: 6),
+        _previewBar(width: 34, height: 5, color: const Color(0xFF424242)),
+        const SizedBox(height: 8),
+        Container(height: 14, decoration: BoxDecoration(
+            border: Border.all(color: const Color(0xFFBDBDBD)),
+            borderRadius: BorderRadius.circular(4),
+            color: Colors.white)),
+        const SizedBox(height: 5),
+        Container(height: 14, decoration: BoxDecoration(
+            border: Border.all(color: const Color(0xFFBDBDBD)),
+            borderRadius: BorderRadius.circular(4),
+            color: Colors.white)),
+        const SizedBox(height: 8),
+        Container(height: 18,
+          decoration: BoxDecoration(
+              color: const Color(0xFF6750A4),
+              borderRadius: BorderRadius.circular(4)),
+          child: Center(child: _previewBar(
+              width: 28, height: 5, color: Colors.white)),
+        ),
+      ]));
+
+  Widget _listView() => Column(children: [
+      _previewAppBar(color: const Color(0xFF00796B)),
+      Expanded(child: Container(
+        color: Colors.white,
+        child: Column(children: [
+          ...List.generate(3, (i) => Column(children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              child: Row(children: [
+                Container(width: 12, height: 12,
+                    decoration: BoxDecoration(
+                        color: const Color(0xFF00796B).withValues(alpha: 0.25),
+                        shape: BoxShape.circle)),
+                const SizedBox(width: 7),
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  _previewBar(width: 50, height: 5),
+                  const SizedBox(height: 3),
+                  _previewBar(width: 36, height: 4),
+                ]),
+              ]),
+            ),
+            if (i < 2)
+              Container(height: 1, color: const Color(0xFFEEEEEE)),
+          ])),
+        ]),
+      )),
+    ]);
+
+  Widget _tabs() => Column(children: [
+      Container(
+        color: const Color(0xFF1565C0),
+        child: Column(children: [
+          // AppBar row
+          SizedBox(height: 24,
+            child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Align(alignment: Alignment.centerLeft,
+                child: _previewBar(width: 46, height: 5,
+                    color: Colors.white.withValues(alpha: 0.55))))),
+          // Tab row
+          Row(mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: List.generate(3, (i) => Column(children: [
+              SizedBox(height: 16,
+                child: Center(child: _previewBar(width: 20, height: 4,
+                    color: i == 0
+                        ? Colors.white
+                        : Colors.white.withValues(alpha: 0.4)))),
+              Container(height: 2, width: 30,
+                  color: i == 0 ? Colors.white : Colors.transparent),
+            ])),
+          ),
+        ]),
+      ),
+      Expanded(child: Container(color: const Color(0xFFF5F5F5),
+          child: Center(child: _previewBar()))),
+    ]);
+}
+
+// ── React Native previews ─────────────────────────────────────────────────────
+
+class _RnTemplatePreview extends StatelessWidget {
+  final ReactNativeTemplate template;
+  const _RnTemplatePreview({required this.template});
+
+  @override
+  Widget build(BuildContext context) => switch (template) {
+    ReactNativeTemplate.blank           => _blank(),
+    ReactNativeTemplate.blankTypescript => _blankTs(),
+    ReactNativeTemplate.tabs            => _tabs(),
+    ReactNativeTemplate.flatList        => _flatList(),
+    ReactNativeTemplate.settings        => _settings(),
+    ReactNativeTemplate.login           => _login(),
+  };
+
+  Widget _blank() => Container(
+      color: const Color(0xFF1C1E21),
+      child: Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        Container(width: 24, height: 24,
+          decoration: BoxDecoration(
+              color: const Color(0xFF61DAFB).withValues(alpha: 0.15),
+              shape: BoxShape.circle,
+              border: Border.all(color: const Color(0xFF61DAFB), width: 1.5)),
+          child: const Icon(Icons.code, size: 13, color: Color(0xFF61DAFB))),
+        const SizedBox(height: 8),
+        _previewBar(width: 46, color: Colors.white.withValues(alpha: 0.7)),
+      ])));
+
+  Widget _blankTs() => Container(
+      color: const Color(0xFF1C1E21),
+      child: Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        Container(width: 30, height: 22,
+          decoration: BoxDecoration(
+              color: const Color(0xFF3178C6),
+              borderRadius: BorderRadius.circular(4)),
+          child: Center(child: Text('TS',
+              style: TextStyle(color: Colors.white, fontSize: 11,
+                  fontWeight: FontWeight.bold)))),
+        const SizedBox(height: 8),
+        _previewBar(width: 46, color: Colors.white.withValues(alpha: 0.7)),
+      ])));
+
+  Widget _tabs() => Column(children: [
+      // Status bar
+      Container(height: 14, color: const Color(0xFF1C1E21)),
+      // Content
+      Expanded(child: Container(color: const Color(0xFF1C1E21),
+          child: Center(child: _previewBar(width: 48,
+              color: Colors.white.withValues(alpha: 0.7))))),
+      // Tab bar
+      Container(height: 36,
+        decoration: BoxDecoration(
+            color: const Color(0xFF2C2E33),
+            boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 8, offset: Offset(0, -2))]),
+        child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: List.generate(3, (i) {
+            final active = i == 0;
+            return Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Container(width: 18, height: 10,
+                decoration: BoxDecoration(
+                    color: active ? const Color(0xFF61DAFB) : const Color(0xFF555555),
+                    borderRadius: BorderRadius.circular(3))),
+              const SizedBox(height: 2),
+              Container(width: 22, height: 4,
+                decoration: BoxDecoration(
+                    color: active ? const Color(0xFF61DAFB) : const Color(0xFF555555),
+                    borderRadius: BorderRadius.circular(2))),
+            ]);
+          })),
+      ),
+    ]);
+
+  Widget _flatList() => Column(children: [
+      Container(height: 24, color: const Color(0xFF2196F3),
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        alignment: Alignment.centerLeft,
+        child: _previewBar(width: 38, height: 5,
+            color: Colors.white.withValues(alpha: 0.85)),
+      ),
+      Expanded(child: Container(
+        color: const Color(0xFF252628),
+        child: Column(children: [
+          ...List.generate(3, (i) => Column(children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                _previewBar(width: 56, height: 5,
+                    color: Colors.white.withValues(alpha: 0.8)),
+                const SizedBox(height: 3),
+                _previewBar(width: 40, height: 4,
+                    color: Colors.white.withValues(alpha: 0.4)),
+              ]),
+            ),
+            if (i < 2)
+              Container(height: 1,
+                  color: Colors.white.withValues(alpha: 0.07)),
+          ])),
+        ]),
+      )),
+    ]);
+
+  Widget _settings() => Container(
+      color: const Color(0xFF1C1E21),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(8, 10, 8, 4),
+          child: _previewBar(width: 38, height: 4,
+              color: Colors.white.withValues(alpha: 0.35)),
+        ),
+        Container(color: const Color(0xFF2C2E33),
+          child: Column(children: [
+            ...List.generate(2, (i) => Column(children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 10, vertical: 10),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    _previewBar(width: 48, height: 5,
+                        color: Colors.white.withValues(alpha: 0.75)),
+                    Container(width: 24, height: 13,
+                      decoration: BoxDecoration(
+                        color: i == 0
+                            ? const Color(0xFF61DAFB)
+                                .withValues(alpha: 0.85)
+                            : const Color(0xFF555555),
+                        borderRadius: BorderRadius.circular(7),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (i < 1)
+                Container(height: 1,
+                    color: Colors.white.withValues(alpha: 0.07)),
+            ])),
+          ]),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+          child: _previewBar(width: 32, height: 4,
+              color: Colors.white.withValues(alpha: 0.35)),
+        ),
+        Container(color: const Color(0xFF2C2E33),
+          padding: const EdgeInsets.symmetric(
+              horizontal: 10, vertical: 10),
+          child: _previewBar(width: 48, height: 5,
+              color: Colors.white.withValues(alpha: 0.75)),
+        ),
+      ]));
+
+  Widget _login() => Container(
+      color: const Color(0xFF1C1E21),
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        Container(width: 26, height: 26,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: const Color(0xFF2196F3).withValues(alpha: 0.18),
+            border: Border.all(
+                color: const Color(0xFF2196F3), width: 1.5),
+          ),
+          child: const Icon(Icons.lock_outline,
+              size: 13, color: Color(0xFF2196F3)),
+        ),
+        const SizedBox(height: 7),
+        _previewBar(width: 32, height: 5,
+            color: Colors.white.withValues(alpha: 0.8)),
+        const SizedBox(height: 9),
+        Container(height: 15,
+          decoration: BoxDecoration(
+            border: Border.all(
+                color: Colors.white.withValues(alpha: 0.18)),
+            borderRadius: BorderRadius.circular(4),
+            color: const Color(0xFF2C2E33),
+          ),
+        ),
+        const SizedBox(height: 5),
+        Container(height: 15,
+          decoration: BoxDecoration(
+            border: Border.all(
+                color: Colors.white.withValues(alpha: 0.18)),
+            borderRadius: BorderRadius.circular(4),
+            color: const Color(0xFF2C2E33),
+          ),
+        ),
+        const SizedBox(height: 9),
+        Container(height: 18,
+          decoration: BoxDecoration(
+            color: const Color(0xFF2196F3),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Center(child: _previewBar(
+              width: 28, height: 5, color: Colors.white)),
+        ),
+      ]));
+}
+
+// ── SDK picker dialog ──────────────────────────────────────────────────────────
 
 class _SdkPickerDialog extends StatelessWidget {
   final List<SdkType> options;
@@ -505,8 +1575,8 @@ class _SdkPickerDialog extends StatelessWidget {
         children: options.map((sdk) {
           final isSelected = sdk == selected;
           return ListTile(
-            leading: Text(sdk.icon,
-                style:  GoogleFonts.openSans(fontSize: 22)),
+            leading:
+                Text(sdk.icon, style: GoogleFonts.openSans(fontSize: 22)),
             title: Text(sdk.displayName),
             subtitle: Text(sdk.description,
                 style: GoogleFonts.openSans(
@@ -523,7 +1593,7 @@ class _SdkPickerDialog extends StatelessWidget {
   }
 }
 
-// ── SDK detecting tile ────────────────────────────────────────────────────────
+// ── SDK detecting tile ─────────────────────────────────────────────────────────
 
 class _SdkDetectingTile extends StatelessWidget {
   @override
@@ -541,14 +1611,13 @@ class _SdkDetectingTile extends StatelessWidget {
             width: 18,
             height: 18,
             child: CircularProgressIndicator(
-              strokeWidth: 2,
-              color: cs.primary,
-            ),
+                strokeWidth: 2, color: cs.primary),
           ),
           const SizedBox(width: 12),
           Text(
             'Detecting SDKs on remote machine…',
-            style: GoogleFonts.openSans(color: cs.onSurfaceVariant, fontSize: 14),
+            style: GoogleFonts.openSans(
+                color: cs.onSurfaceVariant, fontSize: 14),
           ),
         ],
       ),
@@ -556,7 +1625,7 @@ class _SdkDetectingTile extends StatelessWidget {
   }
 }
 
-// ── No SDK warning ────────────────────────────────────────────────────────────
+// ── No SDK warning ─────────────────────────────────────────────────────────────
 
 class _NoSdkWarning extends StatelessWidget {
   @override
@@ -576,7 +1645,8 @@ class _NoSdkWarning extends StatelessWidget {
           Expanded(
             child: Text(
               AppStrings.of(context).noSdkInstalled,
-              style: GoogleFonts.openSans(color: cs.onErrorContainer, fontSize: 14),
+              style: GoogleFonts.openSans(
+                  color: cs.onErrorContainer, fontSize: 14),
             ),
           ),
         ],
@@ -585,7 +1655,7 @@ class _NoSdkWarning extends StatelessWidget {
   }
 }
 
-// ── Creating progress dialog ──────────────────────────────────────────────────
+// ── Creating progress dialog ───────────────────────────────────────────────────
 
 class _CreatingProgressDialog extends StatelessWidget {
   final String projectName;
@@ -605,18 +1675,19 @@ class _CreatingProgressDialog extends StatelessWidget {
         children: [
           BackdropFilter(
             filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-            child: Container(color: Colors.black.withValues(alpha: 0.35)),
+            child:
+                Container(color: Colors.black.withValues(alpha: 0.35)),
           ),
           Center(
             child: Material(
               color: Colors.transparent,
               child: AlertDialog(
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20),
-                ),
+                    borderRadius: BorderRadius.circular(20)),
                 title: Row(
                   children: [
-                    Icon(Icons.folder_open_rounded, color: cs.primary, size: 22),
+                    Icon(Icons.folder_open_rounded,
+                        color: cs.primary, size: 22),
                     const SizedBox(width: 10),
                     const Text('Criando projeto'),
                   ],
@@ -624,7 +1695,8 @@ class _CreatingProgressDialog extends StatelessWidget {
                 content: ValueListenableBuilder<double>(
                   valueListenable: progressNotifier,
                   builder: (_, progress, __) {
-                    final pct = (progress * 100).clamp(0, 100).round();
+                    final pct =
+                        (progress * 100).clamp(0, 100).round();
                     return Column(
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -632,9 +1704,7 @@ class _CreatingProgressDialog extends StatelessWidget {
                         Text(
                           projectName,
                           style: GoogleFonts.openSans(
-                            color: cs.onSurfaceVariant,
-                            fontSize: 13,
-                          ),
+                              color: cs.onSurfaceVariant, fontSize: 13),
                           overflow: TextOverflow.ellipsis,
                         ),
                         const SizedBox(height: 16),
@@ -643,7 +1713,8 @@ class _CreatingProgressDialog extends StatelessWidget {
                           child: LinearProgressIndicator(
                             value: progress,
                             minHeight: 6,
-                            backgroundColor: cs.surfaceContainerHighest,
+                            backgroundColor:
+                                cs.surfaceContainerHighest,
                             valueColor: AlwaysStoppedAnimation(cs.primary),
                           ),
                         ),

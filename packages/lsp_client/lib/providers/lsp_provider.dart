@@ -56,6 +56,9 @@ class LspProvider extends ChangeNotifier {
       args: cmd.sublist(1),
       languageId: _languageId(extension),
       workspacePath: projectPath,
+      // Pass Termux PATH so the LSP process can find node, python, etc.
+      // Without this the process inherits the app's restricted environment.
+      environment: _envForExtension(extension),
     );
     _status = LspStatus.warming;
     notifyListeners();
@@ -94,7 +97,15 @@ class LspProvider extends ChangeNotifier {
       case 'py':
         return 'pylsp';
       case 'kt':
+      case 'kotlin':
         return 'kotlin-language-server';
+      case 'java':
+        // jdtls wrapper script installed by the Android SDK extension.
+        return 'jdtls -data ~/.jdtls-data';
+      case 'go':
+        return 'gopls';
+      case 'swift':
+        return 'sourcekit-lsp';
       default:
         return null;
     }
@@ -123,35 +134,191 @@ class LspProvider extends ChangeNotifier {
       return [customExe];
     }
 
-    String? exe;
-    List<String> args = [];
-
     switch (ext.toLowerCase()) {
       case 'dart':
-        // Use the dart VM binary directly (not the shell wrapper flutter/bin/dart)
-        // so it can be exec'd from Android without a shell interpreter.
-        exe = _dartVmPath;
-        args = ['language-server'];
+        // Use the Dart VM ELF binary directly — not the shell wrapper at
+        // flutter/bin/dart — so it can be exec'd without a shell interpreter.
+        final dart = _dartVmPath;
+        if (dart == null) {
+          debugPrint('[LspProvider] dart VM not found');
+          return null;
+        }
+        return [dart, 'language-server'];
+
       case 'js':
       case 'ts':
       case 'jsx':
       case 'tsx':
-        exe = '${RuntimeEnvir.usrPath}/bin/typescript-language-server';
-        args = ['--stdio'];
+        // npm global shims (e.g. $PREFIX/bin/typescript-language-server) are
+        // bash scripts. On Android without LD_PRELOAD=libtermux-exec.so, the
+        // #!/usr/bin/env shebang fails with ENOENT because /usr/bin/env doesn't
+        // exist outside Termux. We bypass the shim and run node + the real JS
+        // entry file directly.
+        final node = RuntimeEnvir.nodePath;
+        if (!File(node).existsSync()) {
+          debugPrint('[LspProvider] node not found at $node');
+          return null;
+        }
+        final nmRoot = '${RuntimeEnvir.usrPath}/lib/node_modules/typescript-language-server';
+        // Try known JS entry paths across typescript-language-server versions:
+        //   v3/v4 → lib/cli.mjs
+        //   v2    → out/cli.js
+        //   v1    → bin/server.js
+        for (final rel in const ['lib/cli.mjs', 'out/cli.js', 'bin/server.js']) {
+          final jsFile = '$nmRoot/$rel';
+          if (File(jsFile).existsSync()) {
+            debugPrint('[LspProvider] using node $jsFile');
+            return [node, jsFile, '--stdio'];
+          }
+        }
+        // Fallback: shim exists, run via bash (works when LD_PRELOAD is set)
+        final bash = RuntimeEnvir.bashPath;
+        final shim = '${RuntimeEnvir.usrPath}/bin/typescript-language-server';
+        if (File(bash).existsSync() && File(shim).existsSync()) {
+          debugPrint('[LspProvider] falling back to bash shim: $shim');
+          return [bash, shim, '--stdio'];
+        }
+        debugPrint('[LspProvider] typescript-language-server not found');
+        return null;
+
       case 'py':
-        exe = '${RuntimeEnvir.usrPath}/bin/pylsp';
+        final pylsp = '${RuntimeEnvir.usrPath}/bin/pylsp';
+        if (!File(pylsp).existsSync()) {
+          debugPrint('[LspProvider] pylsp not found');
+          return null;
+        }
+        // pylsp is also a Python script — run via python3 directly
+        final py = RuntimeEnvir.pythonPath;
+        if (File(py).existsSync()) return [py, '-m', 'pylsp'];
+        final bash2 = RuntimeEnvir.bashPath;
+        if (File(bash2).existsSync()) return [bash2, pylsp];
+        return null;
+
+      // ── Kotlin ────────────────────────────────────────────────────────────
       case 'kt':
-        exe = '${RuntimeEnvir.usrPath}/bin/kotlin-language-server';
+      case 'kotlin':
+        // kotlin-language-server is a bash launcher script installed by the
+        // Android SDK extension at $PREFIX/opt/kotlin-language-server/server/.
+        // Prefer the full path; fall back to the symlink in $PREFIX/bin.
+        final klsHome = '${RuntimeEnvir.kotlinLsHome}/bin/kotlin-language-server';
+        final klsBin  = RuntimeEnvir.kotlinLsBin;
+        final ktlsBin = File(klsHome).existsSync() ? klsHome
+            : File(klsBin).existsSync() ? klsBin
+            : null;
+        if (ktlsBin == null) {
+          debugPrint('[LspProvider] kotlin-language-server not found.'
+              ' Install via Android SDK extension.');
+          return null;
+        }
+        final bash3 = RuntimeEnvir.bashPath;
+        if (!File(bash3).existsSync()) {
+          debugPrint('[LspProvider] bash not found');
+          return null;
+        }
+        return [bash3, ktlsBin];
+
+      // ── Java (Eclipse JDT Language Server) ────────────────────────────────
+      case 'java':
+        return _jdtlsCommand();
+
+      // ── Go (gopls) ────────────────────────────────────────────────────────
+      case 'go':
+        final gopls = RuntimeEnvir.goplsBin;
+        if (!File(gopls).existsSync()) {
+          debugPrint('[LspProvider] gopls not found at $gopls.'
+              ' Run: go install golang.org/x/tools/gopls@latest');
+          return null;
+        }
+        return [gopls];
+
+      // ── Swift (sourcekit-lsp) ─────────────────────────────────────────────
+      case 'swift':
+        final sourcekitLsp = RuntimeEnvir.sourcekitLspBin;
+        if (!File(sourcekitLsp).existsSync()) {
+          debugPrint('[LspProvider] sourcekit-lsp not found at $sourcekitLsp.'
+              ' Install Swift via: pkg install swift');
+          return null;
+        }
+        return [sourcekitLsp];
+
       default:
         return null;
     }
+  }
 
-    if (exe == null || !File(exe).existsSync()) {
-      debugPrint('[LspProvider] binary not found, skipping LSP: $exe');
+  /// Constructs the full [java, ...args] command to launch jdtls by scanning
+  /// the jdtls installation directory for the versioned launcher jar.
+  ///
+  /// Returns null and logs if jdtls is not installed or Java is missing.
+  List<String>? _jdtlsCommand() {
+    final jdtlsHome = RuntimeEnvir.jdtlsHome;
+    final pluginsDir = Directory('$jdtlsHome/plugins');
+    if (!pluginsDir.existsSync()) {
+      // Try the wrapper script installed by the extension as a fallback.
+      final wrapper = RuntimeEnvir.jdtlsBin;
+      if (File(wrapper).existsSync()) {
+        final bash = RuntimeEnvir.bashPath;
+        if (!File(bash).existsSync()) return null;
+        final dataDir = RuntimeEnvir.jdtlsDataPath;
+        Directory(dataDir).createSync(recursive: true);
+        return [bash, wrapper, '-data', dataDir];
+      }
+      debugPrint('[LspProvider] jdtls not found at $jdtlsHome.'
+          ' Install via Android SDK extension.');
       return null;
     }
 
-    return [exe, ...args];
+    // Find the launcher JAR (org.eclipse.equinox.launcher_<version>.jar).
+    final jars = pluginsDir
+        .listSync()
+        .whereType<File>()
+        .where((f) =>
+            f.path.contains('org.eclipse.equinox.launcher_') &&
+            f.path.endsWith('.jar'))
+        .map((f) => f.path)
+        .toList()
+      ..sort();
+
+    if (jars.isEmpty) {
+      debugPrint('[LspProvider] jdtls launcher jar not found in $pluginsDir');
+      return null;
+    }
+    final launcherJar = jars.last;
+
+    final java = RuntimeEnvir.javaPath;
+    if (!File(java).existsSync()) {
+      debugPrint('[LspProvider] java not found at $java. Install openjdk-17.');
+      return null;
+    }
+
+    // Prefer the ARM64-specific config; fall back to the generic Linux one.
+    String configDir = '$jdtlsHome/config_linux_arm64';
+    if (!Directory(configDir).existsSync()) {
+      configDir = '$jdtlsHome/config_linux';
+    }
+    if (!Directory(configDir).existsSync()) {
+      debugPrint('[LspProvider] jdtls config directory not found in $jdtlsHome');
+      return null;
+    }
+
+    final dataDir = RuntimeEnvir.jdtlsDataPath;
+    Directory(dataDir).createSync(recursive: true);
+
+    return [
+      java,
+      '-Declipse.application=org.eclipse.jdt.ls.core.id1',
+      '-Dosgi.bundles.defaultStartLevel=4',
+      '-Declipse.product=org.eclipse.jdt.ls.core.product',
+      '-Dlog.level=ERROR',
+      '-noverify',
+      '-Xmx512m',
+      '--add-modules=ALL-SYSTEM',
+      '--add-opens', 'java.base/java.util=ALL-UNNAMED',
+      '--add-opens', 'java.base/java.lang=ALL-UNNAMED',
+      '-jar', launcherJar,
+      '-configuration', configDir,
+      '-data', dataDir,
+    ];
   }
 
   /// Path to the Dart VM binary (the ELF executable, not the shell wrapper).
@@ -160,17 +327,39 @@ class LspProvider extends ChangeNotifier {
     return File(path).existsSync() ? path : null;
   }
 
+  /// Returns the environment map for a given file extension.
+  /// Java and Kotlin LSP servers need JAVA_HOME so their launcher scripts can
+  /// locate the JVM. We only inject it when we can confirm the path is valid;
+  /// if the path is unknown/wrong the launcher script dies with
+  /// "JAVA_HOME is set to an invalid directory", so it is safer to omit it
+  /// and let the script fall back to `java` from PATH.
+  Map<String, String> _envForExtension(String ext) {
+    final base = RuntimeEnvir.baseEnv;
+    switch (ext.toLowerCase()) {
+      case 'java':
+      case 'kt':
+      case 'kotlin':
+        final home = RuntimeEnvir.javaHome;
+        return home.isNotEmpty ? {...base, 'JAVA_HOME': home} : base;
+      default:
+        return base;
+    }
+  }
+
   String _languageId(String ext) {
     switch (ext.toLowerCase()) {
-      case 'dart':   return 'dart';
-      case 'js':     return 'javascript';
-      case 'jsx':    return 'javascriptreact';
-      case 'ts':     return 'typescript';
-      case 'tsx':    return 'typescriptreact';
-      case 'py':     return 'python';
-      case 'kt':     return 'kotlin';
-      case 'java':   return 'java';
-      default:       return ext;
+      case 'dart':    return 'dart';
+      case 'js':      return 'javascript';
+      case 'jsx':     return 'javascriptreact';
+      case 'ts':      return 'typescript';
+      case 'tsx':     return 'typescriptreact';
+      case 'py':      return 'python';
+      case 'kt':
+      case 'kotlin':  return 'kotlin';
+      case 'java':    return 'java';
+      case 'go':      return 'go';
+      case 'swift':   return 'swift';
+      default:        return ext;
     }
   }
 

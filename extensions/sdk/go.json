@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "sdk": "go",
+  "sdk_version": "latest",
+  "display_name": "Go (Golang)",
+  "description": "Linguagem Go para Termux no Android ARM64. Inclui o compilador Go via pkg, gopls (language server oficial), gofmt (formatador) e Delve (debugger DAP). Suporte completo a módulos Go.",
+  "package": {
+    "type": "pkg",
+    "arch": "arm64",
+    "size_mb": 120
+  },
+  "package_author": {
+    "name": "Termux / Go Team",
+    "github": "https://github.com/termux/termux-packages"
+  },
+  "json_author": {
+    "name": "Yato",
+    "date": "2026-04-11"
+  },
+  "install_steps": [
+    {
+      "type": "shell",
+      "command": "pkg update -y 2>&1 && pkg install -y golang 2>&1",
+      "description": "Instalando o compilador Go via pkg"
+    },
+    {
+      "type": "shell",
+      "command": "go version 2>&1 && echo \"GOROOT: $(go env GOROOT 2>/dev/null)\" && echo \"GOPATH: $(go env GOPATH 2>/dev/null)\"",
+      "description": "Verificando instalação do Go"
+    },
+    {
+      "type": "shell",
+      "command": "grep -qxF 'export GOPATH=\"$HOME/go\"' $HOME/.bashrc || echo 'export GOPATH=\"$HOME/go\"' >> $HOME/.bashrc; grep -qxF 'export PATH=\"$PATH:$HOME/go/bin\"' $HOME/.bashrc || echo 'export PATH=\"$PATH:$HOME/go/bin\"' >> $HOME/.bashrc",
+      "description": "Adicionando GOPATH e $HOME/go/bin ao .bashrc"
+    },
+    {
+      "type": "shell",
+      "command": "export GOPATH=$HOME/go && export PATH=$PATH:$GOPATH/bin && GOFLAGS='-mod=mod' go install golang.org/x/tools/gopls@latest 2>&1 && echo 'OK: gopls instalado' && gopls version 2>&1",
+      "description": "Instalando gopls (Go Language Server)"
+    }
+  ],
+  "config_steps": [
+    {
+      "type": "shell",
+      "command": "export GOPATH=$HOME/go && export PATH=$PATH:$GOPATH/bin && GOFLAGS='-mod=mod' go install github.com/go-delve/delve/cmd/dlv@latest 2>&1 && echo 'OK: Delve instalado' && dlv version 2>&1 || echo 'AVISO: Delve instalado, mas depuração requer permissão ptrace (root ou proot)'",
+      "description": "Instalando Delve (depurador / adaptador DAP)"
+    },
+    {
+      "type": "shell",
+      "command": "export GOPATH=$HOME/go && export PATH=$PATH:$GOPATH/bin && go env GOROOT GOPATH GOOS GOARCH GOVERSION 2>&1",
+      "description": "Verificando variáveis de ambiente Go"
+    },
+    {
+      "type": "shell",
+      "command": "test -f $HOME/go/bin/gopls && echo 'gopls OK' || echo 'ERRO: gopls não encontrado em $HOME/go/bin/gopls'",
+      "description": "Verificando binário gopls"
+    }
+  ],
+  "cleanup_steps": [],
+  "uninstall_steps": [
+    {
+      "type": "shell",
+      "command": "rm -f $HOME/go/bin/gopls $HOME/go/bin/dlv 2>&1 || true",
+      "description": "Removendo gopls e Delve"
+    },
+    {
+      "type": "shell",
+      "command": "pkg remove -y golang 2>&1 || true",
+      "description": "Removendo o compilador Go"
+    },
+    {
+      "type": "shell",
+      "command": "sed -i '/GOPATH/d; /go\\/bin/d' $HOME/.bashrc 2>&1 || true",
+      "description": "Limpando .bashrc"
+    }
+  ],
+  "verify_binary": "go",
+  "verify_command": "go version",
+  "run_config": {
+    "run": "go run .",
+    "supports_devices": false,
+    "build_debug": "go build -o app .",
+    "build_release": "go build -ldflags=\"-s -w\" -o app ."
+  },
+  "sdk_config": {
+    "new_project_cmd": "mkdir -p $name && cd $name && go mod init $name && printf 'package main\\n\\nimport \"fmt\"\\n\\nfunc main() {\\n\\tfmt.Println(\"Hello, World!\")\\n}\\n' > main.go",
+    "default_entry_file": "main.go",
+    "file_extensions": ["go", "mod", "sum"],
+    "sync_command": "go mod tidy",
+    "sync_trigger_file": "go.mod",
+    "format_command": "gofmt -w ."
+  },
+  "dap_config": {
+    "adapter_binary": "$HOME/go/bin/dlv",
+    "adapter_args": ["dap"],
+    "adapter_id": "go",
+    "launch_program": ".",
+    "build_done_strings": ["DAP server listening"]
+  }
+}

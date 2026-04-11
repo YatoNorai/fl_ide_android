@@ -1,3 +1,7 @@
+import 'dart:async';
+import 'dart:io';
+
+import 'package:core/core.dart' show RuntimeEnvir;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
@@ -5,19 +9,27 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'app.dart';
 import 'providers/settings_provider.dart';
 
+/// Holds results computed during the pre-launch phase (before runApp).
+/// All fields are immutable after [AppBootData.initialize] completes.
+abstract final class AppBootData {
+  static bool gitAvailable = false;
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Pre-warm SharedPreferences so SettingsProvider loads synchronously on first
-  // build, eliminating the theme-color flash on HomeScreen.
-  await SettingsProvider.warmUp();
+  // Run all pre-launch work in parallel so the UI never has to wait for
+  // individual async results — git check, settings warm-up, and asset
+  // pre-caching all finish before the first frame is drawn.
+  final results = await Future.wait([
+    SettingsProvider.warmUp(),
+    _checkGit(),
+    _precacheAssets(),
+  ]);
+  AppBootData.gitAvailable = results[1] as bool;
 
   // Foreground service init — keeps FL IDE alive when backgrounded.
-  // The service itself is started/stopped by WorkspaceScreen.
   FlutterForegroundTask.initCommunicationPort();
-  // Skip the 5-second binding check — on some Android devices the service
-  // takes longer to bind and throws ServiceTimeoutException. The service still
-  // starts; we just don't wait for confirmation.
   FlutterForegroundTask.skipServiceResponseCheck = true;
   FlutterForegroundTask.init(
     androidNotificationOptions: AndroidNotificationOptions(
@@ -34,23 +46,53 @@ void main() async {
     foregroundTaskOptions: ForegroundTaskOptions(
       eventAction: ForegroundTaskEventAction.nothing(),
       autoRunOnBoot: false,
-      allowWakeLock: true,   // keep CPU alive → SSH keepalive fires every 25s
-      allowWifiLock: true,   // keep WiFi radio awake → no TCP drop on screen off
+      allowWakeLock: true,
+      allowWifiLock: true,
     ),
   );
 
-  // Transparent system bars (same as termare)
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
     systemNavigationBarColor: Colors.transparent,
     systemNavigationBarDividerColor: Colors.transparent,
   ));
 
-  // Full screen immersive
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-
-  // Lock all screens to portrait by default
   await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
 
   runApp(const FlIdeApp());
+}
+
+/// Checks whether git is available in the Termux environment.
+Future<bool> _checkGit() async {
+  try {
+    final r = await Process.run(
+      'git', ['--version'],
+      environment: RuntimeEnvir.baseEnv,
+    ).timeout(const Duration(seconds: 5));
+    return r.exitCode == 0;
+  } catch (_) {
+    return false;
+  }
+}
+
+/// Pre-warms Flutter's image cache for every bundled asset that the home
+/// screen shows, so there is zero decode stutter on first render.
+Future<void> _precacheAssets() async {
+  await _resolveAsset('assets/logo.png');
+}
+
+Future<void> _resolveAsset(String assetPath) async {
+  final completer = Completer<void>();
+  late final ImageStreamListener listener;
+  final stream = AssetImage(assetPath).resolve(ImageConfiguration.empty);
+  listener = ImageStreamListener(
+    (_, __) { stream.removeListener(listener); completer.complete(); },
+    onError: (_, __) { stream.removeListener(listener); completer.complete(); },
+  );
+  stream.addListener(listener);
+  await completer.future.timeout(
+    const Duration(seconds: 3),
+    onTimeout: () {},
+  );
 }

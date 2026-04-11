@@ -4,7 +4,8 @@ enum SdkType {
   reactNative,
   nodejs,
   python,
-  swift;
+  swift,
+  go;
 
   String get displayName {
     switch (this) {
@@ -20,6 +21,8 @@ enum SdkType {
         return 'Python';
       case SdkType.swift:
         return 'Swift';
+      case SdkType.go:
+        return 'Go';
     }
   }
 
@@ -37,6 +40,8 @@ enum SdkType {
         return '🐍';
       case SdkType.swift:
         return '🦅';
+      case SdkType.go:
+        return '🐹';
     }
   }
 
@@ -54,6 +59,8 @@ enum SdkType {
         return 'Python 3 scripting and apps';
       case SdkType.swift:
         return 'Swift scripting and server-side apps';
+      case SdkType.go:
+        return 'Linguagem Go com gopls LSP e Delve debugger';
     }
   }
 }

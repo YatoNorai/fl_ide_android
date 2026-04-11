@@ -117,11 +117,8 @@ class _PreviewFrame extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     final mode = provider.previewMode;
 
-    // Use real rendering in preview (Build) tab, wireframe in Tree tab
-    final useReal = provider.activeTab != SidebarTab.tree;
-    Widget canvas = useReal
-        ? _RealWidgetCanvas(root: provider.root!)
-        : _WidgetTreeCanvas(root: provider.root!);
+    // Always use real rendering
+    Widget canvas = _RealWidgetCanvas(root: provider.root!);
 
     if (mode == PreviewMode.rectangle) {
       return Container(

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:code_editor/code_editor.dart';
@@ -171,7 +172,11 @@ class _AiChatDrawerState extends State<AiChatDrawer> {
         break;
       }
       try {
-        final raw = await File(path).readAsString();
+        final bytes = await File(path).readAsBytes();
+        // Skip binary files: null bytes anywhere in first 512 bytes = binary
+        final sample = bytes.length > 512 ? bytes.sublist(0, 512) : bytes;
+        if (sample.contains(0)) continue;
+        final raw = utf8.decode(bytes, allowMalformed: false);
         final content = raw.length > maxFile
             ? '${raw.substring(0, maxFile)}\n… (truncado)'
             : raw;
@@ -245,10 +250,15 @@ class _AiChatDrawerState extends State<AiChatDrawer> {
     // Backup before first modification
     if (_pendingSnapshotId != null &&
         !_pendingBackups.containsKey(fullPath)) {
-      try {
-        _pendingBackups[fullPath] = await File(fullPath).readAsString();
-      } catch (_) {
-        _pendingBackups[fullPath] = null; // file didn't exist
+      final f = File(fullPath);
+      if (await f.exists()) {
+        try {
+          _pendingBackups[fullPath] = await f.readAsString();
+        } catch (_) {
+          _pendingBackups[fullPath] = null;
+        }
+      } else {
+        _pendingBackups[fullPath] = null; // new file — nothing to back up
       }
     }
 

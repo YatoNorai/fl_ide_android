@@ -21,6 +21,47 @@ class RuntimeEnvir {
   static String get npmPath => '$usrPath/bin/npm';
   static String get pythonPath => '$usrPath/bin/python3';
 
+  // Java
+  static String get javaPath    => '$usrPath/bin/java';
+
+  /// JAVA_HOME for the Termux OpenJDK installation.
+  /// Checks known Termux paths in order; returns the first that contains
+  /// a `bin/java` executable. Returns empty string if none is found.
+  static String get javaHome {
+    final candidates = [
+      '$usrPath/lib/jvm/java-17-openjdk',
+      '$usrPath/lib/jvm/openjdk-17',
+      '$usrPath/lib/jvm/java-21-openjdk',
+      '$usrPath/lib/jvm/java-11-openjdk',
+      '$usrPath/opt/java/17',
+      '$usrPath/opt/openjdk',
+    ];
+    for (final path in candidates) {
+      if (File('$path/bin/java').existsSync()) return path;
+    }
+    return ''; // not found — callers should skip JAVA_HOME in this case
+  }
+
+  // Eclipse JDT Language Server (Java LSP)
+  static String get jdtlsHome   => '$usrPath/opt/jdtls';
+  /// Launcher wrapper created by the Android SDK extension install step.
+  static String get jdtlsBin    => '$usrPath/bin/jdtls';
+  /// Per-user workspace storage required by jdtls (-data flag).
+  static String get jdtlsDataPath => '$homePath/.jdtls-data';
+
+  // Kotlin Language Server
+  static String get kotlinLsHome => '$usrPath/opt/kotlin-language-server/server';
+  static String get kotlinLsBin  => '$usrPath/bin/kotlin-language-server';
+
+  // Go
+  /// GOPATH root — where `go install` places binaries (go/bin/).
+  static String get goPath    => '$homePath/go';
+  static String get goplsBin  => '$goPath/bin/gopls';
+  static String get dlvBin    => '$goPath/bin/dlv';
+
+  // Swift — sourcekit-lsp ships with the Termux Swift package
+  static String get sourcekitLspBin => '$usrPath/bin/sourcekit-lsp';
+
   // Projects dir
   static String get projectsPath => '$homePath/projects';
 

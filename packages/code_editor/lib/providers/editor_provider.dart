@@ -49,6 +49,7 @@ class EditorProvider extends ChangeNotifier {
   int _lastTopIdx = -1;
   int _lastBottomIdx = -1;
   FileNode? _rootNode;
+  int _treeVersion = 0;
   /// Path of the most recently saved file. Updated on every saveActiveFile call.
   String? lastSavedPath;
   /// Set when the project lives on a remote machine; used for tree expand/refresh.
@@ -89,6 +90,7 @@ class EditorProvider extends ChangeNotifier {
     return i >= 0 ? _openFiles[i] : null;
   }
   FileNode? get rootNode => _rootNode;
+  int get treeVersion => _treeVersion;
   bool get isRemote => _remoteListDir != null;
 
   Future<void> loadProject(String projectPath) async {
@@ -132,7 +134,11 @@ class EditorProvider extends ChangeNotifier {
     } else {
       final file = File(filePath);
       if (!await file.exists()) return;
-      content = await file.readAsString();
+      try {
+        content = await file.readAsString();
+      } catch (_) {
+        return; // Binary file or unreadable encoding — skip opening
+      }
     }
 
     final name = filePath.split('/').last.split('\\').last;
@@ -370,6 +376,7 @@ class EditorProvider extends ChangeNotifier {
       await node.loadChildren();
     }
     node.isExpanded = !node.isExpanded;
+    _treeVersion++;
     notifyListeners();
   }
 

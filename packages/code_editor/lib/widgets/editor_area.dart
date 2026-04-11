@@ -235,22 +235,27 @@ class _ActiveEditorState extends State<_ActiveEditor> {
 
   Future<void> _startLspAndAttach(QuillLspConfig cfg, OpenFile file) async {
     LspClient? client;
-    if (cfg is QuillLspStdioConfig) {
-      client = await LspStdioClient.start(
-        executable:    cfg.executable,
-        args:          cfg.args,
-        workspacePath: cfg.workspacePath,
-        languageId:    cfg.languageId,
-        environment:   cfg.environment,
-      );
-    } else if (cfg is QuillLspSocketConfig) {
-      final sc = LspSocketClient(
-        serverUrl:     cfg.url,
-        workspacePath: cfg.workspacePath,
-        languageId:    cfg.languageId,
-      );
-      await sc.connect();
-      client = sc;
+    try {
+      if (cfg is QuillLspStdioConfig) {
+        client = await LspStdioClient.start(
+          executable:    cfg.executable,
+          args:          cfg.args,
+          workspacePath: cfg.workspacePath,
+          languageId:    cfg.languageId,
+          environment:   cfg.environment,
+        );
+      } else if (cfg is QuillLspSocketConfig) {
+        final sc = LspSocketClient(
+          serverUrl:     cfg.url,
+          workspacePath: cfg.workspacePath,
+          languageId:    cfg.languageId,
+        );
+        await sc.connect();
+        client = sc;
+      }
+    } catch (e) {
+      debugPrint('[EditorArea] LSP start failed: $e');
+      return;
     }
     if (!mounted || client == null) { client?.shutdown(); return; }
     _ownedLspClient = client;

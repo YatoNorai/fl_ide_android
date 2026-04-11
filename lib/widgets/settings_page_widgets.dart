@@ -32,7 +32,7 @@ class SettingsPageScaffold extends StatefulWidget {
 }
 
 class _SettingsPageScaffoldState extends State<SettingsPageScaffold> {
-  static const double _maxExtent = 160.0;
+  static const double _maxExtent = 180.0;
   static const double _minExtent = kToolbarHeight;
   static const double _expandedLeft = 20.0;
   static const double _collapsedLeft = 120.0;

@@ -2,7 +2,7 @@ part of '../ai_chat_drawer.dart';
 
 // ── File operation approval card ──────────────────────────────────────────────
 
-class _FileOpCard extends StatelessWidget {
+class _FileOpCard extends StatefulWidget {
   final FileOperation op;
   final String msgId;
   final Future<void> Function(FileOperation) onExecuteOp;
@@ -14,9 +14,35 @@ class _FileOpCard extends StatelessWidget {
   });
 
   @override
+  State<_FileOpCard> createState() => _FileOpCardState();
+}
+
+class _FileOpCardState extends State<_FileOpCard> {
+
+  bool _executing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Auto-execute terminal commands that the user has set to always accept.
+    if (widget.op.type == FileOpType.terminal &&
+        widget.op.status == FileOpStatus.pending &&
+        widget.op.command != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final chat = context.read<ChatProvider>();
+        if (chat.isAlwaysAccepted(widget.op.command!)) {
+          _accept(context, chat);
+        }
+      });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final cs   = Theme.of(context).colorScheme;
     final chat = context.watch<ChatProvider>();
+    final op   = widget.op;
     final status = op.status;
 
     // Colour band by status
@@ -68,9 +94,11 @@ class _FileOpCard extends StatelessWidget {
                               fontSize: 10,
                               color: cs.onSurfaceVariant,
                               fontWeight: FontWeight.w500)),
-                      Text(op.type == FileOpType.rename
-                              ? '${op.path} → ${op.newPath}'
-                              : op.path,
+                      Text(op.type == FileOpType.terminal
+                              ? (op.command ?? op.path)
+                              : op.type == FileOpType.rename
+                                  ? '${op.path} → ${op.newPath}'
+                                  : op.path,
                           style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
@@ -101,54 +129,124 @@ class _FileOpCard extends StatelessWidget {
           ),
 
           // ── Code preview (write ops) ─────────────────────────
-          if (op.type == FileOpType.write && op.content != null) ...[
+          if (op.type == FileOpType.write && op.content != null)
             _CodePreview(code: op.content!, language: op.language ?? ''),
-          ],
+
+          // ── Command output (terminal ops after execution) ────
+          if (op.type == FileOpType.terminal &&
+              op.commandOutput != null &&
+              op.commandOutput!.isNotEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+              decoration: BoxDecoration(
+                color: cs.surfaceContainerHighest.withValues(alpha: 0.5),
+                border: Border(
+                  top: BorderSide(color: cs.outlineVariant.withValues(alpha: 0.4)),
+                ),
+              ),
+              child: SelectableText(
+                op.commandOutput!,
+                style: TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 11,
+                  color: cs.onSurfaceVariant,
+                  height: 1.5,
+                ),
+              ),
+            ),
 
           // ── Action buttons (pending only) ────────────────────
           if (status == FileOpStatus.pending)
             Padding(
               padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-              child: Row(
-                children: [
-                  // Accept all button
-                  TextButton.icon(
-                    onPressed: () => _acceptAll(context, chat),
-                    icon: const Icon(Icons.done_all_rounded, size: 14),
-                    label: const Text('Aceitar tudo', style: TextStyle(fontSize: 12)),
-                    style: TextButton.styleFrom(
-                      foregroundColor: cs.primary,
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              child: _executing
+                  ? Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 1.5, color: cs.primary),
+                          ),
+                          const SizedBox(width: 8),
+                          Text('Executando…',
+                              style: TextStyle(
+                                  fontSize: 12, color: cs.onSurfaceVariant)),
+                        ],
+                      ),
+                    )
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(
+                          children: [
+                            // Accept all button
+                            TextButton.icon(
+                              onPressed: () => _acceptAll(context, chat),
+                              icon: const Icon(Icons.done_all_rounded, size: 14),
+                              label: const Text('Aceitar tudo',
+                                  style: TextStyle(fontSize: 12)),
+                              style: TextButton.styleFrom(
+                                foregroundColor: cs.primary,
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 10, vertical: 4),
+                              ),
+                            ),
+                            const Spacer(),
+                            // Reject
+                            OutlinedButton(
+                              onPressed: () => chat.setOperationStatus(
+                                  widget.msgId, op.id, FileOpStatus.rejected),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: cs.error,
+                                side: BorderSide(
+                                    color: cs.error.withValues(alpha: 0.5)),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 4),
+                                minimumSize: const Size(0, 32),
+                                textStyle: const TextStyle(fontSize: 12),
+                              ),
+                              child: const Text('Recusar'),
+                            ),
+                            const SizedBox(width: 8),
+                            // Accept
+                            FilledButton(
+                              onPressed: () => _accept(context, chat),
+                              style: FilledButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 4),
+                                minimumSize: const Size(0, 32),
+                                textStyle: const TextStyle(fontSize: 12),
+                              ),
+                              child: const Text('Aceitar'),
+                            ),
+                          ],
+                        ),
+                        // "Aceitar sempre" — only for terminal commands
+                        if (op.type == FileOpType.terminal &&
+                            op.command != null &&
+                            !chat.isAlwaysAccepted(op.command!))
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: TextButton(
+                              onPressed: () {
+                                chat.addAlwaysAcceptCmd(op.command!);
+                                _accept(context, chat);
+                              },
+                              style: TextButton.styleFrom(
+                                foregroundColor: cs.onSurfaceVariant,
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 10, vertical: 2),
+                                textStyle: const TextStyle(fontSize: 11),
+                              ),
+                              child: const Text('Aceitar sempre este comando'),
+                            ),
+                          ),
+                      ],
                     ),
-                  ),
-                  const Spacer(),
-                  // Reject
-                  OutlinedButton(
-                    onPressed: () {
-                      chat.setOperationStatus(msgId, op.id, FileOpStatus.rejected);
-                    },
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: cs.error,
-                      side: BorderSide(color: cs.error.withValues(alpha: 0.5)),
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                      minimumSize: const Size(0, 32),
-                      textStyle: const TextStyle(fontSize: 12),
-                    ),
-                    child: const Text('Recusar'),
-                  ),
-                  const SizedBox(width: 8),
-                  // Accept
-                  FilledButton(
-                    onPressed: () => _accept(context, chat),
-                    style: FilledButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                      minimumSize: const Size(0, 32),
-                      textStyle: const TextStyle(fontSize: 12),
-                    ),
-                    child: const Text('Aceitar'),
-                  ),
-                ],
-              ),
             ),
         ],
       ),
@@ -156,38 +254,42 @@ class _FileOpCard extends StatelessWidget {
   }
 
   Future<void> _accept(BuildContext ctx, ChatProvider chat) async {
-    chat.setOperationStatus(msgId, op.id, FileOpStatus.accepted);
+    if (_executing) return;
+    setState(() => _executing = true);
+    chat.setOperationStatus(widget.msgId, widget.op.id, FileOpStatus.accepted);
     try {
-      await onExecuteOp(op);
+      await widget.onExecuteOp(widget.op);
     } catch (e) {
       if (ctx.mounted) {
         ScaffoldMessenger.of(ctx).showSnackBar(
           SnackBar(content: Text('Erro ao executar operação: $e')),
         );
-        chat.setOperationStatus(msgId, op.id, FileOpStatus.rejected);
+        chat.setOperationStatus(
+            widget.msgId, widget.op.id, FileOpStatus.rejected);
       }
+    } finally {
+      if (mounted) setState(() => _executing = false);
     }
   }
 
   Future<void> _acceptAll(BuildContext ctx, ChatProvider chat) async {
-    // Accept all pending operations in this message
     final conv = chat.activeConversation;
     if (conv == null) return;
-    final msg = conv.messages.firstWhere((m) => m.id == msgId,
+    final msg = conv.messages.firstWhere((m) => m.id == widget.msgId,
         orElse: () => const ChatMessage(id: '', isUser: false, text: ''));
     if (msg.id.isEmpty) return;
 
     for (final o in msg.operations) {
       if (o.status != FileOpStatus.pending) continue;
-      chat.setOperationStatus(msgId, o.id, FileOpStatus.accepted);
+      chat.setOperationStatus(widget.msgId, o.id, FileOpStatus.accepted);
       try {
-        await onExecuteOp(o);
+        await widget.onExecuteOp(o);
       } catch (e) {
         if (ctx.mounted) {
           ScaffoldMessenger.of(ctx).showSnackBar(
             SnackBar(content: Text('Erro em ${o.path}: $e')),
           );
-          chat.setOperationStatus(msgId, o.id, FileOpStatus.rejected);
+          chat.setOperationStatus(widget.msgId, o.id, FileOpStatus.rejected);
         }
       }
     }

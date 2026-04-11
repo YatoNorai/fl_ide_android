@@ -17,6 +17,7 @@ import 'package:ssh_pkg/ssh_pkg.dart';
 import 'package:tofu_expressive/tofu_expressive.dart';
 import 'package:expressive_theme_bridge/expressive_theme_bridge.dart';
 
+import 'main.dart' show AppBootData;
 import 'providers/ai_provider.dart';
 import 'providers/chat_provider.dart';
 import 'providers/extensions_provider.dart';
@@ -26,6 +27,41 @@ import 'screens/onboarding_screen.dart';
 import 'screens/workspace_screen.dart';
 
 export 'package:core/core.dart' show showThemedDialog;
+
+// ── Global fade page transition ───────────────────────────────────────────────
+
+class _FadePageTransitionsBuilder extends PageTransitionsBuilder {
+  const _FadePageTransitionsBuilder();
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    return FadeTransition(
+      opacity: CurvedAnimation(
+        parent: animation,
+        curve: Curves.easeOut,
+        reverseCurve: Curves.easeIn,
+      ),
+      child: child,
+    );
+  }
+}
+
+const _kFadeTransitionsTheme = PageTransitionsTheme(
+  builders: {
+    TargetPlatform.android: _FadePageTransitionsBuilder(),
+    TargetPlatform.iOS:     _FadePageTransitionsBuilder(),
+    TargetPlatform.linux:   _FadePageTransitionsBuilder(),
+    TargetPlatform.windows: _FadePageTransitionsBuilder(),
+    TargetPlatform.macOS:   _FadePageTransitionsBuilder(),
+    TargetPlatform.fuchsia: _FadePageTransitionsBuilder(),
+  },
+);
 
 // 👇 Defina aqui a cor padrão do app
 class FlIdeApp extends StatefulWidget {
@@ -163,8 +199,8 @@ class _FlIdeAppState extends State<FlIdeApp> {
                   title: 'L A Y E R',
                   debugShowCheckedModeBanner: false,
                   themeMode: themeMode,
-                  theme: lightTheme,
-                  darkTheme: darkTheme,
+                  theme: lightTheme.copyWith(pageTransitionsTheme: _kFadeTransitionsTheme),
+                  darkTheme: darkTheme.copyWith(pageTransitionsTheme: _kFadeTransitionsTheme),
                   locale: locale,
                   localizationsDelegates: locDelegates,
                   supportedLocales: supportedLocales,
@@ -653,18 +689,33 @@ class _AppShell extends StatefulWidget {
 }
 
 class _AppShellState extends State<_AppShell> {
+  // Gate that holds the splash until:
+  //   1. Settings are loaded (always true after warmUp in main — instant)
+  //   2. Two frames have been drawn so the ExpressiveTheme + dynamic colors
+  //      finish initialising. Without this gate the user sees the system-default
+  //      theme flash for one frame before the real palette is applied.
+  bool _uiReady = false;
+
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    // Pre-cache the logo so it shows instantly with no decode stutter.
-    precacheImage(const AssetImage('assets/logo.png'), context);
+  void initState() {
+    super.initState();
+    // addPostFrameCallback fires after the current frame finishes painting.
+    // Two nested calls = wait two full frames, enough for the async
+    // ExpressiveThemeController.initialize() to complete and rebuild.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() => _uiReady = true);
+      });
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     return Consumer<SettingsProvider>(
       builder: (context, settings, _) {
-        if (!settings.isLoaded) {
+        if (!settings.isLoaded || !_uiReady) {
+          // Splash: logo centered, no theme-dependent colours so there is
+          // nothing to flash even if the theme hasn't settled yet.
           return Scaffold(
             body: Center(
               child: Image.asset(
@@ -672,7 +723,7 @@ class _AppShellState extends State<_AppShell> {
                 width: 80,
                 height: 80,
                 fit: BoxFit.contain,
-                color: Theme.of(context).colorScheme.primary,
+                color: Theme.of(context).textTheme.bodyLarge?.color,
               ),
             ),
           );

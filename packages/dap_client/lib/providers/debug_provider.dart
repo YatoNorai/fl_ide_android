@@ -22,6 +22,8 @@ enum DebugStatus { idle, starting, running, paused, terminating }
 class DebugProvider extends ChangeNotifier {
   DapStdioClient? _client;
   StreamSubscription<Map<String, dynamic>>? _eventSub;
+  Process? _metroProcess;
+  bool _isMetroSession = false;
 
   DebugStatus _status = DebugStatus.idle;
   String _output = '';
@@ -54,6 +56,7 @@ class DebugProvider extends ChangeNotifier {
   DapConfig _dapConfig = DapConfig.empty;
   String? _webServerUrl;
   bool _isBuilding = false;
+  Project? _currentMetroProject; // kept for Metro restart
 
   /// Fixed port used when launching the Flutter web-server device.
   static const int webServerPort = 5050;
@@ -61,6 +64,10 @@ class DebugProvider extends ChangeNotifier {
   /// Set when the web-server device is running and the URL is known.
   /// Listeners can watch this to auto-open a WebView preview.
   String? get webServerUrl => _webServerUrl;
+
+  /// True while the current session is a Metro (React Native / Expo) run,
+  /// not a DAP session. Used by the WebPreviewOverlay to adapt its toolbar.
+  bool get isMetroSession => _isMetroSession;
 
   // ── Getters ───────────────────────────────────────────────────────────────
 
@@ -196,10 +203,214 @@ class DebugProvider extends ChangeNotifier {
     }
   }
 
+  /// Kill any process occupying [port] so the next `flutter run` web session
+  /// can bind to it. Uses `fuser -k` (Linux/Android) with a SIGKILL fallback
+  /// via `lsof`. Errors are silently swallowed — if neither tool exists the
+  /// port may still be free anyway.
+  static Future<void> _freePort(int port) async {
+    try {
+      // fuser is available on most Termux / Linux systems.
+      final r = await Process.run('fuser', ['-k', '$port/tcp']);
+      if (r.exitCode == 0) {
+        // Give the OS a moment to release the socket.
+        await Future<void>.delayed(const Duration(milliseconds: 400));
+        return;
+      }
+    } catch (_) {}
+    try {
+      // Fallback: lsof + kill
+      await Process.run('sh', [
+        '-c',
+        'lsof -ti:$port | xargs -r kill -9 2>/dev/null; true',
+      ]);
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+    } catch (_) {}
+  }
+
+  /// Start a Metro bundler session for React Native / Expo projects.
+  /// This is used instead of a DAP session when no DAP adapter is available.
+  Future<void> startMetroSession(Project project) async {
+    if (_status != DebugStatus.idle) return;
+    _error = null;
+    _output = '';
+    _projectPath = project.path;
+    _status = DebugStatus.starting;
+    _isBuilding = true;
+    _isMetroSession = true;
+    _currentMetroProject = project;
+    notifyListeners();
+
+    try {
+      // Detect Expo vs bare React Native
+      bool isExpo = false;
+      try {
+        final pkgRaw = await File('${project.path}/package.json').readAsString();
+        isExpo = pkgRaw.contains('"expo"');
+      } catch (_) {}
+
+      final args = isExpo
+          ? ['expo', 'start', '--localhost']
+          : ['react-native', 'start'];
+
+      _output += isExpo
+          ? 'Iniciando Expo Metro bundler...\n'
+          : 'Iniciando React Native Metro bundler...\n';
+      notifyListeners();
+
+      // ── Termux ENOSPC fix ─────────────────────────────────────────────────
+      // Default Android inotify limit ≈ 8 192 watches. An Expo project has
+      // 30 000+ subdirectories in node_modules. Crashed Metro runs leave
+      // zombie processes holding all their watches until the kernel GCs them,
+      // so even the very first fs.watch() call fails with ENOSPC.
+      //
+      // Strategy (no root required):
+      //   1. Kill zombie Metro / Expo Node processes → watches freed.
+      //   2. Write a Node.js --require preload that patches fs.watch to:
+      //        a. Return a no-op watcher for node_modules paths (no inotify).
+      //        b. Swallow ENOSPC for any other path instead of crashing.
+      //   3. Try bumping the kernel limit via /proc (silent fail without root).
+
+      // Step 1 — kill zombies
+      _output += '[Metro] Liberando watches de sessões anteriores...\n';
+      notifyListeners();
+      try {
+        await Process.run(
+          'sh',
+          [
+            '-c',
+            'pkill -9 -f "expo start"     2>/dev/null; '
+            'pkill -9 -f "metro-file-map" 2>/dev/null; '
+            'pkill -9 -f "@expo/cli"      2>/dev/null; '
+            'sleep 1.5',
+          ],
+          environment: RuntimeEnvir.baseEnv,
+        );
+      } catch (_) {}
+
+      // Step 2 — write the fs.watch preload script
+      // Using CommonJS (.cjs) so it works whether the project is ESM or CJS.
+      // The file is idempotent: overwriting it on every start is harmless.
+      const _kPreload = r"""
+'use strict';
+const fs = require('fs');
+const { EventEmitter } = require('events');
+
+function _fakeWatcher() {
+  const w = new EventEmitter();
+  w.close = () => {};
+  return w;
+}
+
+const _origWatch = fs.watch;
+fs.watch = function (filename, options, listener) {
+  if (
+    typeof filename === 'string' &&
+    (filename.includes('/node_modules/') || filename.endsWith('/node_modules'))
+  ) {
+    return _fakeWatcher(); // skip node_modules — no inotify consumed
+  }
+  try {
+    return _origWatch.call(this, filename, options, listener);
+  } catch (e) {
+    if (e.code === 'ENOSPC') {
+      // Limit hit for a source dir — degrade gracefully (no hot-reload for
+      // this dir, but Metro keeps running instead of crashing).
+      return _fakeWatcher();
+    }
+    throw e;
+  }
+};
+""";
+
+      final preloadPath = '${project.path}/.metro-termux-fix.cjs';
+      try {
+        await File(preloadPath).writeAsString(_kPreload);
+      } catch (_) {}
+
+      // Step 3 — try bumping the limit (works on some Android kernels)
+      try {
+        await Process.run('sh', [
+          '-c',
+          'echo 65536 > /proc/sys/fs/inotify/max_user_watches 2>/dev/null || true',
+        ]);
+      } catch (_) {}
+
+      // Inject preload via NODE_OPTIONS so it runs before any Metro code
+      final existingOpts = RuntimeEnvir.baseEnv['NODE_OPTIONS'] ?? '';
+      final nodeOptions = existingOpts.isEmpty
+          ? '--require $preloadPath'
+          : '$existingOpts --require $preloadPath';
+
+      final env = <String, String>{
+        ...RuntimeEnvir.baseEnv,
+        'NODE_OPTIONS': nodeOptions,
+      };
+
+      _metroProcess = await Process.start(
+        'npx', args,
+        workingDirectory: project.path,
+        environment: env,
+      );
+
+      const buildDoneMarkers = [
+        'Metro waiting on',
+        'Scan the QR code',
+        'Bundler ready',
+        'Development server started',
+        'Ready!',
+      ];
+
+      void handleChunk(String chunk) {
+        _output += chunk;
+        if (_isBuilding && buildDoneMarkers.any(chunk.contains)) {
+          _isBuilding = false;
+          _status = DebugStatus.running;
+          // Signal the workspace to open the WebPreviewOverlay.
+          // Expo / Metro serves at :8081. For Expo we append ?platform=web
+          // so the WebView renders the React Native web app (react-native-web).
+          _webServerUrl = isExpo
+              ? 'http://localhost:8081/?platform=web'
+              : 'http://localhost:8081';
+        }
+        notifyListeners();
+      }
+
+      _metroProcess!.stdout
+          .transform(const Utf8Decoder(allowMalformed: true))
+          .listen(handleChunk);
+      _metroProcess!.stderr
+          .transform(const Utf8Decoder(allowMalformed: true))
+          .listen(handleChunk);
+
+      _metroProcess!.exitCode.then((_) {
+        if (_status != DebugStatus.idle) Future.microtask(_cleanup);
+      });
+
+      // Timeout: assume running after 60s even if no marker found
+      Future.delayed(const Duration(seconds: 60), () {
+        if (_isBuilding) {
+          _isBuilding = false;
+          if (_status == DebugStatus.starting) _status = DebugStatus.running;
+          _webServerUrl ??= isExpo
+              ? 'http://localhost:8081/?platform=web'
+              : 'http://localhost:8081';
+          notifyListeners();
+        }
+      });
+    } catch (e) {
+      _error = e.toString();
+      debugPrint('[Metro] startMetroSession error: $e');
+      await _cleanup();
+    }
+  }
+
+
   Future<void> stopSession() async {
     if (_status == DebugStatus.idle) return;
     _status = DebugStatus.terminating;
     notifyListeners();
+    _metroProcess?.kill();
+    _metroProcess = null;
     try {
       await _client?.sendRequest('disconnect', {'terminateDebuggee': true})
           .timeout(const Duration(seconds: 3));
@@ -208,6 +419,8 @@ class DebugProvider extends ChangeNotifier {
   }
 
   Future<void> _cleanup() async {
+    _metroProcess?.kill();
+    _metroProcess = null;
     await _eventSub?.cancel();
     _eventSub = null;
     await _client?.dispose();
@@ -296,6 +509,10 @@ class DebugProvider extends ChangeNotifier {
       };
 
       if (_dapConfig.webPlatform.isNotEmpty && _platformArg == _dapConfig.webPlatform) {
+        // Free the port before binding so stale flutter-web processes don't
+        // block the new session (errno 98 = EADDRINUSE).
+        await _freePort(webServerPort);
+
         // Web platform: pass toolArgs so the adapter finds the device without
         // device-list discovery (web-server isn't enumerated by flutter devices).
         launchArgs['toolArgs'] = _dapConfig.webServerArgs.isNotEmpty
@@ -393,17 +610,48 @@ class DebugProvider extends ChangeNotifier {
   }
 
   Future<void> restart() async {
+    if (_isMetroSession) {
+      await restartMetro();
+      return;
+    }
     if (_client == null || !isActive) return;
     await _client!.sendRequest('restart');
   }
 
   Future<void> hotReload() async {
+    if (_isMetroSession) {
+      await hotReloadMetro();
+      return;
+    }
     if (_client == null || !isRunning) return;
     try {
       await _client!.sendRequest('hotReload', {});
     } catch (e) {
       debugPrint('[DAP] hotReload error: $e');
     }
+  }
+
+  /// Triggers a JS reload on the Metro dev server (React Native / Expo).
+  /// Metro listens for POST /reload requests from tooling.
+  Future<void> hotReloadMetro() async {
+    try {
+      final client = HttpClient();
+      final req = await client
+          .postUrl(Uri.parse('http://localhost:8081/reload'))
+          .timeout(const Duration(seconds: 5));
+      await req.close();
+    } catch (e) {
+      debugPrint('[Metro] hotReload POST failed: $e');
+    }
+  }
+
+  /// Kills and restarts the Metro bundler for the current project.
+  Future<void> restartMetro() async {
+    final project = _currentMetroProject;
+    if (project == null) return;
+    await stopSession();
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    await startMetroSession(project);
   }
 
   // ── Breakpoints ───────────────────────────────────────────────────────────
@@ -667,11 +915,14 @@ class DebugProvider extends ChangeNotifier {
     _currentFrameId = null;
     _webServerUrl = null;
     _isBuilding = false;
+    _isMetroSession = false;
+    _currentMetroProject = null;
     notifyListeners();
   }
 
   @override
   void dispose() {
+    _metroProcess?.kill();
     _eventSub?.cancel();
     _client?.dispose();
     super.dispose();

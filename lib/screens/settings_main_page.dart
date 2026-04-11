@@ -8,6 +8,7 @@ import 'settings_ai_page.dart';
 import 'settings_editor_page.dart';
 import 'settings_file_explorer_page.dart';
 import 'settings_general_page.dart';
+import 'settings_git_page.dart';
 import 'settings_run_debug_page.dart';
 import 'settings_terminal_page.dart';
 import 'ssh_settings_page.dart';
@@ -107,6 +108,18 @@ class SettingsMainPage extends StatelessWidget {
             ),
             iconBg: Colors.indigo,
             icon: FontAwesomeIcons.server,
+          ),
+          settingsOptionTile(
+            context,
+            title: 'Git',
+            subtitle: 'Usuário, email e configurações do git',
+            onTap: () => Navigator.of(context).push(settingsFadeRoute(const GitSettingsPage())),
+            borderRadius: const BorderRadius.vertical(
+              top: Radius.circular(5),
+              bottom: Radius.circular(5),
+            ),
+            iconBg: Colors.deepOrangeAccent,
+            icon: FontAwesomeIcons.codeBranch,
           ),
           settingsOptionTile(
             context,

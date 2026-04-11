@@ -42,15 +42,16 @@ const kDeepSeekModels = [
 
 class AiProvider extends ChangeNotifier {
   // ── SharedPreferences keys ────────────────────────────────────────────────
-  static const _kGeminiKey      = 'ai_gemini_key';
-  static const _kGptKey         = 'ai_gpt_key';
-  static const _kClaudeKey      = 'ai_claude_key';
-  static const _kDeepSeekKey    = 'ai_deepseek_key';
-  static const _kGeminiModel    = 'ai_gemini_model';
-  static const _kGptModel       = 'ai_gpt_model';
-  static const _kClaudeModel    = 'ai_claude_model';
-  static const _kDeepSeekModel  = 'ai_deepseek_model';
-  static const _kAgents         = 'ai_agents';
+  static const _kGeminiKey       = 'ai_gemini_key';
+  static const _kGptKey          = 'ai_gpt_key';
+  static const _kClaudeKey       = 'ai_claude_key';
+  static const _kDeepSeekKey     = 'ai_deepseek_key';
+  static const _kGeminiModel     = 'ai_gemini_model';
+  static const _kGptModel        = 'ai_gpt_model';
+  static const _kClaudeModel     = 'ai_claude_model';
+  static const _kDeepSeekModel   = 'ai_deepseek_model';
+  static const _kActiveProvider  = 'ai_active_provider';
+  static const _kAgents          = 'ai_agents';
 
   // ── API keys ──────────────────────────────────────────────────────────────
   String _geminiKey   = '';
@@ -74,6 +75,29 @@ class AiProvider extends ChangeNotifier {
   String get claudeModel   => _claudeModel;
   String get deepSeekModel => _deepSeekModel;
 
+  // ── Active provider ───────────────────────────────────────────────────────
+  /// The provider the user explicitly selected ('gemini','gpt','claude','deepseek').
+  /// Empty string means auto-select (first key that is non-empty).
+  String _activeProvider = '';
+  String get activeProvider => _activeProvider;
+
+  /// Returns the effective provider id, falling back to auto-selection.
+  String get effectiveProvider {
+    if (_activeProvider.isNotEmpty) return _activeProvider;
+    if (_geminiKey.isNotEmpty)   return 'gemini';
+    if (_claudeKey.isNotEmpty)   return 'claude';
+    if (_gptKey.isNotEmpty)      return 'gpt';
+    if (_deepSeekKey.isNotEmpty) return 'deepseek';
+    return '';
+  }
+
+  Future<void> setActiveProvider(String v) async {
+    _activeProvider = v;
+    final p = await SharedPreferences.getInstance();
+    await p.setString(_kActiveProvider, v);
+    notifyListeners();
+  }
+
   // ── Agents ────────────────────────────────────────────────────────────────
   List<AiAgent> _agents = List<AiAgent>.from(kDefaultAgents);
 
@@ -94,6 +118,7 @@ class AiProvider extends ChangeNotifier {
     _gptModel      = p.getString(_kGptModel)      ?? kGptModels.first;
     _claudeModel   = p.getString(_kClaudeModel)   ?? kClaudeModels.first;
     _deepSeekModel = p.getString(_kDeepSeekModel) ?? kDeepSeekModels.first;
+    _activeProvider = p.getString(_kActiveProvider) ?? '';
 
     final raw = p.getString(_kAgents);
     if (raw != null && raw.isNotEmpty) {

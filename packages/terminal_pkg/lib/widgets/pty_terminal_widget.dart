@@ -9,14 +9,18 @@ class PtyTerminalWidget extends StatelessWidget {
   const PtyTerminalWidget({super.key, required this.session});
 
   /// Builds a TerminalTheme that matches the active MaterialTheme.
-  /// Cached by brightness to avoid allocating a new object every build.
+  /// Cached by (brightness + primary + surface) so it invalidates correctly
+  /// when the user switches between custom themes of the same brightness.
+  static int? _lightKey;
+  static int? _darkKey;
   static TerminalTheme? _lightTheme;
   static TerminalTheme? _darkTheme;
 
   static TerminalTheme _themeFor(ColorScheme cs) {
     final isDark = cs.brightness == Brightness.dark;
-    if (isDark && _darkTheme != null) return _darkTheme!;
-    if (!isDark && _lightTheme != null) return _lightTheme!;
+    final key = cs.primary.toARGB32() ^ cs.surface.toARGB32();
+    if (isDark && _darkTheme != null && _darkKey == key) return _darkTheme!;
+    if (!isDark && _lightTheme != null && _lightKey == key) return _lightTheme!;
     final theme = TerminalTheme(
       cursor:     cs.primary,
       selection:  cs.primary.withValues(alpha: 0.35),
@@ -43,7 +47,8 @@ class PtyTerminalWidget extends StatelessWidget {
       searchHitBackgroundCurrent: const Color(0xFFFF8C00),
       searchHitForeground:        const Color(0xFF000000),
     );
-    if (isDark) { _darkTheme = theme; } else { _lightTheme = theme; }
+    if (isDark) { _darkTheme = theme; _darkKey = key; }
+    else { _lightTheme = theme; _lightKey = key; }
     return theme;
   }
 
@@ -59,6 +64,10 @@ class PtyTerminalWidget extends StatelessWidget {
         theme: _themeFor(cs),
         autofocus: true,
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        // deleteDetection: keeps a dummy character in the hidden text field so
+        // Android soft keyboards can detect and send backspace events correctly.
+        // Without this, pressing backspace on most Android keyboards does nothing.
+        deleteDetection: true,
       ),
     );
   }

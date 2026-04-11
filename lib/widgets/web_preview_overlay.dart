@@ -37,50 +37,39 @@ final _kDevices = [
 
 // ── Screen positioning helpers ────────────────────────────────────────────────
 
-/// Returns the screen bounding rect in the *rendered* overlay coordinate space
-/// after taking the current [orientation] into account.
-///
-/// For landscape the canvas transform is translate(0, W*s), rotate(−π/2),
-/// scale(s,s), which maps native portrait (nx, ny) → overlay (ny*s, (W−nx)*s).
-/// Inverting that gives the landscape screen rect used to position the WebView.
 Rect _screenRectInFrame(DeviceInfo d, Orientation orientation) {
   final raw = d.screenPath.getBounds();
   if (!d.isLandscape(orientation)) return raw;
-
   final W = d.frameSize.width;
   return Rect.fromLTRB(raw.top, W - raw.right, raw.bottom, W - raw.left);
 }
 
-/// Width of the rendered frame for [orientation].
 double _renderedFrameWidth(DeviceInfo d, Orientation orientation) =>
     d.isLandscape(orientation) ? d.frameSize.height : d.frameSize.width;
 
-/// Height of the rendered frame for [orientation].
 double _renderedFrameHeight(DeviceInfo d, Orientation orientation) =>
     d.isLandscape(orientation) ? d.frameSize.width : d.frameSize.height;
 
 // ── Overlay ───────────────────────────────────────────────────────────────────
 
-/// Floating, draggable device-preview overlay that renders a Flutter web app
-/// inside a realistic phone bezel.
+/// Full-screen device-preview panel (inserted via OverlayEntry so it can be
+/// closed programmatically by the DebugProvider listener).
 ///
-/// Rendering layers (bottom → top):
-///   1. [InAppWebView] positioned at the exact scaled screen-area rect.
-///      Platform views must NOT go through Flutter transforms, so we compute
-///      the screen rect in overlay coordinates and use [Positioned] directly.
-///   2. [_FrameBezelPainter] drawn on top via [CustomPaint]. It clips out
-///      the screen path before delegating to [DeviceInfo.framePainter], so
-///      only the bezel is painted and the WebView shows through.
+/// Renders a Flutter web app inside the workspace as a page-like surface.
+/// The device frame is scaled to fit the available area and can be hidden
+/// via the toolbar toggle button.
 class WebPreviewOverlay extends StatefulWidget {
   final String url;
   final VoidCallback onClose;
-  final Offset initialPos;
+  /// A context that has a Navigator ancestor — needed for showModalBottomSheet
+  /// because OverlayEntry builders run above the app's Navigator.
+  final BuildContext navigatorContext;
 
   const WebPreviewOverlay({
     super.key,
     required this.url,
     required this.onClose,
-    this.initialPos = const Offset(16, 72),
+    required this.navigatorContext,
   });
 
   @override
@@ -88,19 +77,14 @@ class WebPreviewOverlay extends StatefulWidget {
 }
 
 class _WebPreviewOverlayState extends State<WebPreviewOverlay> {
-  static const _kMinFrameW = 180.0;
-  static const _kMaxFrameW = 480.0;
-  static const _kDefaultFrameW = 270.0;
-
-  /// Current overlay width — changed by the resize handle.
-  double _frameW = _kDefaultFrameW;
-
-  late Offset _pos;
-  bool _minimized = false;
-
   _DeviceEntry _entry = _kDevices[0];
   Orientation _orientation = Orientation.portrait;
   _NetMode _net = _NetMode.online;
+  bool _showFrame = true;
+
+  /// Whether the panel is collapsed to a floating bubble.
+  bool _minimized = false;
+  Offset _bubblePos = const Offset(16, 120);
 
   InAppWebViewController? _ctrl;
   bool _isLoading = true;
@@ -120,7 +104,6 @@ class _WebPreviewOverlayState extends State<WebPreviewOverlay> {
   @override
   void initState() {
     super.initState();
-    _pos = widget.initialPos;
     _setupServiceWorker();
   }
 
@@ -134,28 +117,9 @@ class _WebPreviewOverlayState extends State<WebPreviewOverlay> {
     } catch (_) {}
   }
 
-  // ── Geometry ────────────────────────────────────────────────────────────────
-
-  /// Scale factor: _frameW / rendered-frame-width.
-  double get _scale {
-    final rw = _renderedFrameWidth(_entry.info, _orientation);
-    return _frameW / rw;
-  }
-
-  /// Overlay frame height after scaling.
-  double get _frameH {
-    final rh = _renderedFrameHeight(_entry.info, _orientation);
-    return rh * _scale;
-  }
-
-  /// Screen area in overlay coordinates (already scaled).
-  Rect get _scaledScreen {
-    final r = _screenRectInFrame(_entry.info, _orientation);
-    final s = _scale;
-    return Rect.fromLTWH(r.left * s, r.top * s, r.width * s, r.height * s);
-  }
-
   // ── Actions ─────────────────────────────────────────────────────────────────
+
+  void _toggleMinimize() => setState(() => _minimized = !_minimized);
 
   void _reload() {
     setState(() {
@@ -165,42 +129,15 @@ class _WebPreviewOverlayState extends State<WebPreviewOverlay> {
     _ctrl?.reload();
   }
 
-  void _toggleMinimized() {
-    setState(() => _minimized = !_minimized);
-    // Clamp bubble position when restoring
-    if (!_minimized) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        final mq = MediaQuery.of(context);
-        final minTop = mq.padding.top + kToolbarHeight + 3;
-        final totalH = _frameH + 44;
-        final clamped = Offset(
-          _pos.dx.clamp(0.0, (mq.size.width - _frameW).toDouble()),
-          _pos.dy.clamp(minTop, (mq.size.height - totalH).toDouble()),
-        );
-        if (clamped != _pos) setState(() => _pos = clamped);
-      });
-    }
-  }
-
   void _toggleOrientation() {
     setState(() {
       _orientation = _orientation == Orientation.portrait
           ? Orientation.landscape
           : Orientation.portrait;
     });
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      final mq = MediaQuery.of(context);
-      final minTop = mq.padding.top + kToolbarHeight + 3;
-      final totalH = _frameH + 44;
-      final clamped = Offset(
-        _pos.dx.clamp(0.0, (mq.size.width - _frameW).toDouble()),
-        _pos.dy.clamp(minTop, (mq.size.height - totalH).toDouble()),
-      );
-      if (clamped != _pos) setState(() => _pos = clamped);
-    });
   }
+
+  void _toggleFrame() => setState(() => _showFrame = !_showFrame);
 
   Future<void> _setNetwork(_NetMode mode) async {
     setState(() => _net = mode);
@@ -217,13 +154,13 @@ class _WebPreviewOverlayState extends State<WebPreviewOverlay> {
 
   void _showDevicePicker() {
     showModalBottomSheet<void>(
-      context: context,
+      context: widget.navigatorContext,
       backgroundColor: Colors.transparent,
       builder: (_) => _DevicePickerSheet(
         current: _entry,
         onSelect: (e) {
           setState(() => _entry = e);
-          Navigator.pop(context);
+          Navigator.pop(widget.navigatorContext);
         },
       ),
     );
@@ -231,191 +168,160 @@ class _WebPreviewOverlayState extends State<WebPreviewOverlay> {
 
   void _showNetworkPicker() {
     showModalBottomSheet<void>(
-      context: context,
+      context: widget.navigatorContext,
       backgroundColor: Colors.transparent,
       builder: (_) => _NetPickerSheet(
         current: _net,
         onSelect: (m) {
-          Navigator.pop(context);
+          Navigator.pop(widget.navigatorContext);
           _setNetwork(m);
         },
       ),
     );
   }
 
-  // ── Build ───────────────────────────────────────────────────────────────────
+  // ── WebView helper ───────────────────────────────────────────────────────────
 
-  Widget _buildBubble(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Positioned(
-      left: _pos.dx,
-      top: _pos.dy,
-      child: GestureDetector(
-        onTap: _toggleMinimized,
-        onPanUpdate: (d) {
-          final mq = MediaQuery.of(context);
-          setState(() {
-            _pos = Offset(
-              (_pos.dx + d.delta.dx).clamp(0.0, mq.size.width - 60.0),
-              (_pos.dy + d.delta.dy).clamp(0.0, mq.size.height - 60.0),
-            );
-          });
-        },
-        child: Material(
-          color: Colors.transparent,
-          child: Container(
-            width: 60,
-            height: 60,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: cs.primaryContainer,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.25),
-                  blurRadius: 12,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Icon(
-              _entry.isIos
-                  ? Icons.phone_iphone_rounded
-                  : Icons.phone_android_rounded,
-              color: cs.primary,
-              size: 28,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  Widget _buildWebView() => InAppWebView(
+        key: ValueKey('wv_${_orientation.name}'),
+        initialUrlRequest: URLRequest(url: WebUri(widget.url)),
+        initialSettings: _webSettings,
+        onWebViewCreated: (c) => _ctrl = c,
+        onLoadStart: (_, __) => setState(() {
+          _isLoading = true;
+          _loadError = null;
+        }),
+        onLoadStop: (_, __) => setState(() => _isLoading = false),
+        onReceivedError: (_, __, error) => setState(() {
+          _isLoading = false;
+          if (error.type != WebResourceErrorType.CANCELLED) {
+            _loadError = error.description;
+          }
+        }),
+        onConsoleMessage: (_, m) =>
+            debugPrint('[WebPreview] ${m.messageLevel}: ${m.message}'),
+      );
+
+  // ── Build ────────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    if (_minimized) return _buildBubble(context);
+    final cs = Theme.of(context).colorScheme;
 
-    final screen = _scaledScreen;
-    final frameH = _frameH;
+    // ── Minimized bubble ───────────────────────────────────────────────────
+    if (_minimized) {
+      return Positioned(
+        left: _bubblePos.dx,
+        top: _bubblePos.dy,
+        child: GestureDetector(
+          onPanUpdate: (d) =>
+              setState(() => _bubblePos += d.delta),
+          onTap: _toggleMinimize,
+          child: Material(
+            elevation: 8,
+            color: cs.primaryContainer,
+            shape: const CircleBorder(),
+            child: SizedBox(
+              width: 56,
+              height: 56,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  Icon(Icons.phone_android_rounded,
+                      size: 24, color: cs.primary),
+                  if (_isLoading)
+                    SizedBox(
+                      width: 48,
+                      height: 48,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: cs.primary),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
 
-    return Positioned(
-      left: _pos.dx,
-      top: _pos.dy,
+    // ── Full-screen panel ──────────────────────────────────────────────────
+    return Positioned.fill(
       child: Material(
-        color: Colors.transparent,
-        child: SizedBox(
-          width: _frameW,
+        color: cs.surface,
+        child: SafeArea(
           child: Column(
-            mainAxisSize: MainAxisSize.min,
             children: [
-              _Toolbar(
+              _PageToolbar(
                 entry: _entry,
                 orientation: _orientation,
                 net: _net,
+                showFrame: _showFrame,
                 isLoading: _isLoading,
                 loadError: _loadError,
-                onDrag: (d) {
-                  final mq = MediaQuery.of(context);
-                  final scrW = mq.size.width;
-                  final scrH = mq.size.height;
-                  final minTop = mq.padding.top + kToolbarHeight + 3;
-                  final totalH = _frameH + 44;
-                  setState(() {
-                    _pos = Offset(
-                      (_pos.dx + d.dx).clamp(0.0, (scrW - _frameW).toDouble()),
-                      (_pos.dy + d.dy).clamp(minTop, (scrH - totalH).toDouble()),
-                    );
-                  });
-                },
                 onDevice: _showDevicePicker,
                 onOrientation: _toggleOrientation,
                 onNetwork: _showNetworkPicker,
                 onReload: _reload,
-                onMinimize: _toggleMinimized,
+                onToggleFrame: _toggleFrame,
+                onMinimize: _toggleMinimize,
                 onClose: widget.onClose,
               ),
-              Stack(
-                children: [
-                  SizedBox(
-                    width: _frameW,
-                    height: frameH,
-                    child: Stack(
-                      clipBehavior: Clip.hardEdge,
+              Expanded(
+                child: LayoutBuilder(
+                  builder: (ctx, constraints) {
+                    if (!_showFrame) {
+                      // Plain full-area web view with no bezel
+                      return _buildWebView();
+                    }
+
+                    // Scaled device frame centered in available space
+                    final W = constraints.maxWidth;
+                    final H = constraints.maxHeight;
+                    final fw = _renderedFrameWidth(_entry.info, _orientation);
+                    final fh = _renderedFrameHeight(_entry.info, _orientation);
+                    // 0.92 → 4% padding on each side so the frame never
+                    // touches the edges of the screen.
+                    final scale = math.min(W / fw, H / fh) * 0.92;
+                    final ox = (W - fw * scale) / 2;
+                    final oy = (H - fh * scale) / 2;
+                    final screen =
+                        _screenRectInFrame(_entry.info, _orientation);
+
+                    return Stack(
                       children: [
-                        // ── 1. WebView: sized to the scaled screen area ──────
+                        // ── 1. WebView at exact scaled screen area ───────────
                         Positioned(
-                          left: screen.left,
-                          top: screen.top,
-                          width: screen.width,
-                          height: screen.height,
+                          left: ox + screen.left * scale,
+                          top: oy + screen.top * scale,
+                          width: screen.width * scale,
+                          height: screen.height * scale,
                           child: ClipRRect(
-                            borderRadius: BorderRadius.circular(_scale * 40),
-                            child: InAppWebView(
-                              key: ValueKey('wv_${_orientation.name}'),
-                              initialUrlRequest:
-                                  URLRequest(url: WebUri(widget.url)),
-                              initialSettings: _webSettings,
-                              onWebViewCreated: (c) => _ctrl = c,
-                              onLoadStart: (_, __) => setState(() {
-                                _isLoading = true;
-                                _loadError = null;
-                              }),
-                              onLoadStop: (_, __) =>
-                                  setState(() => _isLoading = false),
-                              onReceivedError: (_, __, error) => setState(() {
-                                _isLoading = false;
-                                if (error.type !=
-                                    WebResourceErrorType.CANCELLED) {
-                                  _loadError = error.description;
-                                }
-                              }),
-                              onConsoleMessage: (_, m) => debugPrint(
-                                  '[WebPreview] ${m.messageLevel}: ${m.message}'),
-                            ),
+                            borderRadius:
+                                BorderRadius.circular(scale * 40),
+                            child: _buildWebView(),
                           ),
                         ),
-
-                        // ── 2. Device frame bezel: CustomPainter drawn on top
-                        IgnorePointer(
-                          child: SizedBox(
-                            width: _frameW,
-                            height: frameH,
+                        // ── 2. Device bezel painted over the WebView ─────────
+                        Positioned(
+                          left: ox,
+                          top: oy,
+                          width: fw * scale,
+                          height: fh * scale,
+                          child: IgnorePointer(
                             child: CustomPaint(
+                              size: Size(fw * scale, fh * scale),
                               painter: _FrameBezelPainter(
                                 device: _entry.info,
                                 orientation: _orientation,
-                                scale: _scale,
+                                scale: scale,
                               ),
                             ),
                           ),
                         ),
                       ],
-                    ),
-                  ),
-
-                  // ── 3. Resize handle — bottom-right corner ───────────────
-                  Positioned(
-                    right: 0,
-                    bottom: 0,
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onPanUpdate: (d) {
-                        final mq = MediaQuery.of(context);
-                        setState(() {
-                          _frameW = (_frameW + d.delta.dx)
-                              .clamp(_kMinFrameW, _kMaxFrameW);
-                          // keep overlay on screen after resize
-                          final maxX = mq.size.width - _frameW;
-                          if (_pos.dx > maxX) _pos = Offset(maxX, _pos.dy);
-                        });
-                      },
-                      child: _ResizeHandle(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .onSurface
-                              .withValues(alpha: 0.35)),
-                    ),
-                  ),
-                ],
+                    );
+                  },
+                ),
               ),
             ],
           ),
@@ -427,22 +333,6 @@ class _WebPreviewOverlayState extends State<WebPreviewOverlay> {
 
 // ── Frame bezel painter ───────────────────────────────────────────────────────
 
-/// Paints only the device bezel (everything except the screen area).
-///
-/// The [device.framePainter] draws an opaque phone body that covers the screen.
-/// We counter this by clipping the canvas to the inverse of [device.screenPath]
-/// (an even-odd donut) before delegating to [framePainter], so the screen area
-/// stays transparent and the [InAppWebView] below shows through exactly.
-///
-/// Canvas transform (portrait):
-///   canvas.scale(scale, scale) → native frame coordinates
-///
-/// Canvas transform (landscape):
-///   canvas.translate(0, frameSize.width * scale)
-///   canvas.rotate(-π/2)
-///   canvas.scale(scale, scale) → native frame coordinates
-///
-/// Both transforms match the WebView's [_scaledScreen] position exactly.
 class _FrameBezelPainter extends CustomPainter {
   final DeviceInfo device;
   final Orientation orientation;
@@ -463,16 +353,11 @@ class _FrameBezelPainter extends CustomPainter {
     canvas.save();
 
     if (isLandscape) {
-      // Map native portrait frame (W × H) to landscape overlay:
-      // native (nx, ny) → overlay (ny*s, (W−nx)*s)
       canvas.translate(0, d.frameSize.width * s);
       canvas.rotate(-math.pi / 2);
     }
     canvas.scale(s, s);
 
-    // Donut clip: full frame rect minus screen path.
-    // The even-odd fill rule creates a hole wherever screenPath overlaps,
-    // so framePainter can't paint over the screen area.
     final clipPath = Path()
       ..addRect(Rect.fromLTWH(0, 0, d.frameSize.width, d.frameSize.height))
       ..addPath(d.screenPath, Offset.zero);
@@ -491,33 +376,35 @@ class _FrameBezelPainter extends CustomPainter {
       old.scale != scale;
 }
 
-// ── Toolbar ───────────────────────────────────────────────────────────────────
+// ── Page toolbar ──────────────────────────────────────────────────────────────
 
-class _Toolbar extends StatelessWidget {
+class _PageToolbar extends StatelessWidget {
   final _DeviceEntry entry;
   final Orientation orientation;
   final _NetMode net;
+  final bool showFrame;
   final bool isLoading;
   final String? loadError;
-  final void Function(Offset) onDrag;
   final VoidCallback onDevice;
   final VoidCallback onOrientation;
   final VoidCallback onNetwork;
   final VoidCallback onReload;
+  final VoidCallback onToggleFrame;
   final VoidCallback onMinimize;
   final VoidCallback onClose;
 
-  const _Toolbar({
+  const _PageToolbar({
     required this.entry,
     required this.orientation,
     required this.net,
+    required this.showFrame,
     required this.isLoading,
     required this.loadError,
-    required this.onDrag,
     required this.onDevice,
     required this.onOrientation,
     required this.onNetwork,
     required this.onReload,
+    required this.onToggleFrame,
     required this.onMinimize,
     required this.onClose,
   });
@@ -527,123 +414,127 @@ class _Toolbar extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     final hasError = loadError != null;
 
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onPanUpdate: (d) => onDrag(d.delta),
-      child: Container(
-        height: 44,
-        decoration: BoxDecoration(
-          color: hasError ? cs.errorContainer : cs.surfaceContainerHighest,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.15),
-              blurRadius: 10,
-              offset: const Offset(0, 2),
-            ),
-          ],
+    return Container(
+      height: 44,
+       
+      decoration: BoxDecoration(
+        color: hasError ? cs.errorContainer : cs.surface,
+        border: Border(
+          bottom: BorderSide(
+            color: cs.outline.withValues(alpha: 0.15),
+          ),
         ),
-        child: Row(
-          children: [
-            const SizedBox(width: 8),
-            // Device selector chip — Flexible so it shrinks, never pushes right btns off screen
-            Flexible(
-              child: GestureDetector(
-                onTap: onDevice,
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: cs.primaryContainer.withValues(alpha: 0.5),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        entry.isIos
-                            ? Icons.phone_iphone_rounded
-                            : Icons.phone_android_rounded,
-                        size: 11,
-                        color: cs.primary,
-                      ),
-                      const SizedBox(width: 3),
-                      Flexible(
-                        child: Text(
-                          entry.name,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
-                            color: cs.primary,
-                          ),
+      ),
+      child: Row(
+        children: [
+          const SizedBox(width: 8),
+          // Device selector chip
+          Flexible(
+            child: GestureDetector(
+              onTap: onDevice,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                decoration: BoxDecoration(
+                  color: cs.primaryContainer.withValues(alpha: 0.5),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      entry.isIos
+                          ? Icons.phone_iphone_rounded
+                          : Icons.phone_android_rounded,
+                      size: 11,
+                      color: cs.primary,
+                    ),
+                    const SizedBox(width: 3),
+                    Flexible(
+                      child: Text(
+                        entry.name,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: cs.primary,
                         ),
                       ),
-                      Icon(Icons.expand_more_rounded,
-                          size: 12, color: cs.primary),
-                    ],
-                  ),
+                    ),
+                    Icon(Icons.expand_more_rounded,
+                        size: 12, color: cs.primary),
+                  ],
                 ),
               ),
             ),
-            const SizedBox(width: 4),
-            // Drag indicator (centre hint)
-            Icon(Icons.drag_indicator_rounded,
-                size: 14,
-                color: cs.onSurface.withValues(alpha: 0.25)),
-            const SizedBox(width: 4),
-            // Orientation
-            _ToolBtn(
-              icon: orientation == Orientation.portrait
-                  ? Icons.stay_current_portrait_rounded
-                  : Icons.stay_current_landscape_rounded,
-              onTap: onOrientation,
-              cs: cs,
-            ),
-            // Network
-            _ToolBtn(
-              icon: net.icon,
-              onTap: onNetwork,
-              cs: cs,
-              color: net == _NetMode.offline ? cs.error : null,
-            ),
-            // Reload / Loading
-            SizedBox(
-              width: 28,
-              height: 28,
-              child: isLoading
-                  ? Center(
-                      child: SizedBox(
-                        width: 13,
-                        height: 13,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 1.5, color: cs.primary),
-                      ),
-                    )
-                  : _ToolBtn(
-                      icon: Icons.refresh_rounded,
-                      onTap: onReload,
-                      cs: cs,
-                      color: hasError ? cs.error : null,
+          ),
+          const Spacer(),
+          // Orientation
+          _ToolBtn(
+            icon: orientation == Orientation.portrait
+                ? Icons.stay_current_portrait_rounded
+                : Icons.stay_current_landscape_rounded,
+            onTap: onOrientation,
+            cs: cs,
+          ),
+          // Network
+/*           _ToolBtn(
+            icon: net.icon,
+            onTap: onNetwork,
+            cs: cs,
+            color: net == _NetMode.offline ? cs.error : null,
+          ), */
+          // Reload / Loading
+          SizedBox(
+            width: 28,
+            height: 28,
+            child: isLoading
+                ? Center(
+                    child: SizedBox(
+                      width: 13,
+                      height: 13,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 1.5, color: cs.primary),
                     ),
-            ),
-            // Debug actions popup (single btn — avoids overflow when debug active)
-            Consumer<DebugProvider>(
-              builder: (context, dbg, _) {
-                if (!dbg.isRunning) return const SizedBox.shrink();
-                return _DebugPopupBtn(cs: cs, dbg: dbg);
-              },
-            ),
-            // Minimize to bubble
-            _ToolBtn(
-                icon: Icons.picture_in_picture_alt_rounded,
-                onTap: onMinimize,
-                cs: cs),
-            // Close
-            _ToolBtn(icon: Icons.close_rounded, onTap: onClose, cs: cs),
-            const SizedBox(width: 4),
-          ],
-        ),
+                  )
+                : _ToolBtn(
+                    icon: Icons.refresh_rounded,
+                    onTap: onReload,
+                    cs: cs,
+                    color: hasError ? cs.error : null,
+                  ),
+          ),
+          // Debug actions popup
+          Consumer<DebugProvider>(
+            builder: (context, dbg, _) {
+              if (!dbg.isRunning) return const SizedBox.shrink();
+              return _DebugPopupBtn(
+                cs: cs,
+                dbg: dbg,
+                onReloadWebView: onReload,
+              );
+            },
+          ),
+          // Toggle device frame — phone icon when frame is visible,
+          // crop_free (full-screen) icon when frame is hidden
+          _ToolBtn(
+            icon: showFrame
+                ? Icons.phone_android_rounded
+                : Icons.crop_free_rounded,
+            onTap: onToggleFrame,
+            cs: cs,
+            color: showFrame ? cs.primary : cs.onSurfaceVariant,
+          ),
+          // Minimize to floating bubble
+          _ToolBtn(
+            icon: Icons.bubble_chart_rounded,
+            onTap: onMinimize,
+            cs: cs,
+          ),
+          // Close
+          _ToolBtn(icon: Icons.close_rounded, onTap: onClose, cs: cs),
+          const SizedBox(width: 4),
+        ],
       ),
     );
   }
@@ -673,69 +564,74 @@ class _ToolBtn extends StatelessWidget {
       );
 }
 
-// ── Resize handle ─────────────────────────────────────────────────────────────
-
-class _ResizeHandle extends StatelessWidget {
-  final Color color;
-  const _ResizeHandle({required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 28,
-      height: 28,
-      child: CustomPaint(painter: _ResizeHandlePainter(color: color)),
-    );
-  }
-}
-
-class _ResizeHandlePainter extends CustomPainter {
-  final Color color;
-  const _ResizeHandlePainter({required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..strokeWidth = 1.5
-      ..strokeCap = StrokeCap.round
-      ..style = PaintingStyle.stroke;
-    // Three diagonal lines in the bottom-right corner
-    for (int i = 1; i <= 3; i++) {
-      final offset = i * 6.0;
-      canvas.drawLine(
-        Offset(size.width - offset, size.height),
-        Offset(size.width, size.height - offset),
-        paint,
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(_ResizeHandlePainter old) => old.color != color;
-}
-
 // ── Debug popup button ────────────────────────────────────────────────────────
 
-/// Single-button replacement for hot-reload + hot-restart so the toolbar Row
-/// never overflows the fixed 270 px width.
 class _DebugPopupBtn extends StatelessWidget {
   final ColorScheme cs;
   final DebugProvider dbg;
+  /// Called to reload the WebView (used for Metro sessions).
+  final VoidCallback onReloadWebView;
 
-  const _DebugPopupBtn({required this.cs, required this.dbg});
+  const _DebugPopupBtn({
+    required this.cs,
+    required this.dbg,
+    required this.onReloadWebView,
+  });
 
   @override
   Widget build(BuildContext context) {
+    // Metro sessions have no DAP — offer WebView reload + Metro restart instead.
+    if (dbg.isMetroSession) {
+      return PopupMenuButton<String>(
+        padding: EdgeInsets.zero,
+        icon: const Icon(Icons.electric_bolt_rounded,
+            size: 16, color: Colors.deepOrange),
+        iconSize: 16,
+        constraints: const BoxConstraints(
+            minWidth: 28, maxWidth: 28, minHeight: 28, maxHeight: 28),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        onSelected: (v) {
+          if (v == 'webReload') onReloadWebView();
+          if (v == 'metroStop') dbg.stopSession();
+        },
+        itemBuilder: (_) => [
+          PopupMenuItem(
+            value: 'webReload',
+            height: 40,
+            child: Row(
+              children: [
+                Icon(Icons.refresh_rounded, size: 16, color: cs.primary),
+                const SizedBox(width: 10),
+                Text('Recarregar preview',
+                    style: TextStyle(fontSize: 13, color: cs.onSurface)),
+              ],
+            ),
+          ),
+          PopupMenuItem(
+            value: 'metroStop',
+            height: 40,
+            child: Row(
+              children: [
+                Icon(Icons.stop_circle_outlined, size: 16, color: cs.error),
+                const SizedBox(width: 10),
+                Text('Parar Metro',
+                    style: TextStyle(fontSize: 13, color: cs.error)),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+
+    // Flutter DAP session — hot reload / restart via DAP.
     return PopupMenuButton<String>(
       padding: EdgeInsets.zero,
-      icon: Icon(Icons.electric_bolt_rounded,
+      icon: const Icon(Icons.electric_bolt_rounded,
           size: 16, color: Colors.orange),
       iconSize: 16,
-      constraints: const BoxConstraints(minWidth: 28, maxWidth: 28,
-          minHeight: 28, maxHeight: 28),
-      shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      constraints: const BoxConstraints(
+          minWidth: 28, maxWidth: 28, minHeight: 28, maxHeight: 28),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       onSelected: (v) {
         if (v == 'reload') dbg.hotReload();
         if (v == 'restart') dbg.restart();
@@ -746,7 +642,7 @@ class _DebugPopupBtn extends StatelessWidget {
           height: 40,
           child: Row(
             children: [
-              Icon(Icons.electric_bolt_rounded,
+              const Icon(Icons.electric_bolt_rounded,
                   size: 16, color: Colors.orange),
               const SizedBox(width: 10),
               Text('Hot Reload',
@@ -759,8 +655,7 @@ class _DebugPopupBtn extends StatelessWidget {
           height: 40,
           child: Row(
             children: [
-              Icon(Icons.restart_alt_rounded,
-                  size: 16, color: cs.primary),
+              Icon(Icons.restart_alt_rounded, size: 16, color: cs.primary),
               const SizedBox(width: 10),
               Text('Hot Restart',
                   style: TextStyle(fontSize: 13, color: cs.onSurface)),
@@ -829,8 +724,7 @@ class _DeviceTile extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       child: Padding(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         child: Row(
           children: [
             Container(
@@ -847,8 +741,7 @@ class _DeviceTile extends StatelessWidget {
                     ? Icons.phone_iphone_rounded
                     : Icons.phone_android_rounded,
                 size: 16,
-                color:
-                    isSelected ? cs.primary : cs.onSurfaceVariant,
+                color: isSelected ? cs.primary : cs.onSurfaceVariant,
               ),
             ),
             const SizedBox(width: 12),
@@ -861,8 +754,7 @@ class _DeviceTile extends StatelessWidget {
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
-                      color:
-                          isSelected ? cs.primary : cs.onSurface,
+                      color: isSelected ? cs.primary : cs.onSurface,
                     ),
                   ),
                   Text(
@@ -878,8 +770,7 @@ class _DeviceTile extends StatelessWidget {
               ),
             ),
             if (isSelected)
-              Icon(Icons.check_circle_rounded,
-                  size: 18, color: cs.primary),
+              Icon(Icons.check_circle_rounded, size: 18, color: cs.primary),
           ],
         ),
       ),
@@ -912,16 +803,14 @@ class _NetPickerSheet extends StatelessWidget {
           _SheetHandle(cs: cs),
           const SizedBox(height: 12),
           _SheetTitle(
-              icon: Icons.network_check_rounded,
-              label: 'Network',
-              cs: cs),
+              icon: Icons.network_check_rounded, label: 'Network', cs: cs),
           const SizedBox(height: 8),
           for (final m in _NetMode.values)
             InkWell(
               onTap: () => onSelect(m),
               child: Padding(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 16, vertical: 12),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 child: Row(
                   children: [
                     Container(
@@ -937,12 +826,8 @@ class _NetPickerSheet extends StatelessWidget {
                         m.icon,
                         size: 16,
                         color: m == _NetMode.offline
-                            ? (m == current
-                                ? cs.error
-                                : cs.onSurfaceVariant)
-                            : (m == current
-                                ? cs.primary
-                                : cs.onSurfaceVariant),
+                            ? (m == current ? cs.error : cs.onSurfaceVariant)
+                            : (m == current ? cs.primary : cs.onSurfaceVariant),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -951,9 +836,7 @@ class _NetPickerSheet extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
-                        color: m == current
-                            ? cs.primary
-                            : cs.onSurface,
+                        color: m == current ? cs.primary : cs.onSurface,
                       ),
                     ),
                     const Spacer(),

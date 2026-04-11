@@ -107,11 +107,33 @@ class _InputAreaState extends State<_InputArea> {
                 ),
               ),
 
+            // Pending terminal commands warning
+            if (chat.hasPendingTerminalOps)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 8, 14, 0),
+                child: Row(
+                  children: [
+                    Icon(Icons.hourglass_top_rounded,
+                        size: 13, color: cs.primary),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'Aceite ou recuse os comandos pendentes antes de continuar.',
+                        style: TextStyle(
+                            fontSize: 11, color: cs.onSurfaceVariant),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
             // Text field
             TextField(
               controller: widget.ctrl,
               focusNode: widget.focusNode,
-              enabled: !chat.isStreaming && !widget.isBuildingCtx,
+              enabled: !chat.isStreaming &&
+                  !widget.isBuildingCtx &&
+                  !chat.hasPendingTerminalOps,
               maxLines: 6,
               minLines: 1,
               textInputAction: TextInputAction.newline,
@@ -122,7 +144,9 @@ class _InputAreaState extends State<_InputArea> {
                     ? 'Aguardando resposta…'
                     : widget.isBuildingCtx
                         ? 'Lendo projeto…'
-                        : 'Pergunte algo…',
+                        : chat.hasPendingTerminalOps
+                            ? 'Comandos pendentes de aprovação…'
+                            : 'Pergunte algo…',
                 hintStyle: TextStyle(color: cs.onSurfaceVariant, fontSize: 13),
                 border: InputBorder.none,
                 contentPadding: const EdgeInsets.fromLTRB(14, 12, 14, 4),

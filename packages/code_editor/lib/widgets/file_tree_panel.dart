@@ -26,10 +26,13 @@ class FileTreePanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    // Only rebuild the tree when rootNode itself changes (project open/refresh).
+    // Rebuild when rootNode changes (project open/close) OR when treeVersion
+    // increments (folder expanded/collapsed). The version counter is needed
+    // because expandNode() mutates the existing FileNode in place — the rootNode
+    // reference doesn't change, so a plain rootNode select would miss it.
     // Active-file highlighting is handled per-leaf via context.select<>.
-    final rootNode = context.select<EditorProvider, FileNode?>(
-      (e) => e.rootNode,
+    final (rootNode, _) = context.select<EditorProvider, (FileNode?, int)>(
+      (e) => (e.rootNode, e.treeVersion),
     );
     return ColoredBox(
       color: cs.surface,

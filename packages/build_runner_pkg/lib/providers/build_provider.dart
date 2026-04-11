@@ -54,6 +54,7 @@ List<BuildPlatform> supportedPlatforms(SdkType sdk) {
     case SdkType.nodejs:
     case SdkType.python:
     case SdkType.swift:
+    case SdkType.go:
       return [BuildPlatform.script];
   }
 }
@@ -175,6 +176,8 @@ class BuildProvider extends ChangeNotifier {
         return 'python3 main.py';
       case SdkType.swift:
         return 'swift build';
+      case SdkType.go:
+        return 'go build -o app .';
     }
   }
 

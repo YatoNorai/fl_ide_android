@@ -49,6 +49,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final s = AppStrings.of(context);
 
     return Scaffold(
    //   backgroundColor: cs.surface,
@@ -71,7 +72,6 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       ),
       body: Consumer<ProjectManagerProvider>(
         builder: (context, pm, _) {
-          final s = AppStrings.of(context);
           return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -138,32 +138,32 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                           }),
                         ),
             ),
-              SafeArea(
-            top: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
-              child: Row(
-                children: [
-
-                  OutlinedButton(
-                    onPressed:
-                         () => Navigator.pop(context),
-                    style: OutlinedButton.styleFrom(
-                    //  padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(18)),
-                    ),
-                    child: Text(s.close),
-                  ),
-                 
-                ],
-              ),
-            ),
-          ),
+       
           ],
         );
         },
       ),
+      extendBody: true,
+      bottomNavigationBar:    Padding(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+                child: Row(
+              children: [
+                          
+                OutlinedButton(
+                  onPressed:
+                       () => Navigator.pop(context),
+                  style: OutlinedButton.styleFrom(
+                  //  padding: const EdgeInsets.symmetric(vertical: 14),
+                  backgroundColor: cs.surface,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(18)),
+                  ),
+                  child: Text(s.close),
+                ),
+               
+              ],
+            ),
+              ),
     );
   }
 

@@ -16,6 +16,9 @@ class AiAgent {
   final bool isOrchestrator;
   final String planAgentId;
   final String implAgentId;
+  /// IDs of sub-agents the orchestrator will use, in order.
+  /// Empty means "use all non-orchestrator agents" (backwards-compat default).
+  final List<String> enabledSubAgentIds;
 
   const AiAgent({
     required this.id,
@@ -27,6 +30,7 @@ class AiAgent {
     this.isOrchestrator = false,
     this.planAgentId = '',
     this.implAgentId = '',
+    this.enabledSubAgentIds = const [],
   });
 
   AiAgent copyWith({
@@ -39,6 +43,7 @@ class AiAgent {
     bool? isOrchestrator,
     String? planAgentId,
     String? implAgentId,
+    List<String>? enabledSubAgentIds,
   }) =>
       AiAgent(
         id: id ?? this.id,
@@ -50,6 +55,7 @@ class AiAgent {
         isOrchestrator: isOrchestrator ?? this.isOrchestrator,
         planAgentId: planAgentId ?? this.planAgentId,
         implAgentId: implAgentId ?? this.implAgentId,
+        enabledSubAgentIds: enabledSubAgentIds ?? this.enabledSubAgentIds,
       );
 
   Map<String, dynamic> toJson() => {
@@ -62,6 +68,7 @@ class AiAgent {
         'isOrchestrator': isOrchestrator,
         'planAgentId': planAgentId,
         'implAgentId': implAgentId,
+        'enabledSubAgentIds': enabledSubAgentIds,
       };
 
   factory AiAgent.fromJson(Map<String, dynamic> json) => AiAgent(
@@ -74,6 +81,9 @@ class AiAgent {
         isOrchestrator: json['isOrchestrator'] as bool? ?? false,
         planAgentId: json['planAgentId'] as String? ?? '',
         implAgentId: json['implAgentId'] as String? ?? '',
+        enabledSubAgentIds: ((json['enabledSubAgentIds'] as List?)
+                ?.cast<String>()) ??
+            const [],
       );
 
   static String encodeList(List<AiAgent> agents) =>

@@ -2,28 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../models/widget_node.dart';
 
-enum SidebarTab { build, tree }
-
 enum PreviewMode { rectangle, phone, tablet }
 
 class VisualEditorProvider extends ChangeNotifier {
-  // ── Sidebar & panel state ─────────────────────────────────────────────────
-  SidebarTab _activeTab = SidebarTab.build;
-  bool _panelOpen = true;
-
-  SidebarTab get activeTab => _activeTab;
-  bool get panelOpen => _panelOpen;
-
-  void selectTab(SidebarTab tab) {
-    if (_activeTab == tab) {
-      _panelOpen = !_panelOpen;
-    } else {
-      _activeTab = tab;
-      _panelOpen = true;
-    }
-    notifyListeners();
-  }
-
   // ── Preview mode ──────────────────────────────────────────────────────────
   PreviewMode _previewMode = PreviewMode.phone;
   PreviewMode get previewMode => _previewMode;

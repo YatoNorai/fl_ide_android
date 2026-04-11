@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:core/core.dart' show RuntimeEnvir;
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -9,13 +11,23 @@ import 'package:provider/provider.dart';
 import 'package:ssh_pkg/ssh_pkg.dart';
 
 import '../l10n/app_strings.dart';
+import '../main.dart' show AppBootData;
 import 'settings_screen.dart';
 import 'standalone_terminal_screen.dart';
 
 // ── Home screen ───────────────────────────────────────────────────────────────
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  // Git availability is resolved before runApp in main() — no async check
+  // needed here, so there is no pop-in of the clone card on first render.
+  bool get _gitAvailable => AppBootData.gitAvailable;
 
   @override
   Widget build(BuildContext context) {
@@ -79,6 +91,16 @@ class HomeScreen extends StatelessWidget {
                               bottom: Radius.circular(5)),
                           iconBg: Colors.teal,
                           icon: FontAwesomeIcons.folderOpen),
+                      if (_gitAvailable)
+                        _homeOption(context,
+                            title: 'Clonar repositório',
+                            subtitle: 'Clone do GitHub ou qualquer URL git',
+                            onTap: () => _cloneRepo(context),
+                            borderRadius: const BorderRadius.vertical(
+                                top: Radius.circular(5),
+                                bottom: Radius.circular(5)),
+                            iconBg: Colors.deepPurple,
+                            icon: FontAwesomeIcons.github),
                       _homeOption(context,
                           title: s.terminal,
                           subtitle: s.terminalSub,
@@ -111,6 +133,135 @@ class HomeScreen extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  Future<void> _cloneRepo(BuildContext context) async {
+    final cs = Theme.of(context).colorScheme;
+    final urlCtrl = TextEditingController();
+    String? cloneError;
+
+    await showDialog<void>(
+      context: context,
+      barrierColor: Colors.black54,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => AlertDialog(
+          title: Row(
+            children: [
+              Icon(Icons.source_rounded, color: cs.primary, size: 20),
+              const SizedBox(width: 8),
+              const Text('Clonar repositório'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: urlCtrl,
+                autofocus: true,
+                decoration: InputDecoration(
+                  hintText: 'https://github.com/user/repo.git',
+                  labelText: 'URL do repositório',
+                  errorText: cloneError,
+                  border: const OutlineInputBorder(),
+                  prefixIcon: const Icon(Icons.link_rounded, size: 18),
+                ),
+                keyboardType: TextInputType.url,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton.icon(
+              icon: const Icon(Icons.download_rounded, size: 16),
+              label: const Text('Clonar'),
+              onPressed: () async {
+                final url = urlCtrl.text.trim();
+                if (url.isEmpty) {
+                  setS(() => cloneError = 'Informe a URL');
+                  return;
+                }
+                Navigator.pop(ctx);
+                if (context.mounted) {
+                  await _doClone(context, url);
+                }
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _doClone(BuildContext context, String url) async {
+    // Derive folder name from URL (last segment without .git)
+    final repoName = url
+        .split('/')
+        .last
+        .replaceAll('.git', '')
+        .replaceAll(RegExp(r'[^\w\-]'), '_');
+    final destPath = '${RuntimeEnvir.projectsPath}/$repoName';
+
+    // Show progress dialog
+    if (!context.mounted) return;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        content: Row(
+          children: [
+            const CircularProgressIndicator(),
+            const SizedBox(width: 16),
+            Expanded(child: Text('Clonando $repoName...')),
+          ],
+        ),
+      ),
+    );
+
+    try {
+      final result = await Process.run(
+        'git',
+        ['clone', url, destPath],
+        environment: RuntimeEnvir.baseEnv,
+      );
+
+      if (!context.mounted) return;
+      Navigator.of(context).pop(); // close progress dialog
+
+      if (result.exitCode != 0) {
+        showDialog<void>(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('Erro ao clonar'),
+            content: Text(result.stderr.toString()),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(_),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+
+      // Register and open the cloned project
+      final pm = context.read<ProjectManagerProvider>();
+      await pm.addProjectFromPath(destPath);
+      if (context.mounted) {
+        pm.openProject(pm.projects.first);
+      }
+    } catch (e) {
+      if (context.mounted) {
+        Navigator.of(context).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erro: $e')),
+        );
+      }
+    }
   }
 
   void _createProject(BuildContext context) {

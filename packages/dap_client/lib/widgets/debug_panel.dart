@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -27,11 +28,18 @@ class DebugCallStackPanel extends StatelessWidget {
 }
 
 class DebugOutputPanel extends StatelessWidget {
-  const DebugOutputPanel({super.key});
+  /// Called when the user taps a file:line link in the output.
+  /// The caller (workspace) is responsible for opening the file and
+  /// navigating to the given 1-based line.
+  final void Function(String filePath, int line)? onNavigate;
+
+  const DebugOutputPanel({super.key, this.onNavigate});
+
   @override
   Widget build(BuildContext context) {
     return Consumer<DebugProvider>(
-      builder: (context, dbg, _) => _OutputTab(dbg: dbg),
+      builder: (context, dbg, _) =>
+          _OutputTab(dbg: dbg, onNavigate: onNavigate),
     );
   }
 }
@@ -246,7 +254,9 @@ class _CallStackTab extends StatelessWidget {
 
 class _OutputTab extends StatelessWidget {
   final DebugProvider dbg;
-  const _OutputTab({required this.dbg});
+  final void Function(String filePath, int line)? onNavigate;
+
+  const _OutputTab({required this.dbg, this.onNavigate});
 
   @override
   Widget build(BuildContext context) {
@@ -259,14 +269,20 @@ class _OutputTab extends StatelessWidget {
     }
     return SingleChildScrollView(
       padding: const EdgeInsets.all(10),
-      child: _ColorizedOutput(text: dbg.output),
+      child: _ColorizedOutput(text: dbg.output, onNavigate: onNavigate),
     );
   }
 }
 
 class _ColorizedOutput extends StatelessWidget {
+  // Detects /absolute/path/file.dart:line or package:pkg/file.dart:line
+  static final _fileLineRe = RegExp(
+    r'((?:/[\w./\-]+\.dart)|(?:package:[\w./\-]+\.dart)):(\d+)',
+  );
   final String text;
-  const _ColorizedOutput({required this.text});
+  final void Function(String filePath, int line)? onNavigate;
+
+  const _ColorizedOutput({required this.text, this.onNavigate});
 
   static final _errorPrefixes = [
     'error:', 'Error:', 'ERROR:',
@@ -280,22 +296,58 @@ class _ColorizedOutput extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final lines = text.split('\n');
-    return SelectableText.rich(
+    return Text.rich(
       TextSpan(
-        style: const TextStyle(fontFamily: 'FiraCode', fontSize: 11, height: 1.5),
-        children: lines.map((line) {
-          final isError = _errorPrefixes.any((p) => line.contains(p)) ||
-              line.contains('EXCEPTION') ||
-              line.contains('Unhandled exception') ||
-              (line.trimLeft().startsWith('[adapter]') && line.contains('error'));
-          return TextSpan(
-            text: '$line\n',
-            style: TextStyle(
-              color: isError ? cs.error : cs.onSurface,
-            ),
-          );
-        }).toList(),
+        style: const TextStyle(
+            fontFamily: 'FiraCode', fontSize: 11, height: 1.5),
+        children: lines.map((line) => _buildLine(line, cs)).toList(),
       ),
+    );
+  }
+
+  InlineSpan _buildLine(String line, ColorScheme cs) {
+    final isError = _errorPrefixes.any((p) => line.contains(p)) ||
+        line.contains('EXCEPTION') ||
+        line.contains('Unhandled exception') ||
+        (line.trimLeft().startsWith('[adapter]') && line.contains('error'));
+    final lineColor = isError ? cs.error : cs.onSurface;
+
+    // Try to find a file:line pattern to make it tappable
+    if (onNavigate != null) {
+      final match = _fileLineRe.firstMatch(line);
+      if (match != null) {
+        final filePath = match.group(1)!;
+        final lineNum = int.tryParse(match.group(2)!) ?? 1;
+        final before = line.substring(0, match.start);
+        final linkText = match.group(0)!;
+        final after = line.substring(match.end);
+
+        final recognizer = TapGestureRecognizer()
+          ..onTap = () => onNavigate!(filePath, lineNum);
+
+        return TextSpan(children: [
+          if (before.isNotEmpty)
+            TextSpan(text: before, style: TextStyle(color: lineColor)),
+          TextSpan(
+            text: linkText,
+            recognizer: recognizer,
+            style: TextStyle(
+              color: cs.primary,
+              decoration: TextDecoration.underline,
+              decorationColor: cs.primary,
+            ),
+          ),
+          if (after.isNotEmpty)
+            TextSpan(text: '$after\n', style: TextStyle(color: lineColor)),
+          if (after.isEmpty)
+            TextSpan(text: '\n', style: TextStyle(color: lineColor)),
+        ]);
+      }
+    }
+
+    return TextSpan(
+      text: '$line\n',
+      style: TextStyle(color: lineColor),
     );
   }
 }

@@ -25,7 +25,9 @@ class _MessageContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cacheKey = '${message.id}:${message.operations.length}';
+    // Include each op's status so the cache misses when Accept/Reject is clicked.
+    final statusKey = message.operations.map((o) => o.status.index).join('');
+    final cacheKey  = '${message.id}:${message.operations.length}:$statusKey';
     final segments = _cache.putIfAbsent(
       cacheKey,
       () => _splitSegments(message.text, message.operations),

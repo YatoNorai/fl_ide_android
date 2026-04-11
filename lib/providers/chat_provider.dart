@@ -23,6 +23,10 @@ class ChatProvider extends ChangeNotifier {
   final Set<String> _contextPaths = {};
   final List<ProjectSnapshot> _snapshots = [];
 
+  // Commands the user has chosen to always accept without confirmation.
+  // Stored as the exact command string (trimmed).
+  final Set<String> _alwaysAcceptCmds = {};
+
   List<ChatConversation> get conversations => List.unmodifiable(_conversations);
   ChatConversation? get activeConversation => _activeConversation;
   AiAgent get selectedAgent => _selectedAgent;
@@ -31,6 +35,21 @@ class ChatProvider extends ChangeNotifier {
   List<ProjectSnapshot> get snapshots => List.unmodifiable(_snapshots);
   int get userMessageCount => _userMessageCount;
   bool get autoAccept => _autoAccept;
+  Set<String> get alwaysAcceptCmds => Set.unmodifiable(_alwaysAcceptCmds);
+
+  /// True when the last AI message has terminal operations still pending approval.
+  bool get hasPendingTerminalOps {
+    final conv = _activeConversation;
+    if (conv == null || conv.messages.isEmpty) return false;
+    final lastAi = conv.messages.lastWhere(
+      (m) => !m.isUser,
+      orElse: () => const ChatMessage(id: '', isUser: true, text: ''),
+    );
+    if (lastAi.id.isEmpty) return false;
+    return lastAi.operations.any(
+      (op) => op.type == FileOpType.terminal && op.status == FileOpStatus.pending,
+    );
+  }
 
   // ── Context ────────────────────────────────────────────────────────────────
 
@@ -55,6 +74,22 @@ class ChatProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ── Always-accept commands ─────────────────────────────────────────────────
+
+  bool isAlwaysAccepted(String cmd) => _alwaysAcceptCmds.contains(cmd.trim());
+
+  void addAlwaysAcceptCmd(String cmd) {
+    _alwaysAcceptCmds.add(cmd.trim());
+    notifyListeners();
+    saveProject();
+  }
+
+  void removeAlwaysAcceptCmd(String cmd) {
+    _alwaysAcceptCmds.remove(cmd.trim());
+    notifyListeners();
+    saveProject();
+  }
+
   // ── Persistence ────────────────────────────────────────────────────────────
 
   String? _projectPath;
@@ -76,6 +111,9 @@ class ChatProvider extends ChangeNotifier {
         _snapshots.add(ProjectSnapshot.fromJson(s as Map<String, dynamic>));
       }
       _userMessageCount = (data['userMessageCount'] as int?) ?? 0;
+      _alwaysAcceptCmds
+        ..clear()
+        ..addAll(((data['alwaysAcceptCmds'] as List?) ?? []).cast<String>());
       // Re-open the most recent conversation
       if (_conversations.isNotEmpty) {
         _activeConversation = _conversations.first;
@@ -97,6 +135,7 @@ class ChatProvider extends ChangeNotifier {
         'userMessageCount': _userMessageCount,
         'conversations': _conversations.map((c) => c.toJson()).toList(),
         'snapshots': _snapshots.map((s) => s.toJson()).toList(),
+        'alwaysAcceptCmds': _alwaysAcceptCmds.toList(),
       };
       await file.writeAsString(jsonEncode(data));
     } catch (e) {
@@ -393,20 +432,26 @@ class ChatProvider extends ChangeNotifier {
     saveProject();
   }
 
-  /// Picks the correct streaming function based on which API key is set.
+  /// Picks the correct streaming function based on the user's active provider
+  /// selection, falling back to the first configured key.
   Stream<String> _buildStream(
     AiProvider ai,
     AiAgent agent,
     List<Map<String, String>> history,
   ) {
-    if (ai.geminiKey.isNotEmpty) {
-      return _streamGemini(ai.geminiKey, ai.geminiModel, agent, history);
-    } else if (ai.claudeKey.isNotEmpty) {
-      return _streamClaude(ai.claudeKey, ai.claudeModel, agent, history);
-    } else if (ai.gptKey.isNotEmpty) {
-      return _streamGpt(ai.gptKey, ai.gptModel, agent, history);
-    } else if (ai.deepSeekKey.isNotEmpty) {
-      return _streamDeepSeek(ai.deepSeekKey, ai.deepSeekModel, agent, history);
+    switch (ai.effectiveProvider) {
+      case 'gemini':
+        if (ai.geminiKey.isNotEmpty)
+          return _streamGemini(ai.geminiKey, ai.geminiModel, agent, history);
+      case 'claude':
+        if (ai.claudeKey.isNotEmpty)
+          return _streamClaude(ai.claudeKey, ai.claudeModel, agent, history);
+      case 'gpt':
+        if (ai.gptKey.isNotEmpty)
+          return _streamGpt(ai.gptKey, ai.gptModel, agent, history);
+      case 'deepseek':
+        if (ai.deepSeekKey.isNotEmpty)
+          return _streamDeepSeek(ai.deepSeekKey, ai.deepSeekModel, agent, history);
     }
     return Stream.value('Nenhuma chave de API configurada.');
   }

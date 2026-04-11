@@ -294,9 +294,9 @@ class _PermissionTile extends StatelessWidget {
     );
 
     return Card(
-      elevation: 0,
+   //   elevation: 0,
       margin: EdgeInsets.zero,
-      color: cs.surfaceTint.withValues(alpha: 0.08),
+    //  color: cs.surfaceTint.withValues(alpha: 0.08),
       shape: RoundedRectangleBorder(borderRadius: radius),
       child: InkWell(
         onTap: granted ? null : onRequest,
@@ -432,9 +432,9 @@ class _BootstrapCard extends StatelessWidget {
         state == RootfsState.extracting;
 
     return Card(
-      elevation: 0,
+   //   elevation: 0,
       margin: EdgeInsets.zero,
-      color: cs.surfaceTint.withValues(alpha: 0.08),
+   //   color: cs.surfaceTint.withValues(alpha: 0.08),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: Padding(
         padding: const EdgeInsets.all(20),

@@ -2,14 +2,12 @@
   "schema_version": 1,
   "sdk": "swift",
   "sdk_version": "latest",
-  "display_name": "Swift (Termux)",
-  "description": "Swift compiler from the official Termux repository. Supports ARM64. Suitable for command-line tools and server-side Swift packages.",
+  "display_name": "Swift",
+  "description": "Linguagem Swift para Termux no Android ARM64. Inclui o compilador Swift via pkg, sourcekit-lsp (language server oficial) e suporte a Swift Package Manager (swift build / swift run).",
   "package": {
     "type": "pkg",
-    "url": "",
-    "filename": "",
     "arch": "arm64",
-    "size_mb": 150
+    "size_mb": 400
   },
   "package_author": {
     "name": "Termux / Apple",
@@ -17,32 +15,43 @@
   },
   "json_author": {
     "name": "Yato",
-    "date": "2026-03-25"
+    "date": "2026-04-11"
   },
   "install_steps": [
     {
       "type": "shell",
-      "command": "pkg update -y 2>&1",
-      "description": "Updating package lists"
+      "command": "pkg update -y 2>&1 && pkg install -y swift 2>&1",
+      "description": "Instalando o compilador Swift via pkg"
     },
     {
       "type": "shell",
-      "command": "pkg install -y swift 2>&1",
-      "description": "Installing Swift compiler"
+      "command": "swift --version 2>&1 && echo \"Swift instalado em: $(which swift)\"",
+      "description": "Verificando instalação do Swift"
+    },
+    {
+      "type": "shell",
+      "command": "test -f \"$PREFIX/bin/sourcekit-lsp\" && echo 'sourcekit-lsp OK' || echo 'AVISO: sourcekit-lsp nao encontrado em $PREFIX/bin'",
+      "description": "Verificando sourcekit-lsp (incluido com Swift)"
     }
   ],
   "config_steps": [
     {
       "type": "shell",
-      "command": "swift --version 2>&1",
-      "description": "Verifying Swift installation"
+      "command": "sourcekit-lsp --version 2>&1 && echo 'OK: sourcekit-lsp disponivel' || echo 'AVISO: sourcekit-lsp nao encontrado no PATH'",
+      "description": "Verificando sourcekit-lsp no PATH"
+    },
+    {
+      "type": "shell",
+      "command": "swift package --version 2>&1 && echo 'OK: Swift Package Manager disponivel'",
+      "description": "Verificando Swift Package Manager"
     }
   ],
+  "cleanup_steps": [],
   "uninstall_steps": [
     {
       "type": "shell",
-      "command": "pkg uninstall -y swift 2>&1 || true",
-      "description": "Removing Swift compiler"
+      "command": "pkg remove -y swift 2>&1 || true",
+      "description": "Removendo o compilador Swift"
     }
   ],
   "verify_binary": "swift",
@@ -57,8 +66,8 @@
     "new_project_cmd": "mkdir -p $name && cd $name && swift package init --type executable",
     "default_entry_file": "Sources/main.swift",
     "file_extensions": ["swift", "json", "md"],
-    "sync_command": "",
-    "sync_trigger_file": "",
+    "sync_command": "swift package resolve",
+    "sync_trigger_file": "Package.swift",
     "format_command": ""
   },
   "dap_config": {}

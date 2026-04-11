@@ -2,8 +2,8 @@
   "schema_version": 1,
   "sdk": "reactNative",
   "sdk_version": "latest",
-  "display_name": "React (Node.js + Vite)",
-  "description": "React web development via Node.js LTS and Vite on Termux. Supports ARM64. Includes npm. Create, run and build React apps in the browser via a local dev server.",
+  "display_name": "React Native (Expo)",
+  "description": "React Native development via Expo on Termux. Supports ARM64. Uses Node.js LTS and Expo CLI. Create and run React Native apps on Android via Expo Go or a direct build.",
   "package": {
     "type": "pkg",
     "arch": "arm64",
@@ -37,11 +37,6 @@
     },
     {
       "type": "shell",
-      "command": "npm install -g eslint prettier 2>&1",
-      "description": "Installing ESLint and Prettier"
-    },
-    {
-      "type": "shell",
       "command": "typescript-language-server --version 2>&1 && echo 'LSP OK'",
       "description": "Verifying TypeScript LSP binary"
     }
@@ -49,15 +44,15 @@
   "cleanup_steps": [
     {
       "type": "shell",
-      "command": "npm uninstall -g typescript typescript-language-server eslint prettier 2>&1 || true",
+      "command": "npm uninstall -g typescript typescript-language-server 2>&1 || true",
       "description": "Removing globally installed npm packages on error"
     }
   ],
   "uninstall_steps": [
     {
       "type": "shell",
-      "command": "npm uninstall -g typescript typescript-language-server eslint prettier 2>&1 || true",
-      "description": "Removing TypeScript LSP and tools"
+      "command": "npm uninstall -g typescript typescript-language-server 2>&1 || true",
+      "description": "Removing TypeScript LSP"
     },
     {
       "type": "shell",
@@ -68,15 +63,16 @@
   "verify_binary": "node",
   "verify_command": "node --version",
   "run_config": {
-    "run": "npm run dev -- --host",
-    "supports_devices": false,
-    "build_debug": "npm run build",
-    "build_release": "npm run build"
+    "run": "npx expo start",
+    "supports_devices": true,
+    "device_param": "--android",
+    "build_debug": "npx expo export",
+    "build_release": "npx expo export --platform android"
   },
   "sdk_config": {
-    "new_project_cmd": "npm create vite@latest $name -- --template react-ts && cd $name && npm install",
-    "default_entry_file": "src/App.tsx",
-    "file_extensions": ["js", "jsx", "ts", "tsx", "css", "html", "json"],
+    "new_project_cmd": "npx --yes create-expo-app $name",
+    "default_entry_file": "App.tsx",
+    "file_extensions": ["js", "jsx", "ts", "tsx", "json"],
     "sync_command": "npm install",
     "sync_trigger_file": "package.json",
     "format_command": "npx prettier --write ."
