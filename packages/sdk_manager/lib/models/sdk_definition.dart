@@ -175,6 +175,14 @@ sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
         syncTriggerFile: 'go.mod',
         formatCommand: 'gofmt -w .',
       ),
+      dapConfig: DapConfig(
+        adapterBinary: r'$HOME/go/bin/dlv',
+        adapterArgs: ['dap', '--listen=127.0.0.1:0'],
+        adapterId: 'go',
+        launchProgram: '.',
+        buildDoneStrings: ['DAP server listening'],
+        tcpMode: true,
+      ),
     ),
   ];
 

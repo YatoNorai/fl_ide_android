@@ -8,7 +8,9 @@ import 'package:flutter/foundation.dart';
 
 export 'package:core/core.dart' show DapConfig;
 
+import '../client/dap_client_base.dart';
 import '../client/dap_stdio_client.dart';
+import '../client/dap_tcp_client.dart';
 import '../models/dap_types.dart';
 
 export '../models/dap_types.dart';
@@ -20,7 +22,9 @@ enum DebugStatus { idle, starting, running, paused, terminating }
 // ── Provider ──────────────────────────────────────────────────────────────────
 
 class DebugProvider extends ChangeNotifier {
-  DapStdioClient? _client;
+  DapClientBase? _client;
+  // For TCP mode (e.g. dlv dap): the adapter process is separate from _client.
+  Process? _adapterProcess;
   StreamSubscription<Map<String, dynamic>>? _eventSub;
   Process? _metroProcess;
   bool _isMetroSession = false;
@@ -122,39 +126,101 @@ class DebugProvider extends ChangeNotifier {
         throw DapException('DAP adapter binary not found at $adapterBin');
       }
 
-      _client = DapStdioClient();
-      await _client!.start(
-        adapterBin,
-        _dapConfig.adapterArgs,
-        RuntimeEnvir.baseEnv,
-        onStderr: (line) {
-          // Route adapter stderr to OUTPUT panel so user can see errors
-          _output += '[adapter] $line\n';
-          notifyListeners();
-        },
-      );
-      _eventSub = _client!.events.listen(_onEvent);
-
-      // Standard DAP handshake:
-      // 1. initialize → adapter responds + fires 'initialized' event
-      await _client!.sendRequest('initialize', {
-        'clientID': 'fl_ide',
-        'clientName': 'FL IDE',
-        'adapterID': _dapConfig.adapterId.isEmpty ? 'dart' : _dapConfig.adapterId,
-        'pathFormat': 'path',
-        'linesStartAt1': true,
-        'columnsStartAt1': true,
-        'supportsVariableType': true,
-        'supportsVariablePaging': false,
-        'supportsRunInTerminalRequest': false,
-        'supportsInvalidatedEvent': true,
-      }).timeout(const Duration(seconds: 10));
-      // _onInitialized() handles steps 2-4 when 'initialized' event arrives.
+      if (_dapConfig.tcpMode) {
+        await _startTcpSession(adapterBin);
+      } else {
+        await _startStdioSession(adapterBin);
+      }
     } catch (e) {
       _error = e.toString();
       debugPrint('[DAP] startSession error: $e');
       await _cleanup();
     }
+  }
+
+  Future<void> _startStdioSession(String adapterBin) async {
+    final stdioClient = DapStdioClient();
+    _client = stdioClient;
+    await stdioClient.start(
+      adapterBin,
+      _dapConfig.adapterArgs,
+      RuntimeEnvir.baseEnv,
+      onStderr: (line) {
+        _output += '[adapter] $line\n';
+        notifyListeners();
+      },
+    );
+    _eventSub = _client!.events.listen(_onEvent);
+    await _sendInitialize();
+  }
+
+  /// Starts a TCP-mode DAP adapter (e.g. `dlv dap --listen=127.0.0.1:0`).
+  /// The adapter prints `DAP server listening at: 127.0.0.1:<port>` to stderr.
+  Future<void> _startTcpSession(String adapterBin) async {
+    final portCompleter = Completer<int>();
+
+    _adapterProcess = await Process.start(
+      adapterBin,
+      _dapConfig.adapterArgs,
+      environment: RuntimeEnvir.baseEnv,
+      runInShell: true,
+    );
+
+    _adapterProcess!.stderr
+        .transform(const Utf8Decoder(allowMalformed: true))
+        .transform(const LineSplitter())
+        .listen((line) {
+          debugPrint('[DAP adapter] $line');
+          _output += '[adapter] $line\n';
+          notifyListeners();
+          if (!portCompleter.isCompleted) {
+            // Pattern: "DAP server listening at: 127.0.0.1:PORT"
+            final m = RegExp(r'DAP server listening at: [\w.]+:(\d+)').firstMatch(line);
+            if (m != null) {
+              portCompleter.complete(int.parse(m.group(1)!));
+            }
+          }
+        });
+
+    _adapterProcess!.stdout
+        .transform(const Utf8Decoder(allowMalformed: true))
+        .listen((chunk) {
+          _output += chunk;
+          notifyListeners();
+        });
+
+    _adapterProcess!.exitCode.then((_) {
+      if (!portCompleter.isCompleted) {
+        portCompleter.completeError(DapException('DAP adapter exited before announcing port'));
+      }
+    });
+
+    final port = await portCompleter.future.timeout(
+      const Duration(seconds: 15),
+      onTimeout: () => throw DapException('Timed out waiting for DAP TCP port'),
+    );
+
+    final tcpClient = DapTcpClient();
+    _client = tcpClient;
+    await tcpClient.connect('127.0.0.1', port);
+    _eventSub = _client!.events.listen(_onEvent);
+    await _sendInitialize();
+  }
+
+  Future<void> _sendInitialize() async {
+    await _client!.sendRequest('initialize', {
+      'clientID': 'fl_ide',
+      'clientName': 'FL IDE',
+      'adapterID': _dapConfig.adapterId.isEmpty ? 'dart' : _dapConfig.adapterId,
+      'pathFormat': 'path',
+      'linesStartAt1': true,
+      'columnsStartAt1': true,
+      'supportsVariableType': true,
+      'supportsVariablePaging': false,
+      'supportsRunInTerminalRequest': false,
+      'supportsInvalidatedEvent': true,
+    }).timeout(const Duration(seconds: 10));
+    // _onInitialized() handles steps 2-4 when 'initialized' event arrives.
   }
 
   /// Start a debug session with a DAP adapter running on a remote machine
@@ -177,25 +243,14 @@ class DebugProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      _client = DapStdioClient();
-      await _client!.startRemote(remoteStdout, remoteStdin, onStderr: (line) {
+      final stdioClient = DapStdioClient();
+      _client = stdioClient;
+      await stdioClient.startRemote(remoteStdout, remoteStdin, onStderr: (line) {
         _output += '[adapter] $line\n';
         notifyListeners();
       });
       _eventSub = _client!.events.listen(_onEvent);
-
-      await _client!.sendRequest('initialize', {
-        'clientID': 'fl_ide',
-        'clientName': 'FL IDE',
-        'adapterID': _dapConfig.adapterId.isEmpty ? 'dart' : _dapConfig.adapterId,
-        'pathFormat': 'path',
-        'linesStartAt1': true,
-        'columnsStartAt1': true,
-        'supportsVariableType': true,
-        'supportsVariablePaging': false,
-        'supportsRunInTerminalRequest': false,
-        'supportsInvalidatedEvent': true,
-      }).timeout(const Duration(seconds: 10));
+      await _sendInitialize();
     } catch (e) {
       _error = e.toString();
       debugPrint('[DAP SSH] startSessionRemote error: $e');
@@ -421,6 +476,8 @@ fs.watch = function (filename, options, listener) {
   Future<void> _cleanup() async {
     _metroProcess?.kill();
     _metroProcess = null;
+    _adapterProcess?.kill();
+    _adapterProcess = null;
     await _eventSub?.cancel();
     _eventSub = null;
     await _client?.dispose();
@@ -492,52 +549,69 @@ fs.watch = function (filename, options, listener) {
           .timeout(const Duration(seconds: 10));
 
       // 4. Build launch args from DapConfig
-      final program = _dapConfig.launchProgram.isNotEmpty
-          ? _dapConfig.launchProgram
-          : 'lib/main.dart';
-      final deviceId = _dapConfig.deviceIdFor(_platformArg);
+      final Map<String, dynamic> launchArgs;
 
-      _output += 'Launching $program on $deviceId...\n';
-      notifyListeners();
+      if (_dapConfig.tcpMode) {
+        // Delve (Go) DAP launch: use program + cwd, no device concepts.
+        final program = _dapConfig.launchProgram.isNotEmpty
+            ? _dapConfig.launchProgram
+            : '.';
+        _output += 'Launching Go program ($program) with Delve...\n';
+        notifyListeners();
+        launchArgs = {
+          'mode': 'debug',
+          'program': program,
+          'cwd': _projectPath,
+          'noDebug': false,
+        };
+      } else {
+        final program = _dapConfig.launchProgram.isNotEmpty
+            ? _dapConfig.launchProgram
+            : 'lib/main.dart';
+        final deviceId = _dapConfig.deviceIdFor(_platformArg);
 
-      final launchArgs = <String, dynamic>{
-        'program': program,
-        'cwd': _projectPath,
-        'debugSdkLibraries': false,
-        'debugExternalPackageLibraries': false,
-        'noDebug': false,
-      };
+        _output += 'Launching $program on $deviceId...\n';
+        notifyListeners();
 
-      if (_dapConfig.webPlatform.isNotEmpty && _platformArg == _dapConfig.webPlatform) {
-        // Free the port before binding so stale flutter-web processes don't
-        // block the new session (errno 98 = EADDRINUSE).
-        await _freePort(webServerPort);
+        launchArgs = {
+          'program': program,
+          'cwd': _projectPath,
+          'debugSdkLibraries': false,
+          'debugExternalPackageLibraries': false,
+          'noDebug': false,
+        };
 
-        // Web platform: pass toolArgs so the adapter finds the device without
-        // device-list discovery (web-server isn't enumerated by flutter devices).
-        launchArgs['toolArgs'] = _dapConfig.webServerArgs.isNotEmpty
-            ? _dapConfig.webServerArgs
-            : [
-                '-d', 'web-server',
-                '--web-port', '$webServerPort',
-                '--web-hostname', 'localhost',
-                '--no-start-paused',
-              ];
-      } else if (deviceId.isNotEmpty) {
-        // Native device: validate availability before launching.
-        final devsCmd = _dapConfig.resolvedDevicesCommand;
-        if (devsCmd.isNotEmpty) {
-          final available = await _getAvailableDeviceIds(devsCmd);
-          if (!available.any((id) => id == deviceId || id.startsWith('$deviceId-'))) {
-            _output += '[DAP] Error: device "$deviceId" not found.\n'
-                'Available: ${available.isEmpty ? "none" : available.join(", ")}\n'
-                'Connect a device or change the debug platform in Settings.\n';
-            notifyListeners();
-            await _cleanup();
-            return;
+        if (_dapConfig.webPlatform.isNotEmpty && _platformArg == _dapConfig.webPlatform) {
+          // Free the port before binding so stale flutter-web processes don't
+          // block the new session (errno 98 = EADDRINUSE).
+          await _freePort(webServerPort);
+
+          // Web platform: pass toolArgs so the adapter finds the device without
+          // device-list discovery (web-server isn't enumerated by flutter devices).
+          launchArgs['toolArgs'] = _dapConfig.webServerArgs.isNotEmpty
+              ? _dapConfig.webServerArgs
+              : [
+                  '-d', 'web-server',
+                  '--web-port', '$webServerPort',
+                  '--web-hostname', 'localhost',
+                  '--no-start-paused',
+                ];
+        } else if (deviceId.isNotEmpty) {
+          // Native device: validate availability before launching.
+          final devsCmd = _dapConfig.resolvedDevicesCommand;
+          if (devsCmd.isNotEmpty) {
+            final available = await _getAvailableDeviceIds(devsCmd);
+            if (!available.any((id) => id == deviceId || id.startsWith('$deviceId-'))) {
+              _output += '[DAP] Error: device "$deviceId" not found.\n'
+                  'Available: ${available.isEmpty ? "none" : available.join(", ")}\n'
+                  'Connect a device or change the debug platform in Settings.\n';
+              notifyListeners();
+              await _cleanup();
+              return;
+            }
           }
+          launchArgs['deviceId'] = deviceId;
         }
-        launchArgs['deviceId'] = deviceId;
       }
 
       await _client!.sendRequest('launch', launchArgs)
@@ -923,6 +997,7 @@ fs.watch = function (filename, options, listener) {
   @override
   void dispose() {
     _metroProcess?.kill();
+    _adapterProcess?.kill();
     _eventSub?.cancel();
     _client?.dispose();
     super.dispose();

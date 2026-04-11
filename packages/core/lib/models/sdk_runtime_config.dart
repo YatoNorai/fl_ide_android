@@ -82,6 +82,11 @@ class DapConfig {
   /// selected (e.g. `["-d", "web-server", "--web-port", "5050", ...]`).
   final List<String> webServerArgs;
 
+  /// When true, the adapter starts a TCP DAP server instead of stdio.
+  /// The IDE connects via socket after reading the port from the adapter's
+  /// stderr (pattern: `DAP server listening at: HOST:PORT`).
+  final bool tcpMode;
+
   const DapConfig({
     required this.adapterBinary,
     required this.adapterArgs,
@@ -92,6 +97,7 @@ class DapConfig {
     this.platformDeviceMap = const {},
     this.webPlatform = '',
     this.webServerArgs = const [],
+    this.tcpMode = false,
   });
 
   /// Returns true when this config has a valid adapter binary.
@@ -128,6 +134,7 @@ class DapConfig {
         webPlatform: (j['web_platform'] as String?) ?? '',
         webServerArgs:
             ((j['web_server_args'] as List?) ?? []).cast<String>(),
+        tcpMode: (j['tcp_mode'] as bool?) ?? false,
       );
 
   static const empty = DapConfig(
@@ -135,5 +142,6 @@ class DapConfig {
     adapterArgs: [],
     adapterId: '',
     launchProgram: '',
+    tcpMode: false,
   );
 }

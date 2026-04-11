@@ -7,75 +7,58 @@ import 'package:flutter/foundation.dart';
 
 import 'dap_client_base.dart';
 
-/// Low-level DAP stdio client.
+/// DAP client that communicates over a TCP socket instead of stdin/stdout.
 ///
-/// Handles Content-Length framing (same as LSP), request/response matching
-/// via sequence numbers, and exposes an event stream for DAP events.
-class DapStdioClient implements DapClientBase {
-  Process? _process;
-  // For SSH-backed sessions: write to this sink instead of _process.stdin
-  // dartssh2 SSHSession.stdin is StreamSink<Uint8List>.
-  StreamSink<Uint8List>? _remoteSink;
-
+/// Used for adapters like Delve (Go) that start a TCP DAP server and print
+/// the listening address to stderr:
+///   `DAP server listening at: 127.0.0.1:<port>`
+///
+/// Usage:
+///   1. Start the adapter process externally (or let [connectToProcess] do it).
+///   2. Call [connect] with host + port.
+///   3. Use [sendRequest] / [events] exactly like [DapStdioClient].
+class DapTcpClient implements DapClientBase {
+  Socket? _socket;
   int _seq = 0;
   final Map<int, Completer<Map<String, dynamic>>> _pending = {};
   final StreamController<Map<String, dynamic>> _events =
       StreamController.broadcast();
 
-  // Buffer for partial reads
   final List<int> _buf = [];
   int? _expectedLength;
 
   @override
   Stream<Map<String, dynamic>> get events => _events.stream;
   @override
-  bool get isRunning => _process != null || _remoteSink != null;
+  bool get isRunning => _socket != null;
+  bool get isConnected => isRunning;
 
-  // ── Lifecycle ──────────────────────────────────────────────────────────────
+  // ── Connect ────────────────────────────────────────────────────────────────
 
-  Future<void> start(
-    String executable,
-    List<String> args,
-    Map<String, String> env, {
-    void Function(String line)? onStderr,
-  }) async {
-    _process = await Process.start(
-      executable,
-      args,
-      environment: env,
-      runInShell: true,
+  Future<void> connect(String host, int port) async {
+    _socket = await Socket.connect(
+      host,
+      port,
+      timeout: const Duration(seconds: 8),
     );
-
-    _process!.stdout.listen(_onBytes, onDone: _onProcessDone);
-    _process!.stderr
-        .transform(const Utf8Decoder(allowMalformed: true))
-        .transform(const LineSplitter())
-        .listen((line) {
-          debugPrint('[DAP stderr] $line');
-          onStderr?.call(line);
-        });
-    _process!.exitCode.then((_) => _onProcessDone());
+    _socket!.listen(
+      _onBytes,
+      onDone: _onSocketDone,
+      onError: (e) {
+        debugPrint('[DAP TCP] socket error: $e');
+        _onSocketDone();
+      },
+    );
   }
 
-  /// Attach to an SSH-backed remote process.
-  /// [remoteStdout] / [remoteStdin] are the SSH session's stdio streams
-  /// (dartssh2 uses Stream<Uint8List> / StreamSink<Uint8List>).
-  Future<void> startRemote(
-    Stream<Uint8List> remoteStdout,
-    StreamSink<Uint8List> remoteStdin, {
-    void Function(String line)? onStderr,
-  }) async {
-    _remoteSink = remoteStdin;
-    remoteStdout.listen(_onBytes, onDone: _onProcessDone);
-  }
+  // ── Disconnect ─────────────────────────────────────────────────────────────
 
   @override
   Future<void> dispose() async {
-    _remoteSink = null;
-    _process?.kill();
-    _process = null;
+    try { await _socket?.close(); } catch (_) {}
+    _socket = null;
     for (final c in _pending.values) {
-      c.completeError(StateError('DAP client disposed'));
+      if (!c.isCompleted) c.completeError(StateError('DAP TCP client disposed'));
     }
     _pending.clear();
     if (!_events.isClosed) await _events.close();
@@ -83,8 +66,6 @@ class DapStdioClient implements DapClientBase {
 
   // ── Send ───────────────────────────────────────────────────────────────────
 
-  /// Sends a DAP request and returns the response body map.
-  /// Throws [DapException] on failure responses.
   @override
   Future<Map<String, dynamic>> sendRequest(
     String command, [
@@ -98,24 +79,19 @@ class DapStdioClient implements DapClientBase {
       if (arguments != null) 'arguments': arguments,
     };
     await _sendRaw(msg);
-
     final completer = Completer<Map<String, dynamic>>();
     _pending[seq] = completer;
     return completer.future;
   }
 
   Future<void> _sendRaw(Map<String, dynamic> msg) async {
+    if (_socket == null) throw StateError('DAP TCP: not connected');
     final body = jsonEncode(msg);
-    final bytes = utf8.encode(body);
-    final header = utf8.encode('Content-Length: ${bytes.length}\r\n\r\n');
-    final framed = Uint8List.fromList([...header, ...bytes]);
-    if (_remoteSink != null) {
-      _remoteSink!.add(framed);
-    } else if (_process != null) {
-      _process!.stdin.add(header);
-      _process!.stdin.add(bytes);
-      await _process!.stdin.flush();
-    }
+    final bodyBytes = utf8.encode(body);
+    final header = 'Content-Length: ${bodyBytes.length}\r\n\r\n';
+    final headerBytes = utf8.encode(header);
+    _socket!.add(Uint8List.fromList([...headerBytes, ...bodyBytes]));
+    await _socket!.flush();
   }
 
   // ── Receive ────────────────────────────────────────────────────────────────
@@ -128,25 +104,21 @@ class DapStdioClient implements DapClientBase {
   void _pump() {
     while (true) {
       if (_expectedLength == null) {
-        // Look for \r\n\r\n header terminator
         final headerEnd = _findHeaderEnd();
         if (headerEnd == -1) return;
         final header = utf8.decode(_buf.sublist(0, headerEnd));
         _expectedLength = _parseContentLength(header);
-        _buf.removeRange(0, headerEnd + 4); // +4 for \r\n\r\n
+        _buf.removeRange(0, headerEnd + 4);
       }
-
       if (_buf.length < _expectedLength!) return;
-
       final msgBytes = _buf.sublist(0, _expectedLength!);
       _buf.removeRange(0, _expectedLength!);
       _expectedLength = null;
-
       try {
         final json = jsonDecode(utf8.decode(msgBytes)) as Map<String, dynamic>;
         _dispatch(json);
       } catch (e) {
-        debugPrint('[DAP] parse error: $e');
+        debugPrint('[DAP TCP] parse error: $e');
       }
     }
   }
@@ -167,7 +139,7 @@ class DapStdioClient implements DapClientBase {
         return int.parse(line.split(':')[1].trim());
       }
     }
-    throw FormatException('No Content-Length in DAP header: $header');
+    throw FormatException('No Content-Length in DAP TCP header: $header');
   }
 
   void _dispatch(Map<String, dynamic> msg) {
@@ -180,24 +152,23 @@ class DapStdioClient implements DapClientBase {
         if (completer == null) return;
         final success = msg['success'] as bool? ?? false;
         if (success) {
-          completer.complete(
-              (msg['body'] as Map<String, dynamic>?) ?? {});
+          completer.complete((msg['body'] as Map<String, dynamic>?) ?? {});
         } else {
           completer.completeError(
-            DapException(msg['message'] as String? ?? 'Request failed'),
+            Exception(msg['message'] as String? ?? 'Request failed'),
           );
         }
       case 'event':
         if (!_events.isClosed) _events.add(msg);
       default:
-        debugPrint('[DAP] unknown message type: $type');
+        debugPrint('[DAP TCP] unknown message type: $type');
     }
   }
 
-  void _onProcessDone() {
+  void _onSocketDone() {
     for (final c in _pending.values) {
       if (!c.isCompleted) {
-        c.completeError(StateError('DAP process exited'));
+        c.completeError(StateError('DAP TCP connection closed'));
       }
     }
     _pending.clear();
@@ -205,11 +176,4 @@ class DapStdioClient implements DapClientBase {
       _events.add({'type': 'event', 'event': 'terminated', 'body': {}});
     }
   }
-}
-
-class DapException implements Exception {
-  final String message;
-  const DapException(this.message);
-  @override
-  String toString() => 'DapException: $message';
 }

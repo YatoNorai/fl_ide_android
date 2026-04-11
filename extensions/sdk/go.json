@@ -92,9 +92,10 @@
   },
   "dap_config": {
     "adapter_binary": "$HOME/go/bin/dlv",
-    "adapter_args": ["dap"],
+    "adapter_args": ["dap", "--listen=127.0.0.1:0"],
     "adapter_id": "go",
     "launch_program": ".",
-    "build_done_strings": ["DAP server listening"]
+    "build_done_strings": ["DAP server listening"],
+    "tcp_mode": true
   }
 }

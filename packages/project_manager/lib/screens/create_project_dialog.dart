@@ -531,9 +531,11 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
           ),
 
           // ── Bottom buttons ─────────────────────────────────────────────────
-          SafeArea(
-            top: false,
-            child: Padding(
+         
+        ],
+      ),
+      extendBody: true,
+      bottomNavigationBar: Padding(
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -542,6 +544,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                     onPressed:
                         _creating ? null : () => Navigator.pop(context),
                     style: OutlinedButton.styleFrom(
+                      backgroundColor: cs.surface,
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(18)),
                     ),
@@ -558,9 +561,6 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                 ],
               ),
             ),
-          ),
-        ],
-      ),
     );
   }
 
