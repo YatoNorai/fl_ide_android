@@ -126,27 +126,7 @@ class DebugProvider extends ChangeNotifier {
         throw DapException('DAP adapter binary not found at $adapterBin');
       }
 
-      if (_dapConfig.tcpMode) {
-        try {
-          await _startTcpSession(adapterBin);
-        } catch (tcpErr) {
-          // TCP mode failed — kill the adapter process and retry via stdio.
-          // This handles adapters whose JSON has tcp_mode:true but whose
-          // actual build (e.g. dlv on Android) doesn't support TCP DAP.
-          debugPrint('[DAP] TCP mode failed ($tcpErr), retrying via stdio');
-          _output += '[DAP] TCP mode failed, retrying via stdio...\n';
-          notifyListeners();
-          await _eventSub?.cancel();
-          _eventSub = null;
-          await _client?.dispose();
-          _client = null;
-          _adapterProcess?.kill();
-          _adapterProcess = null;
-          await _startStdioSession(adapterBin);
-        }
-      } else {
-        await _startStdioSession(adapterBin);
-      }
+      await _startStdioSession(adapterBin);
     } catch (e) {
       _error = e.toString();
       debugPrint('[DAP] startSession error: $e');
