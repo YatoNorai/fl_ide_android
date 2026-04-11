@@ -132,7 +132,14 @@ class DapStdioClient implements DapClientBase {
         final headerEnd = _findHeaderEnd();
         if (headerEnd == -1) return;
         final header = utf8.decode(_buf.sublist(0, headerEnd));
-        _expectedLength = _parseContentLength(header);
+        try {
+          _expectedLength = _parseContentLength(header);
+        } on FormatException catch (e) {
+          // Non-DAP output (e.g. startup warnings) — discard buffer and resync.
+          debugPrint('[DAP] invalid header, discarding buffer: $e\n  header: $header');
+          _buf.clear();
+          return;
+        }
         _buf.removeRange(0, headerEnd + 4); // +4 for \r\n\r\n
       }
 

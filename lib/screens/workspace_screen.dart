@@ -2111,7 +2111,7 @@ class _PeekBar extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 4),
-          if (showProgress)
+          /* if (showProgress)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 32),
               child: LinearProgressIndicator(
@@ -2122,7 +2122,7 @@ class _PeekBar extends StatelessWidget {
                 backgroundColor: cs.outlineVariant,
               ),
             )
-          else
+          else */
             Text(
               s.peekSwipeUp,
               textAlign: TextAlign.center,

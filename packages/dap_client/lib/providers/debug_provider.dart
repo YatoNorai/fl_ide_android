@@ -127,7 +127,23 @@ class DebugProvider extends ChangeNotifier {
       }
 
       if (_dapConfig.tcpMode) {
-        await _startTcpSession(adapterBin);
+        try {
+          await _startTcpSession(adapterBin);
+        } catch (tcpErr) {
+          // TCP mode failed — kill the adapter process and retry via stdio.
+          // This handles adapters whose JSON has tcp_mode:true but whose
+          // actual build (e.g. dlv on Android) doesn't support TCP DAP.
+          debugPrint('[DAP] TCP mode failed ($tcpErr), retrying via stdio');
+          _output += '[DAP] TCP mode failed, retrying via stdio...\n';
+          notifyListeners();
+          await _eventSub?.cancel();
+          _eventSub = null;
+          await _client?.dispose();
+          _client = null;
+          _adapterProcess?.kill();
+          _adapterProcess = null;
+          await _startStdioSession(adapterBin);
+        }
       } else {
         await _startStdioSession(adapterBin);
       }
@@ -557,8 +573,8 @@ fs.watch = function (filename, options, listener) {
       // 4. Build launch args from DapConfig
       final Map<String, dynamic> launchArgs;
 
-      if (_dapConfig.tcpMode) {
-        // Delve (Go) DAP launch: use program + cwd, no device concepts.
+      if (_dapConfig.adapterId == 'go') {
+        // Delve (dlv dap) launch: program + cwd, no device/platform concepts.
         final program = _dapConfig.launchProgram.isNotEmpty
             ? _dapConfig.launchProgram
             : '.';

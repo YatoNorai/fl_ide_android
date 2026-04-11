@@ -177,11 +177,10 @@ sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
       ),
       dapConfig: DapConfig(
         adapterBinary: r'$HOME/go/bin/dlv',
-        adapterArgs: ['dap', '--listen=127.0.0.1:0'],
+        adapterArgs: ['dap', '--check-go-version=false'],
         adapterId: 'go',
         launchProgram: '.',
-        buildDoneStrings: ['DAP server listening'],
-        tcpMode: true,
+        buildDoneStrings: ['loaded'],
       ),
     ),
   ];
