@@ -321,7 +321,35 @@ class DebugProvider extends ChangeNotifier {
             _error = 'Build failed. See output for details.';
           }
         }
-        notifyListeners();
+        // Inline hints for common Gradle errors
+        if (line.contains('Cannot mutate the dependencies of configuration') ||
+            line.contains('after the configuration was resolved')) {
+          _output += '\n── Hint ──────────────────────────────────────────\n'
+              'This error means your Android Gradle Plugin (AGP) is\n'
+              'incompatible with the Gradle version in the wrapper.\n\n'
+              'Fix option A — downgrade Gradle wrapper to match your AGP:\n'
+              '  Edit gradle/wrapper/gradle-wrapper.properties and change\n'
+              '  the distributionUrl to a compatible version, e.g.:\n'
+              '  distributionUrl=https\\://services.gradle.org/distributions/gradle-8.7-bin.zip\n\n'
+              'Fix option B — upgrade AGP to support Gradle 9:\n'
+              '  In build.gradle (project level) change:\n'
+              '  id "com.android.application" version "8.7.3"  (or newer)\n'
+              '──────────────────────────────────────────────────────────\n';
+          notifyListeners();
+        } else if (line.contains('Could not resolve') || line.contains('Could not download')) {
+          _output += '\n── Hint ──────────────────────────\n'
+              'Dependency resolution failed. Check your internet connection\n'
+              'or add offlineMode=true to gradle.properties to use cached deps.\n'
+              '──────────────────────────────────\n';
+          notifyListeners();
+        } else if (line.contains('SDK location not found') ||
+                   line.contains('ANDROID_HOME') && line.contains('not set')) {
+          _output += '\n── Hint ────────────────────────────────────────────\n'
+              'Android SDK not found. Make sure the Android SDK extension\n'
+              'is installed and ANDROID_HOME is set correctly.\n'
+              '────────────────────────────────────────────────────\n';
+          notifyListeners();
+        }
       }
 
       _metroProcess!.stdout
