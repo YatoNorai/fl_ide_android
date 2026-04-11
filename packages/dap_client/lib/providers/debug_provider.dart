@@ -154,14 +154,30 @@ class DebugProvider extends ChangeNotifier {
     await _sendInitialize();
   }
 
-  /// Starts a TCP-mode DAP adapter (e.g. `dlv dap --listen=127.0.0.1:0`).
-  /// The adapter prints `DAP server listening at: 127.0.0.1:<port>` to stderr.
+  /// Starts a TCP-mode DAP adapter (e.g. `dlv dap --listen=127.0.0.1:PORT`).
+  ///
+  /// We pick the port ourselves by briefly binding a socket, so we never
+  /// need to parse the adapter's stderr output for the port — that output
+  /// format varies across dlv versions and may be buffered on Termux.
   Future<void> _startTcpSession(String adapterBin) async {
-    final portCompleter = Completer<int>();
+    // Find a free port: bind to :0, record the port, release the socket.
+    // The gap between close() and dlv binding is tiny on a single-user device.
+    final int port;
+    {
+      final probe = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+      port = probe.port;
+      await probe.close();
+    }
+
+    // Replace the placeholder `:0` in adapter args with the chosen port.
+    // e.g. "--listen=127.0.0.1:0" → "--listen=127.0.0.1:PORT"
+    final args = _dapConfig.adapterArgs
+        .map((a) => a.replaceAll(':0', ':$port'))
+        .toList();
 
     _adapterProcess = await Process.start(
       adapterBin,
-      _dapConfig.adapterArgs,
+      args,
       environment: RuntimeEnvir.baseEnv,
       runInShell: true,
     );
@@ -170,16 +186,9 @@ class DebugProvider extends ChangeNotifier {
         .transform(const Utf8Decoder(allowMalformed: true))
         .transform(const LineSplitter())
         .listen((line) {
-          debugPrint('[DAP adapter] $line');
+          debugPrint('[DAP adapter stderr] $line');
           _output += '[adapter] $line\n';
           notifyListeners();
-          if (!portCompleter.isCompleted) {
-            // Pattern: "DAP server listening at: 127.0.0.1:PORT"
-            final m = RegExp(r'DAP server listening at: [\w.]+:(\d+)').firstMatch(line);
-            if (m != null) {
-              portCompleter.complete(int.parse(m.group(1)!));
-            }
-          }
         });
 
     _adapterProcess!.stdout
@@ -189,16 +198,13 @@ class DebugProvider extends ChangeNotifier {
           notifyListeners();
         });
 
-    _adapterProcess!.exitCode.then((_) {
-      if (!portCompleter.isCompleted) {
-        portCompleter.completeError(DapException('DAP adapter exited before announcing port'));
-      }
-    });
+    // Give dlv time to bind the port before we connect.
+    await Future<void>.delayed(const Duration(milliseconds: 800));
 
-    final port = await portCompleter.future.timeout(
-      const Duration(seconds: 15),
-      onTimeout: () => throw DapException('Timed out waiting for DAP TCP port'),
-    );
+    if (_adapterProcess == null) {
+      // Process exited during the delay — cleanup will have been triggered.
+      throw DapException('DAP adapter exited before the IDE could connect');
+    }
 
     final tcpClient = DapTcpClient();
     _client = tcpClient;
