@@ -1,7 +1,6 @@
-import 'dart:io';
-
 import 'package:core/core.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:terminal_pkg/terminal_pkg.dart';
 
@@ -28,12 +27,13 @@ class AppInstallerProvider extends ChangeNotifier {
   bool get watchingLogs => _watchingLogs;
   bool get hotReloadAvailable => _hotReloadAvailable;
 
-  /// Install APK using `pm install -r`.
+  static const _kChannel = MethodChannel('com.example.fl_ide/apk_installer');
+
+  /// Opens the system package installer UI for [apkPath].
   ///
-  /// `pm install` runs as system_server and cannot access files under
-  /// Termux's private data directory (/data/data/com.termux/...) due to
-  /// SELinux restrictions.  We copy the APK to /data/local/tmp/ first,
-  /// which is world-readable, then clean up afterwards.
+  /// Uses a method channel → FileProvider → ACTION_INSTALL_PACKAGE intent so
+  /// Android displays the standard "Do you want to install this app?" prompt.
+  /// The app already holds REQUEST_INSTALL_PACKAGES permission.
   Future<void> installApk(String apkPath) async {
     if (_installStatus == InstallStatus.installing) return;
 
@@ -42,37 +42,20 @@ class AppInstallerProvider extends ChangeNotifier {
     _installError = null;
     notifyListeners();
 
-    const tmpApk = '/data/local/tmp/fl_ide_install.apk';
     try {
-      final result = await Process.run(
-        '${RuntimeEnvir.usrPath}/bin/bash',
-        [
-          '-c',
-          // Copy to a world-readable location, install, then always clean up.
-          'cp "\$1" "$tmpApk" && pm install -r "$tmpApk"; '
-          'EXIT=\$?; rm -f "$tmpApk"; exit \$EXIT',
-          '--',   // argv[0]
-          apkPath,
-        ],
-        environment: RuntimeEnvir.baseEnv,
-      );
-
-      _installOutput = result.stdout.toString() + result.stderr.toString();
-
-      if (result.exitCode == 0 && _installOutput.contains('Success')) {
-        _installStatus = InstallStatus.success;
-      } else {
-        _installStatus = InstallStatus.error;
-        _installError = _installOutput.trim().isNotEmpty
-            ? _installOutput
-            : 'Installation failed (exit code ${result.exitCode})';
-      }
+      await _kChannel.invokeMethod<void>('installApk', {'path': apkPath});
+      // The system installer UI takes over from here — we can't observe whether
+      // the user ultimately accepted or rejected, so we mark as "launched".
+      _installStatus = InstallStatus.success;
+      _installOutput = 'System installer opened. Follow the on-screen prompt.';
+    } on PlatformException catch (e) {
+      _installStatus = InstallStatus.error;
+      _installError = e.message ?? e.toString();
+      _installOutput = _installError!;
     } catch (e) {
       _installStatus = InstallStatus.error;
       _installError = e.toString();
       _installOutput = e.toString();
-      // Best-effort cleanup
-      Process.run('rm', ['-f', tmpApk]);
     }
 
     notifyListeners();

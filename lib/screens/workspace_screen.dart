@@ -2886,16 +2886,20 @@ class _ApkInstallDialogState extends State<_ApkInstallDialog> {
   Future<void> _install() async {
     setState(() { _installing = true; });
     await widget.installer.installApk(widget.apkPath);
-    final status = widget.installer.installStatus;
     if (!mounted) return;
-    setState(() {
-      _installing = false;
-      _done = true;
-      _success = status == InstallStatus.success;
-      _message = status == InstallStatus.success
-          ? 'Installed successfully!'
-          : widget.installer.installError ?? 'Installation failed.';
-    });
+    final status = widget.installer.installStatus;
+    if (status == InstallStatus.success) {
+      // System installer UI is now open — dismiss our dialog so it's not
+      // blocking behind the system prompt.
+      Navigator.of(context).pop();
+    } else {
+      setState(() {
+        _installing = false;
+        _done = true;
+        _success = false;
+        _message = widget.installer.installError ?? 'Failed to open installer.';
+      });
+    }
   }
 
   @override
