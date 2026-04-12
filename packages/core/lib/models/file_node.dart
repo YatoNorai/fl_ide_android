@@ -1,8 +1,9 @@
 import 'dart:io';
 
 // Top-level const — single allocation for the lifetime of the app.
+// Note: 'build' is intentionally NOT hidden — users need to browse APK output.
 const _kHiddenDirs = {
-  '.git', '.dart_tool', 'build', '.gradle',
+  '.git', '.dart_tool', '.gradle',
   'node_modules', '__pycache__',
 };
 

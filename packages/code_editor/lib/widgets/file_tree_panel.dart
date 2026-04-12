@@ -21,7 +21,10 @@ bool _isRemote(BuildContext ctx, String path) {
 
 class FileTreePanel extends StatelessWidget {
   final VoidCallback? onFileSelected;
-  const FileTreePanel({super.key, this.onFileSelected});
+  /// Called when the user taps an APK file — workspace_screen shows the
+  /// install dialog using this callback instead of opening the file in editor.
+  final void Function(String apkPath)? onApkTap;
+  const FileTreePanel({super.key, this.onFileSelected, this.onApkTap});
 
   @override
   Widget build(BuildContext context) {
@@ -47,6 +50,7 @@ class FileTreePanel extends StatelessWidget {
                 node: rootNode,
                 depth: 0,
                 onFileSelected: onFileSelected,
+                onApkTap: onApkTap,
               ),
             ),
     );
@@ -59,15 +63,19 @@ class _FileTreeNode extends StatelessWidget {
   final FileNode node;
   final int depth;
   final VoidCallback? onFileSelected;
+  final void Function(String apkPath)? onApkTap;
   const _FileTreeNode(
-      {super.key, required this.node, required this.depth, this.onFileSelected});
+      {super.key, required this.node, required this.depth,
+       this.onFileSelected, this.onApkTap});
 
   @override
   Widget build(BuildContext context) => node.isDirectory
       ? _DirectoryNode(
-          node: node, depth: depth, onFileSelected: onFileSelected)
+          node: node, depth: depth,
+          onFileSelected: onFileSelected, onApkTap: onApkTap)
       : _FileLeaf(
-          node: node, depth: depth, onFileSelected: onFileSelected);
+          node: node, depth: depth,
+          onFileSelected: onFileSelected, onApkTap: onApkTap);
 }
 
 // ── Directory node ────────────────────────────────────────────────────────────
@@ -76,8 +84,10 @@ class _DirectoryNode extends StatelessWidget {
   final FileNode node;
   final int depth;
   final VoidCallback? onFileSelected;
+  final void Function(String apkPath)? onApkTap;
   const _DirectoryNode(
-      {required this.node, required this.depth, this.onFileSelected});
+      {required this.node, required this.depth,
+       this.onFileSelected, this.onApkTap});
 
   @override
   Widget build(BuildContext context) {
@@ -106,7 +116,8 @@ class _DirectoryNode extends StatelessWidget {
               key: ValueKey(child.path),
               node: child,
               depth: depth + 1,
-              onFileSelected: onFileSelected)),
+              onFileSelected: onFileSelected,
+              onApkTap: onApkTap)),
       ],
     );
   }
@@ -136,8 +147,12 @@ class _FileLeaf extends StatelessWidget {
   final FileNode node;
   final int depth;
   final VoidCallback? onFileSelected;
+  final void Function(String apkPath)? onApkTap;
   const _FileLeaf(
-      {required this.node, required this.depth, this.onFileSelected});
+      {required this.node, required this.depth,
+       this.onFileSelected, this.onApkTap});
+
+  bool get _isApk => node.extension.toLowerCase() == 'apk';
 
   @override
   Widget build(BuildContext context) {
@@ -154,8 +169,12 @@ class _FileLeaf extends StatelessWidget {
       label: node.name,
       isActive: isActive,
       onTap: () {
-        context.read<EditorProvider>().openFile(node.path);
-        onFileSelected?.call();
+        if (_isApk) {
+          onApkTap?.call(node.path);
+        } else {
+          context.read<EditorProvider>().openFile(node.path);
+          onFileSelected?.call();
+        }
       },
       onLongPress: () => _showFileSheet(context, node),
     );
@@ -172,6 +191,7 @@ class _FileLeaf extends StatelessWidget {
         file: file,
         parentContext: parentCtx,
         onRefresh: editor.refreshTree,
+        onInstallApk: _isApk ? () => onApkTap?.call(file.path) : null,
         onCloseFile: () {
           final idx =
               editor.openFiles.indexWhere((f) => f.path == file.path);
@@ -208,6 +228,7 @@ class _FileLeaf extends StatelessWidget {
       case 'bash':     return Icons.terminal;
       case 'gradle':   return Icons.build_outlined;
       case 'bat':      return Icons.terminal;
+      case 'apk':      return Icons.android_rounded;
       default:         return Icons.insert_drive_file_outlined;
     }
   }
@@ -235,6 +256,7 @@ class _FileLeaf extends StatelessWidget {
       case 'bash':
       case 'bat':      return const Color(0xFF89DDFF);
       case 'md':       return const Color(0xFF9CA3AF);
+      case 'apk':      return const Color(0xFF3DDC84); // Android green
       default:         return const Color(0xFF9CA3AF);
     }
   }
@@ -326,17 +348,21 @@ class _FileActionsSheet extends StatelessWidget {
   final BuildContext parentContext;
   final VoidCallback onRefresh;
   final VoidCallback onCloseFile;
+  /// Non-null only for APK files — calls onApkTap from the tree.
+  final VoidCallback? onInstallApk;
 
   const _FileActionsSheet({
     required this.file,
     required this.parentContext,
     required this.onRefresh,
     required this.onCloseFile,
+    this.onInstallApk,
   });
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final isApk = file.extension.toLowerCase() == 'apk';
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
@@ -355,8 +381,11 @@ class _FileActionsSheet extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
               child: Row(children: [
-                Icon(Icons.insert_drive_file_outlined,
-                    size: 16, color: cs.onSurfaceVariant),
+                Icon(
+                  isApk ? Icons.android_rounded : Icons.insert_drive_file_outlined,
+                  size: 16,
+                  color: isApk ? const Color(0xFF3DDC84) : cs.onSurfaceVariant,
+                ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(file.name,
@@ -369,6 +398,16 @@ class _FileActionsSheet extends StatelessWidget {
               ]),
             ),
             const SizedBox(height: 4),
+            if (isApk)
+              _SheetAction(
+                icon: Icons.install_mobile_rounded,
+                label: 'Install APK',
+                color: const Color(0xFF3DDC84),
+                onTap: () {
+                  Navigator.pop(context);
+                  onInstallApk?.call();
+                },
+              ),
             _SheetAction(
               icon: Icons.delete_outline_rounded,
               label: 'Delete',

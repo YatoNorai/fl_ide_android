@@ -100,6 +100,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   // SSH LSP bridge — closed on dispose
   SshLspBridge? _sshLspBridge;
 
+  // Track the last APK for which we showed the install dialog (avoid duplicates)
+  String? _lastShownApk;
+
   @override
   void initState() {
     super.initState();
@@ -424,12 +427,36 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   void _onDebugChanged() {
     if (!mounted) return;
     final dbg = context.read<DebugProvider>();
+
+    // Show APK install dialog after a successful build
+    final apk = dbg.lastBuiltApk;
+    if (apk != null && apk != _lastShownApk) {
+      _lastShownApk = apk;
+      // Refresh tree so the APK appears in the file browser
+      context.read<EditorProvider>().refreshTree();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _showApkInstallDialog(apk);
+      });
+    }
+
     final url = dbg.webServerUrl;
     if (url != null && !_showWebPreview) {
       _showPreview(url: url);
     } else if (url == null && _showWebPreview) {
       _hidePreview();
     }
+  }
+
+  void _showApkInstallDialog(String apkPath) {
+    final apkName = apkPath.split('/').last;
+    showThemedDialog(
+      context: context,
+      builder: (ctx) => _ApkInstallDialog(
+        apkPath: apkPath,
+        apkName: apkName,
+        installer: context.read<AppInstallerProvider>(),
+      ),
+    );
   }
 
   void _showPreview({String? url}) {
@@ -713,6 +740,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                                 _closeDrawer();
                                 _expandBottomSheet();
                               },
+                              onApkTap: _showApkInstallDialog,
                             ),
                           );
                           if (liquidGlass) {
@@ -1523,11 +1551,13 @@ class _DrawerContent extends StatelessWidget {
   final Project project;
   final VoidCallback onClose;
   final ValueChanged<int> onTabChange;
+  final void Function(String apkPath)? onApkTap;
 
   const _DrawerContent({
     required this.project,
     required this.onClose,
     required this.onTabChange,
+    this.onApkTap,
   });
 
   @override
@@ -1568,7 +1598,10 @@ class _DrawerContent extends StatelessWidget {
                   scrollDirection: Axis.horizontal,
                   child: SizedBox(
                     width: 600,
-                    child: FileTreePanel(onFileSelected: onClose),
+                    child: FileTreePanel(
+                      onFileSelected: onClose,
+                      onApkTap: onApkTap,
+                    ),
                   ),
                 ),
               ),
@@ -2823,6 +2856,128 @@ class _OverlayBtn extends StatelessWidget {
           child: Icon(icon, size: 17, color: c),
         ),
       ),
+    );
+  }
+}
+
+// ── APK install dialog ────────────────────────────────────────────────────────
+
+class _ApkInstallDialog extends StatefulWidget {
+  final String apkPath;
+  final String apkName;
+  final AppInstallerProvider installer;
+
+  const _ApkInstallDialog({
+    required this.apkPath,
+    required this.apkName,
+    required this.installer,
+  });
+
+  @override
+  State<_ApkInstallDialog> createState() => _ApkInstallDialogState();
+}
+
+class _ApkInstallDialogState extends State<_ApkInstallDialog> {
+  bool _installing = false;
+  bool _done = false;
+  bool _success = false;
+  String? _message;
+
+  Future<void> _install() async {
+    setState(() { _installing = true; });
+    await widget.installer.installApk(widget.apkPath);
+    final status = widget.installer.installStatus;
+    if (!mounted) return;
+    setState(() {
+      _installing = false;
+      _done = true;
+      _success = status == InstallStatus.success;
+      _message = status == InstallStatus.success
+          ? 'Installed successfully!'
+          : widget.installer.installError ?? 'Installation failed.';
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    final title = _done
+        ? (_success ? 'Installed' : 'Installation failed')
+        : 'Install APK';
+
+    final content = _installing
+        ? const SizedBox(
+            height: 60,
+            child: Center(child: CircularProgressIndicator()),
+          )
+        : Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (!_done) ...[
+                Row(children: [
+                  const Icon(Icons.android_rounded,
+                      color: Color(0xFF3DDC84), size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      widget.apkName,
+                      style: const TextStyle(fontWeight: FontWeight.w500),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ]),
+                const SizedBox(height: 8),
+                Text(
+                  'Install this APK on the device?',
+                  style: TextStyle(color: cs.onSurfaceVariant),
+                ),
+              ] else ...[
+                Row(children: [
+                  Icon(
+                    _success ? Icons.check_circle_outline : Icons.error_outline,
+                    color: _success ? const Color(0xFF3DDC84) : cs.error,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _message ?? '',
+                      style: TextStyle(
+                        color: _success ? null : cs.error,
+                      ),
+                    ),
+                  ),
+                ]),
+              ],
+            ],
+          );
+
+    final actions = _done || _installing
+        ? [
+            TextButton(
+              onPressed: _installing ? null : () => Navigator.pop(context),
+              child: const Text('Close'),
+            ),
+          ]
+        : [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            FilledButton.icon(
+              onPressed: _install,
+              icon: const Icon(Icons.install_mobile_rounded, size: 18),
+              label: const Text('Install'),
+            ),
+          ];
+
+    return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: Text(title),
+      content: content,
+      actions: actions,
     );
   }
 }

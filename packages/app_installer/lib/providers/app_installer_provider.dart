@@ -28,7 +28,12 @@ class AppInstallerProvider extends ChangeNotifier {
   bool get watchingLogs => _watchingLogs;
   bool get hotReloadAvailable => _hotReloadAvailable;
 
-  /// Install APK using `pm install -r <path>`
+  /// Install APK using `pm install -r`.
+  ///
+  /// `pm install` runs as system_server and cannot access files under
+  /// Termux's private data directory (/data/data/com.termux/...) due to
+  /// SELinux restrictions.  We copy the APK to /data/local/tmp/ first,
+  /// which is world-readable, then clean up afterwards.
   Future<void> installApk(String apkPath) async {
     if (_installStatus == InstallStatus.installing) return;
 
@@ -37,10 +42,18 @@ class AppInstallerProvider extends ChangeNotifier {
     _installError = null;
     notifyListeners();
 
+    const tmpApk = '/data/local/tmp/fl_ide_install.apk';
     try {
       final result = await Process.run(
         '${RuntimeEnvir.usrPath}/bin/bash',
-        ['-c', 'pm install -r "$apkPath"'],
+        [
+          '-c',
+          // Copy to a world-readable location, install, then always clean up.
+          'cp "\$1" "$tmpApk" && pm install -r "$tmpApk"; '
+          'EXIT=\$?; rm -f "$tmpApk"; exit \$EXIT',
+          '--',   // argv[0]
+          apkPath,
+        ],
         environment: RuntimeEnvir.baseEnv,
       );
 
@@ -50,12 +63,16 @@ class AppInstallerProvider extends ChangeNotifier {
         _installStatus = InstallStatus.success;
       } else {
         _installStatus = InstallStatus.error;
-        _installError = _installOutput;
+        _installError = _installOutput.trim().isNotEmpty
+            ? _installOutput
+            : 'Installation failed (exit code ${result.exitCode})';
       }
     } catch (e) {
       _installStatus = InstallStatus.error;
       _installError = e.toString();
       _installOutput = e.toString();
+      // Best-effort cleanup
+      Process.run('rm', ['-f', tmpApk]);
     }
 
     notifyListeners();

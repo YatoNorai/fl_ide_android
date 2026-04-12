@@ -62,6 +62,10 @@ class DebugProvider extends ChangeNotifier {
   bool _isBuilding = false;
   Project? _currentMetroProject; // kept for Metro restart
 
+  /// Set to the APK path after a successful build (Gradle / Flutter).
+  /// Cleared when a new build session starts.
+  String? _lastBuiltApk;
+
   /// Fixed port used when launching the Flutter web-server device.
   static const int webServerPort = 5050;
 
@@ -82,6 +86,9 @@ class DebugProvider extends ChangeNotifier {
   bool get isBuilding => _isBuilding;
   String get output => _output;
   String? get error => _error;
+
+  /// Path of the last successfully built APK, or null.
+  String? get lastBuiltApk => _lastBuiltApk;
   List<DapThread> get threads => _threads;
   List<DapStackFrame> get callStack => _callStack;
   List<DapScope> get scopes => _scopes;
@@ -290,6 +297,7 @@ class DebugProvider extends ChangeNotifier {
     if (_status != DebugStatus.idle) return;
     _error = null;
     _output = '';
+    _lastBuiltApk = null;
     _projectPath = project.path;
     _status = DebugStatus.starting;
     _isBuilding = true;
@@ -316,6 +324,7 @@ class DebugProvider extends ChangeNotifier {
         if (_isBuilding) {
           if (line.contains('BUILD SUCCESSFUL')) {
             _isBuilding = false;
+            _lastBuiltApk = _findBuiltApk(_projectPath);
           } else if (line.contains('BUILD FAILED') || line.contains('FAILURE:')) {
             _isBuilding = false;
             _error = 'Build failed. See output for details.';
@@ -335,21 +344,19 @@ class DebugProvider extends ChangeNotifier {
               '  In build.gradle (project level) change:\n'
               '  id "com.android.application" version "8.7.3"  (or newer)\n'
               '──────────────────────────────────────────────────────────\n';
-          notifyListeners();
         } else if (line.contains('Could not resolve') || line.contains('Could not download')) {
           _output += '\n── Hint ──────────────────────────\n'
               'Dependency resolution failed. Check your internet connection\n'
               'or add offlineMode=true to gradle.properties to use cached deps.\n'
               '──────────────────────────────────\n';
-          notifyListeners();
         } else if (line.contains('SDK location not found') ||
                    line.contains('ANDROID_HOME') && line.contains('not set')) {
           _output += '\n── Hint ────────────────────────────────────────────\n'
               'Android SDK not found. Make sure the Android SDK extension\n'
               'is installed and ANDROID_HOME is set correctly.\n'
               '────────────────────────────────────────────────────\n';
-          notifyListeners();
         }
+        notifyListeners(); // stream output line-by-line in real time
       }
 
       _metroProcess!.stdout
@@ -1068,6 +1075,22 @@ fs.watch = function (filename, options, listener) {
   }
 
   // ── Reset ─────────────────────────────────────────────────────────────────
+
+  /// Searches common APK output directories after a successful build.
+  static String? _findBuiltApk(String projectPath) {
+    final candidates = [
+      // Android native Gradle
+      '$projectPath/app/build/outputs/apk/debug/app-debug.apk',
+      // Flutter
+      '$projectPath/build/app/outputs/flutter-apk/app-debug.apk',
+      // React Native / Expo
+      '$projectPath/android/app/build/outputs/apk/debug/app-debug.apk',
+    ];
+    for (final p in candidates) {
+      if (File(p).existsSync()) return p;
+    }
+    return null;
+  }
 
   void _reset() {
     _status = DebugStatus.idle;

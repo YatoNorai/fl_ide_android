@@ -1036,8 +1036,9 @@ const styles = StyleSheet.create({
 
     final safeName = projectName.replaceAll('"', r'\"');
 
+    final isCompose = template == AndroidTemplate.emptyCompose;
     final settingsContent   = _aSettingsGradle(safeName);
-    final rootBuildContent  = _aRootBuildGradle(isKotlin);
+    final rootBuildContent  = _aRootBuildGradle(isKotlin, isCompose: isCompose);
     final appBuildContent   = _aAppBuildGradle(pkg, minSdk, template, isKotlin);
     final manifestContent   = _aManifest(pkg, className, template);
     final activityContent   = _aActivity(pkg, className, template, isKotlin);
@@ -1058,6 +1059,7 @@ set -e
 mkdir -p "$projectPath/app/src/main/$srcDir/$pkgDir"
 mkdir -p "$projectPath/app/src/main/res/values"
 mkdir -p "$projectPath/app/src/main/res/layout"
+mkdir -p "$projectPath/gradle/wrapper"
 $extraMkdir
 
 cat > "$projectPath/settings.gradle.kts" << \'__LAYEREOF__\'
@@ -1109,11 +1111,35 @@ android.nonTransitiveRClass=true
 \$AAPT2_LINE
 __LAYEREOF__
 
+# Write a shim gradlew that delegates to system gradle (works offline)
 cat > "$projectPath/gradlew" << \'__LAYEREOF__\'
 #!/bin/sh
 exec gradle "\$@"
 __LAYEREOF__
 chmod +x "$projectPath/gradlew"
+
+# Detect the system gradle version for the wrapper properties
+GRADLE_VER=\$(gradle --version 2>/dev/null | awk '/^Gradle /{print \$2; exit}')
+GRADLE_VER=\${GRADLE_VER:-8.6}
+
+cat > "$projectPath/gradle/wrapper/gradle-wrapper.properties" << __LAYEREOF__
+distributionBase=GRADLE_USER_HOME
+distributionPath=wrapper/dists
+distributionUrl=https\\://services.gradle.org/distributions/gradle-\$GRADLE_VER-bin.zip
+networkTimeout=10000
+validateDistributionUrl=true
+zipStoreBase=GRADLE_USER_HOME
+zipStorePath=wrapper/dists
+__LAYEREOF__
+
+# Try to generate gradle-wrapper.jar using the system gradle.
+# We restore our shim afterwards so builds don't download Gradle from the internet.
+if command -v gradle > /dev/null 2>&1; then
+  (cd "$projectPath" && gradle wrapper --gradle-version="\$GRADLE_VER" --quiet 2>/dev/null && echo "✓ gradle-wrapper.jar generated") || true
+  # Restore the offline shim (gradle wrapper overwrites gradlew)
+  printf '#!/bin/sh\nexec gradle "\$@"\n' > "$projectPath/gradlew"
+  chmod +x "$projectPath/gradlew"
+fi
 
 echo "✓ $safeName (${template.label}, ${isKotlin ? 'Kotlin' : 'Java'}, API $minSdk)"
 ) 2>&1''';
@@ -1139,13 +1165,17 @@ dependencyResolutionManagement {
 rootProject.name = "$projectName"
 include(":app")''';
 
-  static String _aRootBuildGradle(bool isKotlin) {
+  static String _aRootBuildGradle(bool isKotlin, {bool isCompose = false}) {
     final kt = isKotlin
-        ? '\n    id("org.jetbrains.kotlin.android") version "1.9.22" apply false'
+        ? '\n    id("org.jetbrains.kotlin.android") version "2.0.21" apply false'
+        : '';
+    // Kotlin 2.0 bundles the Compose compiler — needs the compose plugin declared here.
+    final compose = (isKotlin && isCompose)
+        ? '\n    id("org.jetbrains.kotlin.plugin.compose") version "2.0.21" apply false'
         : '';
     return '''
 plugins {
-    id("com.android.application") version "8.2.0" apply false$kt
+    id("com.android.application") version "8.7.3" apply false$kt$compose
 }''';
   }
 
@@ -1156,6 +1186,7 @@ plugins {
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 android {
     namespace = "$pkg"
@@ -1169,29 +1200,28 @@ android {
     }
     buildTypes { release { isMinifyEnabled = false } }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = "1.8" }
+    kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
-    composeOptions { kotlinCompilerExtensionVersion = "1.5.8" }
 }
 dependencies {
-    val composeBom = platform("androidx.compose:compose-bom:2024.02.00")
+    val composeBom = platform("androidx.compose:compose-bom:2024.09.00")
     implementation(composeBom)
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
-    implementation("androidx.activity:activity-compose:1.8.2")
-    implementation("androidx.core:core-ktx:1.12.0")
+    implementation("androidx.activity:activity-compose:1.9.2")
+    implementation("androidx.core:core-ktx:1.13.1")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }''';
     }
 
     final ktPlugin = isKotlin ? '\n    id("org.jetbrains.kotlin.android")' : '';
     final coreLib  = isKotlin ? 'core-ktx' : 'core';
-    final ktOpts   = isKotlin ? '\n    kotlinOptions { jvmTarget = "1.8" }' : '';
+    final ktOpts   = isKotlin ? '\n    kotlinOptions { jvmTarget = "17" }' : '';
     final fragDep  = template == AndroidTemplate.bottomNavigation
         ? '\n    implementation("androidx.fragment:fragment${isKotlin ? '-ktx' : ''}:1.6.2")'
         : '';
@@ -1212,14 +1242,14 @@ android {
     }
     buildTypes { release { isMinifyEnabled = false } }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }$ktOpts
 }
 dependencies {
-    implementation("androidx.core:$coreLib:1.12.0")
-    implementation("androidx.appcompat:appcompat:1.6.1")
-    implementation("com.google.android.material:material:1.11.0")
+    implementation("androidx.core:$coreLib:1.13.1")
+    implementation("androidx.appcompat:appcompat:1.7.0")
+    implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")$fragDep
 }''';
   }
