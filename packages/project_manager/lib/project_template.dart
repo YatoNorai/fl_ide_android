@@ -111,6 +111,7 @@ class ProjectTemplate {
        String androidLanguage = 'kotlin',
        int androidMinSdk = 24,
        AndroidTemplate androidTemplate = AndroidTemplate.emptyActivity,
+       bool useGroovy = false,
        // Flutter
        FlutterTemplate flutterTemplate = FlutterTemplate.counterApp,
        // React Native
@@ -136,7 +137,7 @@ class ProjectTemplate {
           : cmd;
       final flutterBase = 'cd "$parentDir" && $flutterCmd';
       final patch = _flutterTemplatePatch(projectPath, projectName, flutterTemplate);
-      return '$flutterBase && ${_flutterAndroidFixes(projectPath)} && $patch';
+      return '$flutterBase && ${_flutterAndroidFixes(projectPath, useGroovy: useGroovy)} && $patch';
     }
 
     // ── Android SDK ───────────────────────────────────────────────────────────
@@ -146,6 +147,7 @@ class ProjectTemplate {
         language: androidLanguage,
         minSdk: androidMinSdk,
         template: androidTemplate,
+        useGroovy: useGroovy,
       )}';
     }
 
@@ -957,11 +959,24 @@ const styles = StyleSheet.create({
 
   // ── Flutter Android fixes ─────────────────────────────────────────────────
 
-  static String _flutterAndroidFixes(String projectPath) {
+  static String _flutterAndroidFixes(String projectPath,
+      {bool useGroovy = false}) {
     const androidSdkDir = r'$PREFIX/opt/android-sdk';
     // Pinned versions known to be present in the Termux Android SDK package.
     const ndkVersion        = '27.1.12297006';
     const buildToolsVersion = '35.0.0';
+    // Flutter projects use KTS by default; with useGroovy the app module uses build.gradle
+    final gradleFile = useGroovy
+        ? '$projectPath/android/app/build.gradle'
+        : '$projectPath/android/app/build.gradle.kts';
+    // ndkVersion assignment syntax differs between KTS (= "…") and Groovy ("…")
+    final ndkKtsPattern   = r's/ndkVersion\s*=\s*flutter\.ndkVersion/ndkVersion = "' + ndkVersion + r'"/g';
+    final ndkGroovyPattern = r's/ndkVersion\s\+flutter\.ndkVersion/ndkVersion "' + ndkVersion + r'"/g';
+    final ndkPattern      = useGroovy ? ndkGroovyPattern : ndkKtsPattern;
+    final ndkPinned       = useGroovy ? 'ndkVersion "$ndkVersion"' : 'ndkVersion = "$ndkVersion"';
+    final btoolsInject    = useGroovy
+        ? r'    buildToolsVersion "' + buildToolsVersion + r'"'
+        : r'    buildToolsVersion = "' + buildToolsVersion + r'"';
     return r'''
 (
   SDK_ROOT="${ANDROID_HOME:-''' +
@@ -986,23 +1001,23 @@ const styles = StyleSheet.create({
   } > "$PROPS"
   echo "✓ Wrote local.properties"
 
-  # ── build.gradle.kts ──────────────────────────────────────────────────────
+  # ── build.gradle(.kts) ────────────────────────────────────────────────────
   GRADLE="''' +
-        projectPath +
-        r'''/android/app/build.gradle.kts"
+        gradleFile +
+        r'''"
   if [ -f "$GRADLE" ]; then
     # Replace flutter.ndkVersion with pinned version; remove stray ndkVersion lines.
-    sed -i 's/ndkVersion\s*=\s*flutter\.ndkVersion/ndkVersion = "''' +
-        ndkVersion +
-        r'''"/g' "$GRADLE"
-    sed -i '/ndkVersion/!b; /ndkVersion = "''' +
-        ndkVersion +
-        r'''"/b; d' "$GRADLE"
+    sed -i ''' +
+        ndkPattern +
+        r"""' "$GRADLE"
+    sed -i '/ndkVersion/!b; /""" +
+        ndkPinned +
+        r'''/b; d' "$GRADLE"
     # Inject buildToolsVersion after the first `compileSdk` line if not present.
     if ! grep -q 'buildToolsVersion' "$GRADLE"; then
-      sed -i '/compileSdk/a\    buildToolsVersion = "''' +
-        buildToolsVersion +
-        r'''"' "$GRADLE"
+      sed -i '/compileSdk/a\''' +
+        btoolsInject +
+        r''''' "$GRADLE"
     fi
     echo "✓ Set ndkVersion=''' +
         ndkVersion +
@@ -1041,6 +1056,7 @@ const styles = StyleSheet.create({
     String language = 'kotlin',
     int minSdk = 24,
     AndroidTemplate template = AndroidTemplate.emptyActivity,
+    bool useGroovy = false,
   }) {
     final isKotlin = (template == AndroidTemplate.emptyCompose)
         ? true
@@ -1067,12 +1083,13 @@ const styles = StyleSheet.create({
     final safeName = projectName.replaceAll('"', r'\"');
 
     final isCompose = template == AndroidTemplate.emptyCompose;
-    final settingsContent   = _aSettingsGradle(safeName);
-    final rootBuildContent  = _aRootBuildGradle(isKotlin, isCompose: isCompose);
-    final appBuildContent   = _aAppBuildGradle(pkg, minSdk, template, isKotlin);
+    final settingsContent   = _aSettingsGradle(safeName, useGroovy: useGroovy);
+    final rootBuildContent  = _aRootBuildGradle(isKotlin, isCompose: isCompose, useGroovy: useGroovy);
+    final appBuildContent   = _aAppBuildGradle(pkg, minSdk, template, isKotlin, useGroovy: useGroovy);
     final manifestContent   = _aManifest(pkg, className, template);
     final activityContent   = _aActivity(pkg, className, template, isKotlin);
     final mainLayoutContent = _aMainLayout(template);
+    final themesContent     = _aThemesXml(isCompose);
     final extraFiles        = _aExtraFiles(
         projectPath, pkg, pkgDir, className, template, isKotlin, fileExt, srcDir);
 
@@ -1083,6 +1100,11 @@ const styles = StyleSheet.create({
         ? 'mkdir -p "$projectPath/app/src/main/res/menu"'
         : '';
 
+    // Build file names depend on DSL choice
+    final settingsFile = useGroovy ? 'settings.gradle'     : 'settings.gradle.kts';
+    final rootFile     = useGroovy ? 'build.gradle'        : 'build.gradle.kts';
+    final appFile      = useGroovy ? 'app/build.gradle'    : 'app/build.gradle.kts';
+
     return '''
 (
 set -e
@@ -1092,15 +1114,15 @@ mkdir -p "$projectPath/app/src/main/res/layout"
 mkdir -p "$projectPath/gradle/wrapper"
 $extraMkdir
 
-cat > "$projectPath/settings.gradle.kts" << \'__LAYEREOF__\'
+cat > "$projectPath/$settingsFile" << \'__LAYEREOF__\'
 $settingsContent
 __LAYEREOF__
 
-cat > "$projectPath/build.gradle.kts" << \'__LAYEREOF__\'
+cat > "$projectPath/$rootFile" << \'__LAYEREOF__\'
 $rootBuildContent
 __LAYEREOF__
 
-cat > "$projectPath/app/build.gradle.kts" << \'__LAYEREOF__\'
+cat > "$projectPath/$appFile" << \'__LAYEREOF__\'
 $appBuildContent
 __LAYEREOF__
 
@@ -1122,6 +1144,10 @@ cat > "$projectPath/app/src/main/res/values/strings.xml" << \'__LAYEREOF__\'
 <resources>
     <string name="app_name">$safeName</string>
 </resources>
+__LAYEREOF__
+
+cat > "$projectPath/app/src/main/res/values/themes.xml" << \'__LAYEREOF__\'
+$themesContent
 __LAYEREOF__
 
 SDK_ROOT_LP="\${ANDROID_HOME:-\$PREFIX/opt/android-sdk}"
@@ -1185,7 +1211,27 @@ echo "✓ $safeName (${template.label}, ${isKotlin ? 'Kotlin' : 'Java'}, API $mi
 
   // ── Android file content generators ──────────────────────────────────────
 
-  static String _aSettingsGradle(String projectName) => '''
+  static String _aSettingsGradle(String projectName, {bool useGroovy = false}) {
+    if (useGroovy) {
+      return '''
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        google()
+        mavenCentral()
+    }
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+rootProject.name = '$projectName'
+include ':app\'''';
+    }
+    return '''
 pluginManagement {
     repositories {
         gradlePluginPortal()
@@ -1202,8 +1248,21 @@ dependencyResolutionManagement {
 }
 rootProject.name = "$projectName"
 include(":app")''';
+  }
 
-  static String _aRootBuildGradle(bool isKotlin, {bool isCompose = false}) {
+  static String _aRootBuildGradle(bool isKotlin, {bool isCompose = false, bool useGroovy = false}) {
+    if (useGroovy) {
+      final kt = isKotlin
+          ? "\n    id 'org.jetbrains.kotlin.android' version '2.0.21' apply false"
+          : '';
+      final compose = (isKotlin && isCompose)
+          ? "\n    id 'org.jetbrains.kotlin.plugin.compose' version '2.0.21' apply false"
+          : '';
+      return """
+plugins {
+    id 'com.android.application' version '8.7.3' apply false$kt$compose
+}""";
+    }
     final kt = isKotlin
         ? '\n    id("org.jetbrains.kotlin.android") version "2.0.21" apply false'
         : '';
@@ -1218,8 +1277,10 @@ plugins {
   }
 
   static String _aAppBuildGradle(
-      String pkg, int minSdk, AndroidTemplate template, bool isKotlin) {
+      String pkg, int minSdk, AndroidTemplate template, bool isKotlin,
+      {bool useGroovy = false}) {
     if (template == AndroidTemplate.emptyCompose) {
+      // Compose always uses KTS (Groovy Compose DSL is unusual; keep KTS)
       return '''
 plugins {
     id("com.android.application")
@@ -1255,6 +1316,41 @@ dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }''';
+    }
+
+    if (useGroovy) {
+      final ktPlugin = isKotlin ? "\n    id 'org.jetbrains.kotlin.android'" : '';
+      final coreLib  = isKotlin ? 'core-ktx' : 'core';
+      final ktOpts   = isKotlin ? "\n    kotlinOptions { jvmTarget = '17' }" : '';
+      final fragDep  = template == AndroidTemplate.bottomNavigation
+          ? "\n    implementation 'androidx.fragment:fragment${isKotlin ? '-ktx' : ''}:1.6.2'"
+          : '';
+      return """
+plugins {
+    id 'com.android.application'$ktPlugin
+}
+android {
+    namespace '$pkg'
+    compileSdk 35
+    defaultConfig {
+        applicationId '$pkg'
+        minSdk $minSdk
+        targetSdk 35
+        versionCode 1
+        versionName '1.0'
+    }
+    buildTypes { release { minifyEnabled false } }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }$ktOpts
+}
+dependencies {
+    implementation 'androidx.core:$coreLib:1.13.1'
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'com.google.android.material:material:1.12.0'
+    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'$fragDep
+}""";
     }
 
     final ktPlugin = isKotlin ? '\n    id("org.jetbrains.kotlin.android")' : '';
@@ -1294,9 +1390,8 @@ dependencies {
 
   static String _aManifest(
       String pkg, String className, AndroidTemplate template) {
-    final theme = template == AndroidTemplate.emptyCompose
-        ? '@style/Theme.AppCompat.DayNight.NoActionBar'
-        : '@style/Theme.AppCompat.DayNight';
+    // Always use the AppTheme defined in res/values/themes.xml
+    const theme = '@style/Theme.AppTheme';
     return '''
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -1312,6 +1407,37 @@ dependencies {
         </activity>
     </application>
 </manifest>''';
+  }
+
+  // ── themes.xml generator ──────────────────────────────────────────────────
+
+  /// Generates res/values/themes.xml for a native Android project.
+  ///
+  /// [isCompose] – when true the base theme is a plain MaterialTheme with no
+  /// ActionBar (Compose manages its own toolbar); otherwise a
+  /// Theme.Material3.DayNight.NoActionBar descendant is used so AppCompat
+  /// and Material Components work correctly out of the box.
+  static String _aThemesXml(bool isCompose) {
+    if (isCompose) {
+      // Compose projects do not need AppCompat or an ActionBar parent.
+      return '''
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.AppTheme" parent="android:Theme.Material">
+        <item name="android:windowBackground">@android:color/white</item>
+    </style>
+</resources>''';
+    }
+
+    // Views-based projects: Material3 with DayNight + NoActionBar so the app
+    // can set its own Toolbar via setSupportActionBar().
+    return '''
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.AppTheme" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- Customize your theme here -->
+    </style>
+</resources>''';
   }
 
   static String _aActivity(

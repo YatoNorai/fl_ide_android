@@ -39,6 +39,8 @@ class ProjectManagerProvider extends ChangeNotifier {
     FlutterTemplate flutterTemplate = FlutterTemplate.counterApp,
     // React Native-specific options
     ReactNativeTemplate rnTemplate = ReactNativeTemplate.blank,
+    // Gradle DSL
+    bool useGroovy = false,
   }) async {
     final base = projectsBasePath ?? RuntimeEnvir.projectsPath;
     final projectPath = '$base/$name';
@@ -60,7 +62,8 @@ class ProjectManagerProvider extends ChangeNotifier {
         androidMinSdk: androidMinSdk,
         androidTemplate: androidTemplate,
         flutterTemplate: flutterTemplate,
-        rnTemplate: rnTemplate);
+        rnTemplate: rnTemplate,
+        useGroovy: useGroovy);
 
     // Await the terminal callback so navigation only happens after the command
     // runs (or the session signals completion).

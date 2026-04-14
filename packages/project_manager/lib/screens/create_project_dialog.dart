@@ -77,6 +77,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
   String _androidLanguage = 'Kotlin';
   int _androidMinSdk = 24;
   AndroidTemplate _androidTemplate = AndroidTemplate.emptyActivity;
+  String _gradleDsl = 'Kotlin (.kts)';
   // Flutter-specific options
   FlutterTemplate _flutterTemplate = FlutterTemplate.counterApp;
   // React Native-specific options
@@ -195,6 +196,19 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
     }
   }
 
+  Future<void> _pickGradleDsl() async {
+    final result = await showThemedDialog<String>(
+      context: context,
+      title: 'Gradle DSL',
+      items: const ['Kotlin (.kts)', 'Groovy'],
+      current: _gradleDsl,
+      label: (v) => v,
+    );
+    if (result != null && mounted) {
+      setState(() => _gradleDsl = result);
+    }
+  }
+
   Future<void> _pickSdk() async {
     final options = widget.isSshActive && _remoteSdkTypes.isNotEmpty
         ? _remoteSdkTypes
@@ -278,6 +292,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
       androidTemplate: _androidTemplate,
       flutterTemplate: _flutterTemplate,
       rnTemplate: _rnTemplate,
+      useGroovy: _gradleDsl == 'Groovy',
       runInTerminal: (script) async {
         await _termProvider.createSession(
           label: 'Criando $name',
@@ -425,6 +440,17 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                     ),
                   ],
 
+                  // ── Gradle DSL picker (Flutter) ────────────────────────────
+                  if (_selectedSdk == SdkType.flutter) ...[
+                    const SizedBox(height: 16),
+                    _SelectTile(
+                      label: 'Gradle DSL',
+                      valueText: _gradleDsl,
+                      enabled: !_creating,
+                      onTap: _creating ? null : _pickGradleDsl,
+                    ),
+                  ],
+
                   // ── Flutter template picker ────────────────────────────────
                   if (_selectedSdk == SdkType.flutter) ...[
                     const SizedBox(height: 20),
@@ -509,6 +535,16 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                           'API $_androidMinSdk  ·  ${_kMinSdkVersions[_androidMinSdk] ?? ''}',
                       enabled: !_creating,
                       onTap: _creating ? null : _pickMinSdk,
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    // Gradle DSL picker
+                    _SelectTile(
+                      label: 'Gradle DSL',
+                      valueText: _gradleDsl,
+                      enabled: !_creating,
+                      onTap: _creating ? null : _pickGradleDsl,
                     ),
 
                     const SizedBox(height: 20),
