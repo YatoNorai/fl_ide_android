@@ -104,6 +104,8 @@ sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
         newProjectCmd: 'mkdir -p \$name',
         defaultEntryFile: 'app/src/main/java/MainActivity.kt',
         fileExtensions: ['java', 'kotlin', 'kt', 'xml', 'gradle'],
+        syncCommand: './gradlew --refresh-dependencies',
+        syncTriggerFile: 'app/build.gradle',
       ),
     ),
     SdkDefinition(

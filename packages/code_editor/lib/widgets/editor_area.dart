@@ -238,11 +238,17 @@ class _ActiveEditorState extends State<_ActiveEditor> {
     try {
       if (cfg is QuillLspStdioConfig) {
         client = await LspStdioClient.start(
-          executable:    cfg.executable,
-          args:          cfg.args,
-          workspacePath: cfg.workspacePath,
-          languageId:    cfg.languageId,
-          environment:   cfg.environment,
+          executable:               cfg.executable,
+          args:                     cfg.args,
+          workspacePath:            cfg.workspacePath,
+          languageId:               cfg.languageId,
+          environment:              cfg.environment,
+          initializeTimeoutSeconds: cfg.initializeTimeoutSeconds,
+          // Wire onError before the process starts so early stderr/crashes
+          // are surfaced in the UI rather than silently swallowed.
+          onError: (msg) {
+            if (mounted) context.read<LspProvider>().setError(msg);
+          },
         );
       } else if (cfg is QuillLspSocketConfig) {
         final sc = LspSocketClient(
@@ -250,14 +256,29 @@ class _ActiveEditorState extends State<_ActiveEditor> {
           workspacePath: cfg.workspacePath,
           languageId:    cfg.languageId,
         );
+        sc.onError = (msg) {
+          if (mounted) context.read<LspProvider>().setError(msg);
+        };
         await sc.connect();
         client = sc;
       }
     } catch (e) {
       debugPrint('[EditorArea] LSP start failed: $e');
+      if (mounted) {
+        context.read<LspProvider>().setError('LSP failed to start: $e');
+      }
       return;
     }
     if (!mounted || client == null) { client?.shutdown(); return; }
+
+    // If initialize timed out, _ready is false — surface the error instead of
+    // attaching a non-functional client.
+    if (!client.isReady) {
+      debugPrint('[EditorArea] LSP client not ready after start, discarding');
+      client.shutdown();
+      return;
+    }
+
     _ownedLspClient = client;
     final langId = cfg.languageId;
     await file.controller?.attachLsp(

@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:app_installer/app_installer.dart';
 import 'package:build_runner_pkg/build_runner_pkg.dart'
-    show BuildPlatform, supportedPlatforms;
+    show BuildPlatform, BuildProvider, LogBridgeInjector, LogcatProvider, LogLevel, supportedPlatforms;
 import 'package:code_editor/code_editor.dart';
 import 'package:dap_client/dap_client.dart';
 import 'package:core/core.dart';
@@ -72,7 +72,7 @@ class WorkspaceScreen extends StatefulWidget {
 }
 
 class _WorkspaceScreenState extends State<WorkspaceScreen>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   late final AnimationController _drawerCtrl;
   late final Animation<double> _drawerAnim;
   late final AnimationController _aiDrawerCtrl;
@@ -87,6 +87,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   bool _syncBannerVisible = false;
   String _syncCommand = '';
   String _syncTriggerPath = '';
+  // Snapshot of the dependency section taken when the project loads.
+  // The banner is shown only when a save changes this section.
+  String _depSectionSnapshot = '';
 
   // Cached EditorProvider reference — safe to use in dispose()
   EditorProvider? _editorProvider;
@@ -103,9 +106,15 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   // Track the last APK for which we showed the install dialog (avoid duplicates)
   String? _lastShownApk;
 
+  // APK poll timer — detects APKs built via terminal (flutter build apk, etc.)
+  Timer? _apkPollTimer;
+  // Modification time of the last known APK — used to detect rebuilds
+  DateTime? _lastApkMtime;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _drawerCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 280),
@@ -346,10 +355,15 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
         final triggerPath =
             '${widget.project.path}/${sdkCfg.syncTriggerFile}';
         if (await File(triggerPath).exists()) {
+          final snapshot = _depSection(
+            await File(triggerPath).readAsString(),
+            widget.project.sdk,
+          );
           if (mounted) {
             setState(() {
               _syncCommand = sdkCfg.syncCommand;
               _syncTriggerPath = triggerPath;
+              _depSectionSnapshot = snapshot;
             });
           }
         }
@@ -359,6 +373,14 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
       _autoSaveTimer = Timer.periodic(const Duration(seconds: 30), (_) {
         if (!mounted) return;
         context.read<EditorProvider>().saveActiveFile();
+      });
+
+      // APK poll — detect APKs built via terminal (flutter build apk, etc.)
+      // Scans output directories every 4 s; triggers install dialog when the
+      // modification time of the latest APK changes.
+      _apkPollTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+        if (!mounted) return;
+        _checkForNewTerminalApk();
       });
     });
   }
@@ -388,7 +410,17 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
         _syncTriggerPath.isNotEmpty &&
         saved == _syncTriggerPath &&
         !_syncBannerVisible) {
-      setState(() => _syncBannerVisible = true);
+      // Only show when the trigger file is open in a tab (must be open to save).
+      final isOpen = _editorProvider?.openFiles.any((f) => f.path == saved) ?? false;
+      if (isOpen) {
+        final file = File(saved);
+        if (file.existsSync()) {
+          final current = _depSection(file.readAsStringSync(), widget.project.sdk);
+          if (current != _depSectionSnapshot) {
+            setState(() => _syncBannerVisible = true);
+          }
+        }
+      }
     }
 
     final lsp = context.read<LspProvider>();
@@ -428,6 +460,15 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     if (!mounted) return;
     final dbg = context.read<DebugProvider>();
 
+    // Open DEBUG CONSOLE tab and expand the sheet when a build/debug session starts.
+    if (dbg.isBuilding || dbg.status == DebugStatus.starting) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _sheetKey.currentState?.selectToolTab(4); // 4 = DEBUG CONSOLE
+        _sheetKey.currentState?.expandToMid();
+      });
+    }
+
     // Show APK install dialog after a successful build
     final apk = dbg.lastBuiltApk;
     if (apk != null && apk != _lastShownApk) {
@@ -448,6 +489,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   }
 
   void _showApkInstallDialog(String apkPath) {
+    // Detect package name BEFORE launching the system installer so we can start
+    // logcat right away — the app may launch seconds after install completes.
+    final packageName = LogcatProvider.detectPackageName(widget.project.path);
+
     context.read<AppInstallerProvider>().installApk(apkPath).then((_) {
       if (!mounted) return;
       final installer = context.read<AppInstallerProvider>();
@@ -455,7 +500,41 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(installer.installError ?? 'Failed to open installer')),
         );
+        return;
       }
+
+      // Start logcat for the installed app (waits for the app PID to appear).
+      if (packageName != null) {
+        context.read<LogcatProvider>().start(packageName);
+        // Jump to LOGCAT tab (index 6) and expand the sheet.
+        _sheetKey.currentState?.selectToolTab(6);
+        _sheetKey.currentState?.expandToMid();
+      }
+    });
+  }
+
+  /// Polls APK output directories to detect APKs built via terminal commands
+  /// (e.g. `flutter build apk`, `./gradlew assembleDebug`).
+  /// Triggers the install + logcat flow when a new or updated APK is found.
+  void _checkForNewTerminalApk() {
+    final apkPath = LogcatProvider.findLatestApk(widget.project.path);
+    if (apkPath == null) return;
+
+    // Skip if this APK was already shown (same path + same mtime).
+    final mtime = File(apkPath).lastModifiedSync();
+    if (apkPath == _lastShownApk && _lastApkMtime == mtime) return;
+
+    // Skip APKs that were already handled by the DebugProvider build flow.
+    if (apkPath == _lastShownApk) {
+      _lastApkMtime = mtime;
+      return;
+    }
+
+    _lastShownApk  = apkPath;
+    _lastApkMtime  = mtime;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _showApkInstallDialog(apkPath);
     });
   }
 
@@ -489,8 +568,19 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   }
 
   @override
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // When the IDE goes to the background while a debug/build session is active,
+    // the foreground service keeps the process alive so SSH keepalive and LSP
+    // connections survive screen-off.  No action needed here beyond logging.
+    debugPrint('[WorkspaceScreen] lifecycle → $state');
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _autoSaveTimer?.cancel();
+    _apkPollTimer?.cancel();
     _webPreviewEntry?.remove();
     _webPreviewEntry = null;
     _debugProvider?.removeListener(_onDebugChanged);
@@ -511,15 +601,21 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
         notificationText: widget.project.name,
         callback: fgServiceCallback,
       );
-    } catch (_) {}
+      debugPrint('[FgService] started for ${widget.project.name}');
+    } catch (e) {
+      debugPrint('[FgService] start failed: $e');
+    }
   }
 
   Future<void> _stopForegroundService() async {
     try {
       if (await FlutterForegroundTask.isRunningService) {
         await FlutterForegroundTask.stopService();
+        debugPrint('[FgService] stopped');
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[FgService] stop failed: $e');
+    }
   }
 
   /// Tries to open the project's default entry file, falling back to a list of
@@ -606,20 +702,137 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     }
   }
 
+  // ── Dependency-section extractors (VS Code-style change detection) ──────────
+  //
+  // Each extractor returns only the dependency-declaring portion of a file.
+  // The snapshot taken at load time is compared on every save — the banner
+  // appears only when the deps actually changed, not on every save.
+
+  static String _depSection(String content, SdkType sdk) {
+    switch (sdk) {
+      case SdkType.flutter:
+        return _yamlDepSection(content);
+      case SdkType.reactNative:
+      case SdkType.nodejs:
+        return _jsonDepSection(content);
+      case SdkType.androidSdk:
+        return _gradleDepSection(content);
+      case SdkType.go:
+        return _goModSection(content);
+      default:
+        return content; // requirements.txt, etc. — compare whole file
+    }
+  }
+
+  /// Extracts [dependencies:], [dev_dependencies:], [dependency_overrides:]
+  /// blocks from a pubspec.yaml.
+  static String _yamlDepSection(String content) {
+    const depKeys = {
+      'dependencies:',
+      'dev_dependencies:',
+      'dependency_overrides:',
+    };
+    final result = StringBuffer();
+    bool inSection = false;
+    for (final line in content.split('\n')) {
+      // A top-level key has no leading whitespace and contains ':'
+      final isTopLevel = line.isNotEmpty &&
+          !line.startsWith(' ') &&
+          !line.startsWith('\t');
+      if (isTopLevel) {
+        inSection = depKeys.any((k) => line.startsWith(k));
+      }
+      if (inSection) result.writeln(line);
+    }
+    return result.toString();
+  }
+
+  /// Extracts [dependencies], [devDependencies], [peerDependencies] from
+  /// a package.json file.
+  static String _jsonDepSection(String content) {
+    try {
+      final map = jsonDecode(content) as Map<String, dynamic>;
+      return jsonEncode({
+        'dependencies': map['dependencies'],
+        'devDependencies': map['devDependencies'],
+        'peerDependencies': map['peerDependencies'],
+      });
+    } catch (_) {
+      return content;
+    }
+  }
+
+  /// Extracts all [dependencies { }] blocks from a Gradle build script.
+  static String _gradleDepSection(String content) {
+    final result = StringBuffer();
+    int depth = 0;
+    bool inDep = false;
+    for (int i = 0; i < content.length; i++) {
+      if (!inDep) {
+        // Look for "dependencies" keyword followed (soon) by '{'
+        if (content.startsWith('dependencies', i)) {
+          final sub = content.indexOf('{', i + 'dependencies'.length);
+          if (sub != -1 && sub - i < 60) {
+            inDep = true;
+            depth = 1;
+            i = sub;
+            result.write('dependencies{');
+            continue;
+          }
+        }
+      } else {
+        final ch = content[i];
+        if (ch == '{') {
+          depth++;
+        } else if (ch == '}') {
+          depth--;
+          if (depth == 0) {
+            result.write('}');
+            inDep = false;
+            continue;
+          }
+        }
+        result.write(ch);
+      }
+    }
+    return result.toString();
+  }
+
+  /// Extracts [require ( ... )] blocks from a go.mod file.
+  static String _goModSection(String content) {
+    final result = StringBuffer();
+    bool inRequire = false;
+    for (final line in content.split('\n')) {
+      final trimmed = line.trim();
+      if (trimmed.startsWith('require')) inRequire = true;
+      if (inRequire) {
+        result.writeln(line);
+        if (trimmed == ')') inRequire = false;
+      }
+    }
+    return result.toString();
+  }
+
   void _runSync() {
+    // Refresh snapshot so the banner doesn't reappear immediately after syncing.
+    if (_syncTriggerPath.isNotEmpty) {
+      final file = File(_syncTriggerPath);
+      if (file.existsSync()) {
+        _depSectionSnapshot = _depSection(
+          file.readAsStringSync(),
+          widget.project.sdk,
+        );
+      }
+    }
     setState(() {
       _syncBannerVisible = false;
       _initPhase = _InitPhase.syncingDeps;
     });
+    // Open OUTPUT tab so the user sees the sync log (VS Code style).
+    _sheetKey.currentState?.selectToolTab(5); // 5 = OUTPUT
     _sheetKey.currentState?.expandToMid();
-    // The terminal session is always the first one created.
-    final termProv = context.read<TerminalProvider>();
-    final sessions = termProv.sessions;
-    if (sessions.isNotEmpty) {
-      sessions.first.writeCommand(_syncCommand);
-    }
-    // After a generous timeout revert the peek bar to ready regardless.
-    Future.delayed(const Duration(seconds: 90), () {
+    // Run the sync command as a background process — output streams to OUTPUT tab.
+    context.read<BuildProvider>().sync(_syncCommand, widget.project.path).then((_) {
       if (mounted && _initPhase == _InitPhase.syncingDeps) {
         setState(() => _initPhase = _InitPhase.ready);
       }
@@ -695,6 +908,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                                       onMenuTap: _toggleDrawer,
                                       onAiTap: _toggleAiDrawer,
                                       liquidGlass: true,
+                                      sheetKey: _sheetKey,
                                       onShowWebPreview: () {
                                         final url = context.read<DebugProvider>().webServerUrl;
                                         _showPreview(url: url);
@@ -709,6 +923,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                                   onMenuTap: _toggleDrawer,
                                   onAiTap: _toggleAiDrawer,
                                   liquidGlass: false,
+                                  sheetKey: _sheetKey,
                                   onShowWebPreview: () {
                                     final url = context.read<DebugProvider>().webServerUrl;
                                     _showPreview(url: url);
@@ -813,6 +1028,7 @@ class _WorkspaceAppBar extends StatefulWidget {
   final VoidCallback onAiTap;
   final VoidCallback onShowWebPreview;
   final bool liquidGlass;
+  final GlobalKey<_BottomSheetPanelState> sheetKey;
 
   const _WorkspaceAppBar({
     required this.project,
@@ -821,6 +1037,7 @@ class _WorkspaceAppBar extends StatefulWidget {
     required this.onAiTap,
     required this.onShowWebPreview,
     required this.liquidGlass,
+    required this.sheetKey,
   });
 
   @override
@@ -863,26 +1080,21 @@ class _WorkspaceAppBarState extends State<_WorkspaceAppBar> {
     final platforms = supportedPlatforms(widget.project.sdk);
     if (platforms.isEmpty) return;
 
-    // Show platform-picker dialog so the user can choose between
-    // android / web / linux every time they hit play.
+    // Use the last-saved platform directly — no dialog. The user changes the
+    // platform via the debug button in the drawer rail (platform-picker sheet).
     final savedName = settings.debugPlatformFor(widget.project.sdk.name);
-    final initialPlatform = savedName != null
+    final platform = savedName != null
         ? platforms.firstWhere((p) => p.name == savedName,
             orElse: () => platforms.first)
         : platforms.first;
 
-    final platform = platforms.length == 1
-        ? platforms.first
-        : await showThemedDialog<BuildPlatform>(
-            context: context,
-            builder: (ctx) => _PlatformPickerDialog(
-              platforms: platforms,
-              initial: initialPlatform,
-            ),
-          );
-
-    if (platform == null || !context.mounted) return;
-    settings.setDebugPlatform(widget.project.sdk.name, platform.name);
+    // Open the bottom sheet on the DEBUG CONSOLE tab (index 4 in the tool tabs)
+    // so the user sees build output immediately without having to navigate there.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!context.mounted) return;
+      widget.sheetKey.currentState?.selectToolTab(4); // 4 = DEBUG CONSOLE
+      widget.sheetKey.currentState?.expandToMid();
+    });
 
     // Prefer DapConfig from installed JSON extension, fall back to SdkDefinition.
     final ext = context.read<ExtensionsProvider>().availableSdks
@@ -1359,29 +1571,142 @@ void _repairAndroidProject(BuildContext context) {
   );
 }
 
+/// Shows a bottom sheet to change the build platform without starting a build.
+void _showPlatformPickerSheet(BuildContext context, Project project) {
+  final settings = context.read<SettingsProvider>();
+  final platforms = supportedPlatforms(project.sdk);
+  if (platforms.isEmpty) return;
+
+  final savedName = settings.debugPlatformFor(project.sdk.name);
+
+  showModalBottomSheet<void>(
+    context: context,
+    backgroundColor: Colors.transparent,
+    isScrollControlled: true,
+    builder: (sheetCtx) {
+      final cs = Theme.of(sheetCtx).colorScheme;
+      return StatefulBuilder(
+        builder: (ctx, setSheetState) {
+          return Container(
+            margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            decoration: BoxDecoration(
+              color: cs.surfaceContainerHigh,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: 12),
+                Center(
+                  child: Container(
+                    width: 36, height: 4,
+                    decoration: BoxDecoration(
+                      color: cs.onSurface.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Row(
+                    children: [
+                      Icon(Icons.developer_board_rounded, color: cs.primary, size: 20),
+                      const SizedBox(width: 10),
+                      Text(
+                        'Plataforma de compilação',
+                        style: TextStyle(
+                          color: cs.onSurface,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                StatefulBuilder(
+                  builder: (_, setState2) {
+                    return Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: platforms.map((p) {
+                        final isActive = settings.debugPlatformFor(project.sdk.name) == p.name ||
+                            (savedName == null && p == platforms.first);
+                        final iconData = switch (p) {
+                          BuildPlatform.android || BuildPlatform.apk => Icons.android_rounded,
+                          BuildPlatform.web => Icons.language_rounded,
+                          BuildPlatform.linux => Icons.computer_rounded,
+                          _ => Icons.play_circle_outline_rounded,
+                        };
+                        return InkWell(
+                          onTap: () {
+                            settings.setDebugPlatform(project.sdk.name, p.name);
+                            Navigator.pop(sheetCtx);
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                            child: Row(
+                              children: [
+                                Icon(iconData,
+                                    color: isActive ? cs.primary : cs.onSurfaceVariant,
+                                    size: 22),
+                                const SizedBox(width: 14),
+                                Expanded(
+                                  child: Text(
+                                    p.label,
+                                    style: TextStyle(
+                                      color: isActive ? cs.primary : cs.onSurface,
+                                      fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ),
+                                if (isActive)
+                                  Icon(Icons.check_circle_rounded, size: 18, color: cs.primary),
+                              ],
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    );
+                  },
+                ),
+                const SizedBox(height: 8),
+              ],
+            ),
+          );
+        },
+      );
+    },
+  );
+}
+
 Future<void> _confirmCloseProject(BuildContext context) async {
   final cs = Theme.of(context).colorScheme;
+  final ss = AppStrings.of(context);
   final confirmed = await showThemedDialog<bool>(
     context: context,
+    title: ss.wsCloseProjectQ,
     builder: (ctx) {
-      final ss = AppStrings.of(ctx);
-      return AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(ss.wsCloseProjectQ),
-        content: Text(ss.wsCloseProjectBody),
-        actions: [
+      
+      return  Padding(
+        padding: const EdgeInsets.all(10.0),
+        child: Text(ss.wsCloseProjectBody),
+      );
+       
+    },
+     actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
+            onPressed: () => Navigator.pop(context, false),
             child: Text(ss.no, style: TextStyle(color: cs.onSurfaceVariant)),
           ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: cs.error),
-            onPressed: () => Navigator.pop(ctx, true),
+            onPressed: () => Navigator.pop(context, true),
             child: Text(ss.wsCloseYes),
           ),
         ],
-      );
-    },
+     
   );
   if (confirmed == true && context.mounted) {
     context.read<ProjectManagerProvider>().closeProject();
@@ -1468,16 +1793,7 @@ class _MainContentState extends State<_MainContent> {
     final liquidGlass = widget.liquidGlass;
     return LayoutBuilder(
       builder: (context, constraints) {
-        // The debug execution bar (36px) is positioned just above the peek bar
-        // as a Positioned widget so it never shifts the editor layout.
-        // The editor's bottom padding grows by that same 36px when DAP is
-        // active, keeping code lines clear of the bar.
-        const debugBarH = 36.0;
-        final isDebugActive =
-            context.select<DebugProvider, bool>((d) => d.isActive);
-        // When the debug bar is visible (36px), grow the editor's bottom
-        // padding so code lines stay clear of it.
-        final editorBottomPad = _BottomSheetPanelState._kPeekBarH ;
+        final editorBottomPad = _BottomSheetPanelState._kPeekBarH;
 
         final stack = Stack(
           children: [
@@ -1500,6 +1816,26 @@ class _MainContentState extends State<_MainContent> {
             ),
             // ── Floating debug execution bar ─────────────────────────────
             const _DebugExecutionOverlay(),
+            // ── Sync banner: anchored at editor bottom, slides in above
+            //    the peek bar. Rendered BEFORE the sheet so it stays in
+            //    the code area and the sheet slides over it when expanded.
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: _BottomSheetPanelState._kPeekBarH,
+              child: AnimatedSize(
+                duration: const Duration(milliseconds: 250),
+                curve: Curves.easeInOut,
+                alignment: Alignment.bottomCenter,
+                child: widget.syncBannerVisible
+                    ? _SyncBanner(
+                        command: widget.syncCommand,
+                        onIgnore: widget.onSyncIgnore,
+                        onRun: widget.onSyncRun,
+                      )
+                    : const SizedBox.shrink(),
+              ),
+            ),
             // ── Bottom sheet overlaid on top (draggable) ─────────────────
             Positioned(
               left: 0,
@@ -1514,24 +1850,6 @@ class _MainContentState extends State<_MainContent> {
                 initPhase: widget.initPhase,
               ),
             ),
-          // ── Sync banner: anchored just above the peek bar ─────────────
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: _BottomSheetPanelState._kPeek,
-            child: AnimatedSize(
-              duration: const Duration(milliseconds: 250),
-              curve: Curves.easeInOut,
-              alignment: Alignment.bottomCenter,
-              child: widget.syncBannerVisible
-                  ? _SyncBanner(
-                      command: widget.syncCommand,
-                      onIgnore: widget.onSyncIgnore,
-                      onRun: widget.onSyncRun,
-                    )
-                  : const SizedBox.shrink(),
-            ),
-          ),
         ],
         );
         // Wrap the whole stack in OCLiquidGlassGroup so that OCLiquidGlass
@@ -1657,10 +1975,10 @@ class _DrawerRail extends StatelessWidget {
             ),
             _CircleRailBtn(
               icon: Icons.bug_report_outlined,
-              tooltip: 'Debug Output',
+              tooltip: 'Plataforma de build',
               bg: cs.primaryContainer,
               fg: cs.onPrimaryContainer,
-              onTap: () => onTabChange(4),
+              onTap: () => _showPlatformPickerSheet(context, project),
             ),
             _CircleRailBtn(
               icon: Icons.settings_outlined,
@@ -1752,13 +2070,13 @@ class _BottomSheetPanelState extends State<_BottomSheetPanel>
   static const double _kPeek = 60.0;
   static const double _kMid = 400.0;
   static const double _kPeekBarH = 64.0;
-  static const int _kToolCount = 5;
+  static const int _kToolCount = 7; // TERMINAL PROBLEMS VARIABLES CALL-STACK DEBUG-CONSOLE OUTPUT LOGCAT
 
   double _height = _kPeek;
   late AnimationController _animCtrl;
   late Animation<double> _anim;
 
-  // Combined tab controller: [file tabs...] + [TERMINAL, PROBLEMS, VARIABLES, CALL STACK, OUTPUT]
+  // Combined tab controller: [file tabs...] + [TERMINAL, PROBLEMS, VARIABLES, CALL STACK, DEBUG CONSOLE, OUTPUT, LOGCAT]
   late TabController _combinedTabCtrl;
   int _fileTabCount = 0;
   EditorProvider? _editorProv;
@@ -2028,7 +2346,9 @@ class _BottomSheetPanelState extends State<_BottomSheetPanel>
                                   const Tab(text: 'PROBLEMS', height: 40),
                                   const Tab(text: 'VARIABLES', height: 40),
                                   const Tab(text: 'CALL STACK', height: 40),
+                                  const Tab(text: 'DEBUG CONSOLE', height: 40),
                                   const Tab(text: 'OUTPUT', height: 40),
+                                  const Tab(text: 'LOGCAT', height: 40),
                                 ],
                               ),
                             ),
@@ -2061,6 +2381,7 @@ class _BottomSheetPanelState extends State<_BottomSheetPanel>
                                   const _ProblemsPanel(),
                                   const DebugVariablesPanel(),
                                   const DebugCallStackPanel(),
+                                  // DEBUG CONSOLE — DAP build/run output
                                   DebugOutputPanel(
                                     onNavigate: (path, line) async {
                                       final editor = context.read<EditorProvider>();
@@ -2073,6 +2394,10 @@ class _BottomSheetPanelState extends State<_BottomSheetPanel>
                                       );
                                     },
                                   ),
+                                  // OUTPUT — general logs (git, sync, LSP, etc.)
+                                  const _OutputPanel(),
+                                  // LOGCAT — live app logs via adb logcat
+                                  _LogcatPanel(project: widget.project),
                                 ],
                               ),
                       ),
@@ -2120,20 +2445,15 @@ class _PeekBar extends StatelessWidget {
     final bool showProgress;
     switch (initPhase) {
       case _InitPhase.creatingProject:
-        label = s.peekCreatingProject;
-        showProgress = true;
+        label = s.peekCreatingProject; showProgress = true;
       case _InitPhase.loadingProject:
-        label = s.peekLoadingProject;
-        showProgress = true;
+        label = s.peekLoadingProject;  showProgress = true;
       case _InitPhase.startingLsp:
-        label = s.peekStartingLsp;
-        showProgress = true;
+        label = s.peekStartingLsp;     showProgress = true;
       case _InitPhase.syncingDeps:
-        label = s.peekSyncingDeps;
-        showProgress = true;
+        label = s.peekSyncingDeps;     showProgress = true;
       case _InitPhase.ready:
-        label = s.peekReady;
-        showProgress = false;
+        label = s.peekReady;           showProgress = false;
     }
 
     return SizedBox(
@@ -2151,18 +2471,17 @@ class _PeekBar extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 4),
-          /* if (showProgress)
+          if (showProgress)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 32),
               child: LinearProgressIndicator(
-                year2023: true,
                 minHeight: 2,
                 borderRadius: BorderRadius.circular(10),
                 color: cs.primary,
                 backgroundColor: cs.outlineVariant,
               ),
             )
-          else */
+          else
             Text(
               s.peekSwipeUp,
               textAlign: TextAlign.center,
@@ -2191,40 +2510,53 @@ class _SyncBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final s = AppStrings.of(context);
-    return Material(
-      color: cs.primaryContainer,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        child: Row(
-          children: [
-            Icon(Icons.download_rounded,
-                size: 18, color: cs.onPrimaryContainer),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                s.syncBannerMsg(command),
-                style: TextStyle(
-                    color: cs.onPrimaryContainer, fontSize: 13),
+    // Fully opaque container — no glass, no transparency — sits in editor area.
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: cs.primaryContainer,
+        border: Border(top: BorderSide(color: cs.primary, width: 2)),
+        boxShadow: [
+          BoxShadow(
+            color: cs.shadow.withValues(alpha: 0.25),
+            blurRadius: 8,
+            offset: const Offset(0, -2),
+          ),
+        ],
+      ),
+      child: Material(
+        type: MaterialType.transparency,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(
+            children: [
+              Icon(Icons.download_rounded, size: 18, color: cs.onPrimaryContainer),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  s.syncBannerMsg(command),
+                  style: TextStyle(color: cs.onPrimaryContainer, fontSize: 13),
+                ),
               ),
-            ),
-            TextButton(
-              onPressed: onIgnore,
-              style: TextButton.styleFrom(
+              TextButton(
+                onPressed: onIgnore,
+                style: TextButton.styleFrom(
                   foregroundColor: cs.onPrimaryContainer,
-                  padding: const EdgeInsets.symmetric(horizontal: 8)),
-              child: Text(s.syncBannerIgnore),
-            ),
-            FilledButton(
-              onPressed: onRun,
-              style: FilledButton.styleFrom(
-                backgroundColor: cs.primary,
-                foregroundColor: cs.onPrimary,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                minimumSize: const Size(0, 32),
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+                child: Text(s.syncBannerIgnore),
               ),
-              child: Text(s.syncBannerRun),
-            ),
-          ],
+              FilledButton(
+                onPressed: onRun,
+                style: FilledButton.styleFrom(
+                  backgroundColor: cs.primary,
+                  foregroundColor: cs.onPrimary,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  minimumSize: const Size(0, 32),
+                ),
+                child: Text(s.syncBannerRun),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -2426,9 +2758,9 @@ class _ProblemsPanel extends StatelessWidget {
       context: context,
       backgroundColor: Colors.transparent,
       builder: (sheetCtx) => Container(
-        margin: const EdgeInsets.all(12),
+        margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
         decoration: BoxDecoration(
-          color: cs.surface,
+          color: cs.surfaceContainerHigh,
           borderRadius: BorderRadius.circular(16),
         ),
         child: Column(
@@ -2437,8 +2769,7 @@ class _ProblemsPanel extends StatelessWidget {
             const SizedBox(height: 12),
             Center(
               child: Container(
-                width: 36,
-                height: 4,
+                width: 36, height: 4,
                 decoration: BoxDecoration(
                   color: cs.onSurface.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(2),
@@ -2493,6 +2824,601 @@ class _ProblemsPanel extends StatelessWidget {
     );
   }
 }
+
+// ── Output panel — general logs (git, sync, LSP, etc.) ───────────────────────
+//
+// BuildProvider exposes a string log that captures flutter pub get, git, etc.
+// output. We display it in a scrollable monospace text view.
+
+// ── Output panel — general logs (sync, git, gradle via BuildProvider) ─────────
+class _OutputPanel extends StatelessWidget {
+  const _OutputPanel();
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Consumer<BuildProvider>(
+      builder: (context, build, _) {
+        final log = build.result.output;
+        if (log.isEmpty) {
+          return const _PanelPlaceholder(
+            icon: Icons.output_rounded,
+            text: 'Nenhum log ainda.\nSincronize dependências ou use o terminal.',
+          );
+        }
+        return Scrollbar(
+          child: SingleChildScrollView(
+            reverse: true,
+            padding: const EdgeInsets.all(12),
+            child: SelectableText(
+              log,
+              style: TextStyle(
+                color: cs.onSurface,
+                fontSize: 11.5,
+                fontFamily: 'monospace',
+                height: 1.5,
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ── Logcat panel ──────────────────────────────────────────────────────────────
+//
+// Mirrors AndroidIDE's AppLogFragment: color-coded log lines by priority level,
+// auto-scroll to bottom, toolbar with level filter + clear + start/stop.
+
+class _LogcatPanel extends StatefulWidget {
+  final Project project;
+  const _LogcatPanel({required this.project});
+
+  @override
+  State<_LogcatPanel> createState() => _LogcatPanelState();
+}
+
+class _LogcatPanelState extends State<_LogcatPanel> {
+  final _scrollCtrl = ScrollController();
+  bool _autoScroll  = true;
+  LogLevel? _filter; // null = ALL levels
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollCtrl.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    _scrollCtrl.removeListener(_onScroll);
+    _scrollCtrl.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (!_scrollCtrl.hasClients) return;
+    final atBottom = _scrollCtrl.position.pixels >=
+        _scrollCtrl.position.maxScrollExtent - 40;
+    if (atBottom != _autoScroll) {
+      setState(() => _autoScroll = atBottom);
+    }
+  }
+
+  void _scrollToBottom() {
+    if (!_scrollCtrl.hasClients) return;
+    _scrollCtrl.animateTo(
+      _scrollCtrl.position.maxScrollExtent,
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOut,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final brightness = Theme.of(context).brightness;
+
+    return Consumer<LogcatProvider>(
+      builder: (context, logcat, _) {
+        // Auto-scroll when new lines arrive (if not manually scrolled up)
+        if (_autoScroll && logcat.lines.isNotEmpty) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted && _scrollCtrl.hasClients &&
+                _scrollCtrl.position.maxScrollExtent > 0) {
+              _scrollCtrl.jumpTo(_scrollCtrl.position.maxScrollExtent);
+            }
+          });
+        }
+
+        final lines = _filter == null
+            ? logcat.lines
+            : logcat.lines.where((l) => l.level == _filter).toList();
+
+        return Column(
+          children: [
+            // ── Toolbar ──────────────────────────────────────────────────────
+            Container(
+              height: 36,
+              color: cs.surfaceContainerHighest.withValues(alpha: 0.5),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Row(
+                children: [
+                  // Status indicator — green = running, teal = bridge connected
+                  Container(
+                    width: 7,
+                    height: 7,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: logcat.bridgeConnected
+                          ? Colors.tealAccent.shade400
+                          : logcat.isRunning
+                              ? Colors.green
+                              : cs.outlineVariant,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      logcat.bridgeConnected
+                          ? '${logcat.packageName ?? ''} [bridge]'
+                          : logcat.packageName ?? 'No app selected',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: cs.onSurface.withValues(alpha: 0.7),
+                        fontFamily: 'monospace',
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  // Bridge inject / remove button
+                  _BridgeButton(project: widget.project),
+                  // Level filter chips
+                  _LevelChip(label: 'ALL', selected: _filter == null,
+                      onTap: () => setState(() => _filter = null)),
+                  _LevelChip(label: 'E', color: const Color(0xFFEF5350),
+                      selected: _filter == LogLevel.error,
+                      onTap: () => setState(() => _filter = LogLevel.error)),
+                  _LevelChip(label: 'W', color: const Color(0xFFFFA726),
+                      selected: _filter == LogLevel.warning,
+                      onTap: () => setState(() => _filter = LogLevel.warning)),
+                  _LevelChip(label: 'I', color: const Color(0xFF66BB6A),
+                      selected: _filter == LogLevel.info,
+                      onTap: () => setState(() => _filter = LogLevel.info)),
+                  _LevelChip(label: 'D', selected: _filter == LogLevel.debug,
+                      onTap: () => setState(() => _filter = LogLevel.debug)),
+                  _LevelChip(label: 'V', color: const Color(0xFF4FC3F7),
+                      selected: _filter == LogLevel.verbose,
+                      onTap: () => setState(() => _filter = LogLevel.verbose)),
+                  const SizedBox(width: 4),
+                  // Clear
+                  IconButton(
+                    icon: const Icon(Icons.delete_sweep_outlined, size: 16),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(maxWidth: 28, maxHeight: 28),
+                    tooltip: 'Clear',
+                    onPressed: () => logcat.clear(),
+                  ),
+                  // Start / Stop
+                  if (logcat.isRunning)
+                    IconButton(
+                      icon: Icon(Icons.stop_circle_outlined, size: 16,
+                          color: cs.error),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(maxWidth: 28, maxHeight: 28),
+                      tooltip: 'Stop logcat',
+                      onPressed: () => logcat.stop(),
+                    )
+                  else
+                    IconButton(
+                      icon: Icon(Icons.play_circle_outlined, size: 16,
+                          color: cs.primary),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(maxWidth: 28, maxHeight: 28),
+                      tooltip: 'Start logcat',
+                      onPressed: () {
+                        final pkg = logcat.packageName
+                            ?? LogcatProvider.detectPackageName(widget.project.path);
+                        if (pkg != null) logcat.start(pkg);
+                      },
+                    ),
+                  // Scroll-to-bottom (visible only when auto-scroll is off)
+                  if (!_autoScroll)
+                    IconButton(
+                      icon: const Icon(Icons.arrow_downward, size: 16),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(maxWidth: 28, maxHeight: 28),
+                      tooltip: 'Scroll to bottom',
+                      onPressed: () {
+                        setState(() => _autoScroll = true);
+                        _scrollToBottom();
+                      },
+                    ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            // ── Log lines ────────────────────────────────────────────────────
+            Expanded(
+              child: lines.isEmpty
+                  ? _LogcatPlaceholder(
+                      project: widget.project,
+                      isRunning: logcat.isRunning,
+                    )
+                  : SelectionArea(
+                      child: ListView.builder(
+                        controller: _scrollCtrl,
+                        itemCount: lines.length,
+                        itemExtent: null,
+                        padding: const EdgeInsets.only(bottom: 8),
+                        itemBuilder: (_, i) {
+                          final line = lines[i];
+                          final color   = line.textColor(brightness);
+                          final bgColor = line.rowBackground(brightness);
+
+                          // System separator
+                          if (line.level == LogLevel.system) {
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 2),
+                              child: Text(
+                                line.message,
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  fontFamily: 'monospace',
+                                  color: cs.onSurface.withValues(alpha: 0.4),
+                                  fontStyle: FontStyle.italic,
+                                ),
+                              ),
+                            );
+                          }
+
+                          return Container(
+                            color: bgColor,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 1),
+                            child: Text.rich(
+                              TextSpan(
+                                style: TextStyle(
+                                  fontFamily: 'monospace',
+                                  fontSize: 11,
+                                  height: 1.45,
+                                  color: color,
+                                ),
+                                children: [
+                                  // time (HH:MM:SS.mmm)
+                                  TextSpan(
+                                    text: '${line.time.length > 12 ? line.time.substring(0, 12) : line.time}  ',
+                                    style: TextStyle(
+                                      color: cs.onSurface.withValues(alpha: 0.4),
+                                    ),
+                                  ),
+                                  // level char — bold
+                                  TextSpan(
+                                    text: '${line.levelChar}  ',
+                                    style: TextStyle(
+                                      color: color,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  // tag
+                                  TextSpan(
+                                    text: '${line.tag}: ',
+                                    style: TextStyle(
+                                      color: cs.onSurface.withValues(alpha: 0.65),
+                                    ),
+                                  ),
+                                  // message
+                                  TextSpan(text: line.message),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+// ── Logcat placeholder ────────────────────────────────────────────────────────
+// Shows "waiting" when running, or an actionable "Install APK" button when
+// there's a pre-built APK available (e.g. from `flutter build apk`).
+
+class _LogcatPlaceholder extends StatelessWidget {
+  final Project project;
+  final bool isRunning;
+  const _LogcatPlaceholder({required this.project, required this.isRunning});
+
+  @override
+  Widget build(BuildContext context) {
+    if (isRunning) {
+      return const _PanelPlaceholder(
+        icon: Icons.pest_control_outlined,
+        text: 'Waiting for app to start…',
+      );
+    }
+
+    final logcat = context.read<LogcatProvider>();
+
+    // Show setup error card (READ_LOGS not granted, etc.)
+    if (logcat.setupError != null) {
+      return _LogcatSetupCard(error: logcat.setupError!);
+    }
+
+    // Check if there's an APK available from a terminal build.
+    final apkPath = LogcatProvider.findLatestApk(project.path);
+
+    if (apkPath == null) {
+      return const _PanelPlaceholder(
+        icon: Icons.pest_control_outlined,
+        text: 'No logs yet.\nBuild and install the app to start logcat.',
+      );
+    }
+
+    final cs = Theme.of(context).colorScheme;
+    final apkName = apkPath.split('/').last;
+
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.android_rounded, size: 28, color: cs.onSurfaceVariant),
+          const SizedBox(height: 8),
+          Text(
+            apkName,
+            style: TextStyle(
+              fontSize: 12,
+              color: cs.onSurface.withValues(alpha: 0.7),
+              fontFamily: 'monospace',
+            ),
+          ),
+          const SizedBox(height: 12),
+          FilledButton.tonal(
+            onPressed: () {
+              final ws = context.findAncestorStateOfType<_WorkspaceScreenState>();
+              ws?._showApkInstallDialog(apkPath);
+            },
+            child: const Text('Install & Watch Logcat'),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'APK found from terminal build',
+            style: TextStyle(
+              fontSize: 10,
+              color: cs.onSurface.withValues(alpha: 0.45),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LogcatSetupCard extends StatelessWidget {
+  final String error;
+  const _LogcatSetupCard({required this.error});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    // Extract the command line from the error string for the copy button.
+    final cmdMatch = RegExp(r'(adb shell pm grant [^\n]+)').firstMatch(error);
+    final cmd = cmdMatch?.group(1) ?? '';
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.terminal_rounded, size: 28,
+                color: cs.error.withValues(alpha: 0.8)),
+            const SizedBox(height: 10),
+            Text(
+              'Logcat permission required',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: cs.onSurface,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Grant READ_LOGS to Termux once from a PC or '
+              'Wireless ADB — then tap play again.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 11,
+                color: cs.onSurface.withValues(alpha: 0.65),
+              ),
+            ),
+            if (cmd.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: cs.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        cmd,
+                        style: const TextStyle(
+                          fontSize: 10.5,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    IconButton(
+                      icon: const Icon(Icons.copy_rounded, size: 14),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(
+                          maxWidth: 24, maxHeight: 24),
+                      tooltip: 'Copy command',
+                      onPressed: () {
+                        Clipboard.setData(ClipboardData(text: cmd));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Command copied'),
+                            duration: Duration(seconds: 2),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Bridge inject/remove button ───────────────────────────────────────────────
+
+class _BridgeButton extends StatefulWidget {
+  final Project project;
+  const _BridgeButton({required this.project});
+
+  @override
+  State<_BridgeButton> createState() => _BridgeButtonState();
+}
+
+class _BridgeButtonState extends State<_BridgeButton> {
+  late bool _injected;
+
+  @override
+  void initState() {
+    super.initState();
+    _injected = LogBridgeInjector.isInjected(widget.project);
+  }
+
+  void _toggle() {
+    final cs = Theme.of(context).colorScheme;
+
+    if (_injected) {
+      // Remove bridge files
+      showThemedDialog(
+        context: context,
+        title: 'Remove Log Bridge?',
+        builder: (_) => const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 4),
+          child: Text(
+            'This will delete the FL IDE Log Bridge files from your project.\n'
+            'You will need to rebuild the app afterwards.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(context);
+              LogBridgeInjector.remove(widget.project);
+              setState(() => _injected = false);
+            },
+            child: const Text('Remove'),
+          ),
+        ],
+      );
+    } else {
+      // Inject bridge files
+      final err = LogBridgeInjector.inject(widget.project);
+      if (err != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Bridge injection failed: $err')),
+        );
+        return;
+      }
+      setState(() => _injected = true);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text(
+            'Log Bridge injected. Rebuild the app to activate.',
+          ),
+          backgroundColor: cs.primaryContainer,
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return IconButton(
+      icon: Icon(
+        _injected ? Icons.cable_rounded : Icons.cable_outlined,
+        size: 15,
+        color: _injected ? Colors.tealAccent.shade400 : cs.onSurface.withValues(alpha: 0.5),
+      ),
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(maxWidth: 28, maxHeight: 28),
+      tooltip: _injected ? 'Remove Log Bridge from project' : 'Inject Log Bridge into project',
+      onPressed: _toggle,
+    );
+  }
+}
+
+class _LevelChip extends StatelessWidget {
+  final String label;
+  final Color? color;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _LevelChip({
+    required this.label,
+    this.color,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final fg = color ?? cs.onSurface;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 2),
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+        decoration: BoxDecoration(
+          color: selected
+              ? (color ?? cs.primary).withValues(alpha: 0.2)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(4),
+          border: selected
+              ? Border.all(color: (color ?? cs.primary).withValues(alpha: 0.5))
+              : null,
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+            color: selected ? fg : cs.onSurface.withValues(alpha: 0.5),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Panel placeholder ─────────────────────────────────────────────────────────
 
 class _PanelPlaceholder extends StatelessWidget {
   final IconData icon;

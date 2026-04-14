@@ -131,8 +131,8 @@ class RunDebugSettingsPage extends StatelessWidget {
                       final isFirst = idx == 0;
                       final isLast = idx == debugSdks.length - 1;
                       return Card(
-                        elevation: 0,
-                        color: Theme.of(context).colorScheme.surfaceTint.withValues(alpha: 0.1),
+                       // elevation: 0,
+                      //  color: Theme.of(context).colorScheme.surfaceTint.withValues(alpha: 0.1),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.vertical(
                             top: isFirst ? const Radius.circular(30) : const Radius.circular(5),
@@ -151,7 +151,7 @@ class RunDebugSettingsPage extends StatelessWidget {
                               style: GoogleFonts.openSans(
                                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                                   fontSize: 12)),
-                          trailing: const Icon(Icons.chevron_right),
+                        //  trailing: const Icon(Icons.chevron_right),
                           onTap: () => _showPlatformPicker(
                             context,
                             sdkType,
@@ -219,7 +219,7 @@ class RunDebugSettingsPage extends StatelessWidget {
     final colors = Theme.of(context).colorScheme;
    // final card = Theme.of(context).cardTheme;
     return Card(
-      elevation: 0,
+      //elevation: 0,
     //  color: card.color?.withOpacity(0.5),
       shape: RoundedRectangleBorder(borderRadius: borderRadius),
       margin: const EdgeInsets.symmetric(vertical: 1),
@@ -247,11 +247,8 @@ class RunDebugSettingsPage extends StatelessWidget {
   ) {
     showThemedDialog<void>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Debug platform for ${sdkType.displayName}'),
-         shape: RoundedRectangleBorder(side: BorderSide(color: Colors.grey, width: 0.2), borderRadius: BorderRadiusGeometry.circular(30)),
-        contentPadding: const EdgeInsets.symmetric(vertical: 8),
-        content: Column(
+      title: 'Debug platform for ${sdkType.displayName}',
+      builder: (ctx) =>  Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             for (final p in platforms)
@@ -272,11 +269,11 @@ class RunDebugSettingsPage extends StatelessWidget {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(AppStrings.of(ctx).cancel),
+            onPressed: () => Navigator.pop(context),
+            child: Text(AppStrings.of(context).cancel),
           ),
         ],
-      ),
+      
     );
   }
 
@@ -291,33 +288,34 @@ class RunDebugSettingsPage extends StatelessWidget {
     final ctrl = TextEditingController(text: current);
     showThemedDialog<void>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(label),
-         shape: RoundedRectangleBorder(side: BorderSide(color: Colors.grey, width: 0.2), borderRadius: BorderRadiusGeometry.circular(30)),
-        content: TextField(
-          controller: ctrl,
-          autofocus: true,
-          
-          decoration: InputDecoration(
-            hintText: hint,
-            labelText: s.binaryPath,
-            border: const OutlineInputBorder(),
+      title: label,
+      builder: (ctx) =>  Padding(
+        padding: const EdgeInsets.all(10.0),
+        child: TextField(
+            controller: ctrl,
+            autofocus: true,
+            
+            decoration: InputDecoration(
+              hintText: hint,
+              labelText: s.binaryPath,
+              border: const OutlineInputBorder(borderSide: BorderSide.none),
+            ),
           ),
-        ),
+      ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx),
+            onPressed: () => Navigator.pop(context),
             child: Text(s.cancel),
           ),
           TextButton(
             onPressed: () {
               onSave(ctrl.text);
-              Navigator.pop(ctx);
+              Navigator.pop(context);
             },
             child: Text(s.save),
           ),
         ],
-      ),
+      
     );
   }
 }

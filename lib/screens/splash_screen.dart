@@ -1,53 +1,140 @@
-import 'package:animated_text_kit/animated_text_kit.dart';
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'package:lottie/lottie.dart';
 
-/// Terminal-style splash screen with animated typing text.
-/// Calls [onFinished] when the animation completes.
-class SplashScreen extends StatelessWidget {
-  final VoidCallback onFinished;
+/// Lottie-based morphing devices splash screen.
+///
+/// Plays the animation once, then navigates to [nextPage] with a
+/// fade+slide transition.
+class MorphingDevicesSplash extends StatefulWidget {
+  const MorphingDevicesSplash({
+    super.key,
+    required this.nextPage,
+    this.assetPath = 'assets/animations/device_morphing_exact.json',
+    this.backgroundLightColor = Colors.white,
+    this.backgroundDarkColor = const Color(0xFF0B0B0B),
+    this.animationLightColor = Colors.black,
+    this.animationDarkColor = Colors.white,
+    this.splashDuration = const Duration(milliseconds: 5433),
+    this.fadeDuration = const Duration(milliseconds: 450),
+    this.slideOffset = const Offset(0, 0.02),
+    this.fit = BoxFit.contain,
+    this.useThemePrimaryColor = false,
+    this.onCompleted,
+  });
 
-  const SplashScreen({super.key, required this.onFinished});
+  final Widget nextPage;
+  final String assetPath;
+  final Color backgroundLightColor;
+  final Color backgroundDarkColor;
+  final Color animationLightColor;
+  final Color animationDarkColor;
+  final Duration splashDuration;
+  final Duration fadeDuration;
+  final Offset slideOffset;
+  final BoxFit fit;
+  final bool useThemePrimaryColor;
+  final VoidCallback? onCompleted;
+
+  @override
+  State<MorphingDevicesSplash> createState() => _MorphingDevicesSplashState();
+}
+
+class _MorphingDevicesSplashState extends State<MorphingDevicesSplash>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  bool _navigated = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: widget.splashDuration,
+    );
+    _controller.addStatusListener((status) {
+      if (status == AnimationStatus.completed) _goNext();
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _controller.forward();
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant MorphingDevicesSplash oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.splashDuration != widget.splashDuration) {
+      _controller.duration = widget.splashDuration;
+    }
+  }
+
+  void _goNext() {
+    if (!mounted || _navigated) return;
+    _navigated = true;
+    widget.onCompleted?.call();
+    Navigator.of(context).pushReplacement(
+      PageRouteBuilder(
+        pageBuilder: (_, animation, __) => widget.nextPage,
+        transitionDuration: widget.fadeDuration,
+        reverseTransitionDuration: const Duration(milliseconds: 250),
+        transitionsBuilder: (_, animation, __, child) {
+          final curved = CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOutCubic,
+            reverseCurve: Curves.easeInCubic,
+          );
+          return FadeTransition(
+            opacity: curved,
+            child: SlideTransition(
+              position: Tween<Offset>(
+                begin: widget.slideOffset,
+                end: Offset.zero,
+              ).animate(curved),
+              child: child,
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bgColor =
+        isDark ? widget.backgroundDarkColor : widget.backgroundLightColor;
+    final animColor = widget.useThemePrimaryColor
+        ? Theme.of(context).colorScheme.primary
+        : (isDark ? widget.animationDarkColor : widget.animationLightColor);
+
     return Scaffold(
-      backgroundColor: Colors.black,
-      body: Center(
-        child: SizedBox(
-          width: MediaQuery.of(context).size.width * 0.8,
-          child: AnimatedTextKit(
-            animatedTexts: [
-              TyperAnimatedText(
-                'Initializing L A Y E R...',
-                textStyle:  GoogleFonts.openSans(
-                  fontSize: 24.0,
-                  color: Colors.lightGreenAccent,
-               
+      backgroundColor: bgColor,
+      body: SizedBox.expand(
+        child: Center(
+          child: Lottie.asset(
+            widget.assetPath,
+            controller: _controller,
+            repeat: false,
+            animate: false,
+            fit: widget.fit,
+            width: 800,
+            height: 800,
+            addRepaintBoundary: true,
+            frameRate: FrameRate.composition,
+            filterQuality: FilterQuality.high,
+            delegates: LottieDelegates(
+              values: [
+                ValueDelegate.colorFilter(
+                  const ['**'],
+                  value: ColorFilter.mode(animColor, BlendMode.srcIn),
                 ),
-                speed: const Duration(milliseconds: 80),
-              ),
-              TyperAnimatedText(
-                'Loading modules...',
-                textStyle: const TextStyle(
-                  fontSize: 24.0,
-                  color: Colors.lightBlueAccent,
-                  fontFamily: 'monospace',
-                ),
-                speed: const Duration(milliseconds: 80),
-              ),
-              TyperAnimatedText(
-                'Preparing workspace...',
-                textStyle: const TextStyle(
-                  fontSize: 24.0,
-                  color: Colors.pinkAccent,
-                  fontFamily: 'monospace',
-                ),
-                speed: const Duration(milliseconds: 80),
-              ),
-            ],
-            totalRepeatCount: 1,
-            onFinished: onFinished,
+              ],
+            ),
           ),
         ),
       ),

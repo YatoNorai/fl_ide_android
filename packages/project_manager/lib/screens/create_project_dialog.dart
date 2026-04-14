@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:ui';
 
 import 'package:core/core.dart';
 import 'package:fl_ide/l10n/app_strings.dart';
@@ -34,12 +33,16 @@ class CreateProjectScreen extends StatefulWidget {
   /// If set, project is created on the remote host at this path.
   final String? remoteProjectsPath;
   final bool isSshActive;
+
   /// SDK names detected on the remote machine (from SshProvider.detectedSdks).
   final List<String> remoteSdkNames;
+
   /// True while SSH SDK detection is still running (show spinner instead of warning).
   final bool isSshDetecting;
+
   /// True when the remote SSH machine is Windows (affects shell command separator).
   final bool remoteIsWindows;
+
   /// Called instead of session.start() for SSH-backed terminal sessions.
   final Future<void> Function(TerminalSession)? sshTerminalSetup;
 
@@ -80,16 +83,25 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
   ReactNativeTemplate _rnTemplate = ReactNativeTemplate.blank;
 
   // SDKs that use a package/bundle identifier
-  static const _pkgSdks = {SdkType.flutter, SdkType.androidSdk, SdkType.reactNative};
+  static const _pkgSdks = {
+    SdkType.flutter,
+    SdkType.androidSdk,
+    SdkType.reactNative
+  };
 
   /// Map a human-readable SDK name (from SSH detection) to SdkType.
   static SdkType? _sdkTypeFromName(String name) {
     switch (name) {
-      case 'Flutter':     return SdkType.flutter;
-      case 'Android SDK': return SdkType.androidSdk;
-      case 'Node.js':     return SdkType.nodejs;
-      case 'Python':      return SdkType.python;
-      default:            return null;
+      case 'Flutter':
+        return SdkType.flutter;
+      case 'Android SDK':
+        return SdkType.androidSdk;
+      case 'Node.js':
+        return SdkType.nodejs;
+      case 'Python':
+        return SdkType.python;
+      default:
+        return null;
     }
   }
 
@@ -122,14 +134,16 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
     const base = 'application';
     final dir = RuntimeEnvir.projectsPath;
     if (!Directory('$dir/$base').existsSync()) return base;
-    for (int i = 1; ; i++) {
+    for (int i = 1;; i++) {
       final candidate = '${base}_$i';
       if (!Directory('$dir/$candidate').existsSync()) return candidate;
     }
   }
 
   void _syncPackage() {
-    final safe = _nameCtrl.text.trim().toLowerCase()
+    final safe = _nameCtrl.text
+        .trim()
+        .toLowerCase()
         .replaceAll(RegExp(r'[^a-z0-9_]'), '_');
     final base = safe.isEmpty ? 'app' : safe;
     _packageCtrl.text = 'com.example.$base';
@@ -147,8 +161,10 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
     super.dispose();
   }
 
+  // ── Pickers ────────────────────────────────────────────────────────────────
+
   Future<void> _pickLanguage() async {
-    final result = await _showFrostedPicker<String>(
+    final result = await showThemedDialog<String>(
       context: context,
       title: 'Linguagem',
       items: const ['Kotlin', 'Java'],
@@ -167,7 +183,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
   }
 
   Future<void> _pickMinSdk() async {
-    final result = await _showFrostedPicker<int>(
+    final result = await showThemedDialog<int>(
       context: context,
       title: 'SDK Mínimo',
       items: _kMinSdkVersions.keys.toList(),
@@ -185,15 +201,20 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
         : context.read<SdkManagerProvider>().installedSdks;
     if (options.isEmpty) return;
 
-    final result = await showDialog<SdkType>(
+    final result = await showThemedDialog<SdkType>(
       context: context,
-      builder: (ctx) => _SdkPickerDialog(
+      title: AppStrings.of(context).selectSdk,
+      maxHeight: 480,
+      builder: (ctx) => _SdkPickerContent(
         options: options,
         selected: _selectedSdk,
+        dialogContext: ctx,
       ),
     );
     if (result != null) setState(() => _selectedSdk = result);
   }
+
+  // ── Progress dialog ────────────────────────────────────────────────────────
 
   void _showProgressDialog(String name) {
     _progressNotifier = ValueNotifier(0.0);
@@ -202,11 +223,13 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
       final remaining = 0.85 - _progressNotifier!.value;
       _progressNotifier!.value += remaining * 0.045;
     });
-    showGeneralDialog(
+    showThemedDialog<void>(
       context: context,
+      title: 'Criando projeto',
       barrierDismissible: false,
-      barrierColor: Colors.transparent,
-      pageBuilder: (_, __, ___) => _CreatingProgressDialog(
+      maxWidth: 340,
+      maxHeight: 300,
+      builder: (_) => _ProgressContent(
         projectName: name,
         progressNotifier: _progressNotifier!,
       ),
@@ -222,6 +245,8 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
     _progressNotifier?.dispose();
     _progressNotifier = null;
   }
+
+  // ── Create ─────────────────────────────────────────────────────────────────
 
   Future<void> _create() async {
     final name = _nameCtrl.text.trim();
@@ -286,15 +311,18 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
     Navigator.of(context).popUntil((route) => route.isFirst);
   }
 
+  // ── Build ──────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final s = AppStrings.of(context);
     final sdkMgr = context.watch<SdkManagerProvider>();
     final detecting = widget.isSshActive && widget.isSshDetecting;
-    final noSdks = !detecting && (widget.isSshActive
-        ? _remoteSdkTypes.isEmpty
-        : sdkMgr.installedSdks.isEmpty);
+    final noSdks = !detecting &&
+        (widget.isSshActive
+            ? _remoteSdkTypes.isEmpty
+            : sdkMgr.installedSdks.isEmpty);
 
     return Scaffold(
       appBar: AppBar(
@@ -327,7 +355,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
             ),
           ),
 
-          // ── Scrollable fields ───────────────────────────────────────────────
+          // ── Scrollable fields ──────────────────────────────────────────────
           Expanded(
             child: SingleChildScrollView(
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
@@ -379,8 +407,8 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                   TextField(
                     controller: _nameCtrl,
                     enabled: !_creating,
-                    style:
-                        GoogleFonts.openSans(color: cs.onSurface, fontSize: 15),
+                    style: GoogleFonts.openSans(
+                        color: cs.onSurface, fontSize: 15),
                     decoration: _inputDeco(context, s.projectName),
                     onChanged: (_) => setState(() {}),
                   ),
@@ -397,7 +425,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                     ),
                   ],
 
-                  // ── Flutter template picker ──────────────────────────────
+                  // ── Flutter template picker ────────────────────────────────
                   if (_selectedSdk == SdkType.flutter) ...[
                     const SizedBox(height: 20),
                     Text('Template',
@@ -421,14 +449,15 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                             selected: _flutterTemplate == t,
                             onTap: _creating
                                 ? null
-                                : () => setState(() => _flutterTemplate = t),
+                                : () =>
+                                    setState(() => _flutterTemplate = t),
                           );
                         },
                       ),
                     ),
                   ],
 
-                  // ── React Native template picker ──────────────────────────
+                  // ── React Native template picker ───────────────────────────
                   if (_selectedSdk == SdkType.reactNative) ...[
                     const SizedBox(height: 20),
                     Text('Template',
@@ -459,7 +488,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                     ),
                   ],
 
-                  // ── Android-specific options ─────────────────────────────
+                  // ── Android-specific options ───────────────────────────────
                   if (_selectedSdk == SdkType.androidSdk) ...[
                     const SizedBox(height: 16),
 
@@ -517,7 +546,8 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                             disabledReason: 'Kotlin only',
                             onTap: disabled
                                 ? null
-                                : () => setState(() => _androidTemplate = t),
+                                : () =>
+                                    setState(() => _androidTemplate = t),
                           );
                         },
                       ),
@@ -529,38 +559,34 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
               ),
             ),
           ),
-
-          // ── Bottom buttons ─────────────────────────────────────────────────
-         
         ],
       ),
       extendBody: true,
       bottomNavigationBar: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  OutlinedButton(
-                    onPressed:
-                        _creating ? null : () => Navigator.pop(context),
-                    style: OutlinedButton.styleFrom(
-                      backgroundColor: cs.surface,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(18)),
-                    ),
-                    child: Text(s.cancel),
-                  ),
-                  FilledButton(
-                    onPressed: _canCreate ? _create : null,
-                    style: FilledButton.styleFrom(
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(18)),
-                    ),
-                    child: Text(_creating ? s.creating : s.createProject),
-                  ),
-                ],
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            OutlinedButton(
+              onPressed: _creating ? null : () => Navigator.pop(context),
+              style: OutlinedButton.styleFrom(
+                backgroundColor: cs.surface,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(18)),
               ),
+              child: Text(s.cancel),
             ),
+            FilledButton(
+              onPressed: _canCreate ? _create : null,
+              style: FilledButton.styleFrom(
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(18)),
+              ),
+              child: Text(_creating ? s.creating : s.createProject),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -587,7 +613,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
   }
 }
 
-// ── SDK selector tile ──────────────────────────────────────────────────────────
+// ── SDK selector tile ─────────────────────────────────────────────────────────
 
 class _SdkSelectorTile extends StatelessWidget {
   final SdkType? selected;
@@ -641,115 +667,147 @@ class _SdkSelectorTile extends StatelessWidget {
   }
 }
 
-// ── Frosted picker dialog ──────────────────────────────────────────────────────
+// ── SDK picker content ────────────────────────────────────────────────────────
+//
+// Conteúdo do picker de SDK exibido dentro do showThemedDialog.
+// Cada item mostra ícone, nome e descrição do SDK.
 
-Future<T?> _showFrostedPicker<T>({
-  required BuildContext context,
-  required String title,
-  required List<T> items,
-  required T current,
-  required String Function(T) label,
-}) {
-  final cs = Theme.of(context).colorScheme;
-  return showDialog<T>(
-    context: context,
-    barrierColor: Colors.transparent,
-    builder: (ctx) => Stack(
-      children: [
-        // Frosted backdrop — tap outside to dismiss
-        GestureDetector(
-          onTap: () => Navigator.pop(ctx),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
-            child: Container(
-              color: Colors.black.withValues(alpha: 0.35),
-            ),
-          ),
-        ),
-        // Centered dialog card
-        Center(
-          child: Material(
-            type: MaterialType.transparency,
-            child: Container(
-              constraints:
-                  const BoxConstraints(maxWidth: 320, maxHeight: 480),
-              margin: const EdgeInsets.symmetric(horizontal: 24),
-              decoration: BoxDecoration(
-                color: cs.surface,
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.22),
-                    blurRadius: 36,
-                    offset: const Offset(0, 10),
-                  ),
-                ],
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 18, 20, 12),
-                    child: Text(
-                      title,
-                      style: GoogleFonts.openSans(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: cs.onSurface,
+class _SdkPickerContent extends StatelessWidget {
+  final List<SdkType> options;
+  final SdkType? selected;
+  final BuildContext dialogContext;
+
+  const _SdkPickerContent({
+    required this.options,
+    required this.selected,
+    required this.dialogContext,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: options.map((sdk) {
+        final isSelected = sdk == selected;
+        return InkWell(
+          onTap: () => Navigator.of(dialogContext).pop(sdk),
+          child: Padding(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            child: Row(
+              children: [
+                Text(sdk.icon,
+                    style: GoogleFonts.openSans(fontSize: 22)),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        sdk.displayName,
+                        style: GoogleFonts.openSans(
+                          fontSize: 14,
+                          fontWeight: isSelected
+                              ? FontWeight.w600
+                              : FontWeight.w500,
+                          color: isSelected ? cs.primary : cs.onSurface,
+                        ),
                       ),
-                    ),
+                      Text(
+                        sdk.description,
+                        style: GoogleFonts.openSans(
+                          fontSize: 11,
+                          color: cs.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
                   ),
-                  Divider(height: 1, color: cs.outlineVariant),
-                  Flexible(
-                    child: ListView(
-                      padding: const EdgeInsets.symmetric(vertical: 6),
-                      shrinkWrap: true,
-                      children: items.map((item) {
-                        final isSel = item == current;
-                        return InkWell(
-                          onTap: () => Navigator.pop(ctx, item),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 20, vertical: 13),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    label(item),
-                                    style: GoogleFonts.openSans(
-                                      fontSize: 14,
-                                      fontWeight: isSel
-                                          ? FontWeight.w600
-                                          : FontWeight.normal,
-                                      color: isSel
-                                          ? cs.primary
-                                          : cs.onSurface,
-                                    ),
-                                  ),
-                                ),
-                                if (isSel)
-                                  Icon(Icons.check_rounded,
-                                      size: 18, color: cs.primary),
-                              ],
-                            ),
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                ],
-              ),
+                ),
+                if (isSelected)
+                  Icon(Icons.check_rounded, size: 18, color: cs.primary),
+              ],
             ),
           ),
-        ),
-      ],
-    ),
-  );
+        );
+      }).toList(),
+    );
+  }
 }
 
-// ── Select tile (opens frosted picker) ────────────────────────────────────────
+// ── Progress content ──────────────────────────────────────────────────────────
+//
+// Conteúdo da barra de progresso exibido dentro do showThemedDialog.
+// Sem AlertDialog ou backdrop próprio — o chrome vem do showThemedDialog.
+
+class _ProgressContent extends StatelessWidget {
+  final String projectName;
+  final ValueNotifier<double> progressNotifier;
+
+  const _ProgressContent({
+    required this.projectName,
+    required this.progressNotifier,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+      child: ValueListenableBuilder<double>(
+        valueListenable: progressNotifier,
+        builder: (_, progress, __) {
+          final pct = (progress * 100).clamp(0, 100).round();
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.folder_open_rounded,
+                      size: 16, color: cs.primary),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      projectName,
+                      style: GoogleFonts.openSans(
+                          color: cs.onSurfaceVariant, fontSize: 13),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: progress,
+                  minHeight: 6,
+                  backgroundColor: cs.surfaceContainerHighest,
+                  valueColor: AlwaysStoppedAnimation(cs.primary),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerRight,
+                child: Text(
+                  '$pct%',
+                  style: GoogleFonts.openSans(
+                    color: cs.primary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ── Select tile (opens themed picker) ────────────────────────────────────────
 
 class _SelectTile extends StatelessWidget {
   final String label;
@@ -792,9 +850,7 @@ class _SelectTile extends StatelessWidget {
                   Text(
                     valueText,
                     style: GoogleFonts.openSans(
-                      color: enabled
-                          ? cs.onSurface
-                          : cs.onSurfaceVariant,
+                      color: enabled ? cs.onSurface : cs.onSurfaceVariant,
                       fontSize: 15,
                     ),
                   ),
@@ -810,7 +866,7 @@ class _SelectTile extends StatelessWidget {
   }
 }
 
-// ── Generic template card ──────────────────────────────────────────────────────
+// ── Generic template card ─────────────────────────────────────────────────────
 
 class _TemplateCard extends StatelessWidget {
   final String label;
@@ -883,7 +939,8 @@ class _TemplateCard extends StatelessWidget {
                               style: GoogleFonts.openSans(
                                 fontSize: 11.5,
                                 fontWeight: FontWeight.w600,
-                                color: selected ? cs.primary : cs.onSurface,
+                                color:
+                                    selected ? cs.primary : cs.onSurface,
                               ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
@@ -928,7 +985,7 @@ class _TemplateCard extends StatelessWidget {
   }
 }
 
-// ── Template visual previews ───────────────────────────────────────────────────
+// ── Template visual previews ──────────────────────────────────────────────────
 
 // Shared helpers
 Widget _previewBar({double width = 58, double height = 7, Color? color}) =>
@@ -971,7 +1028,10 @@ Widget _previewBottomNavBar(
       decoration: const BoxDecoration(
           color: Colors.white,
           boxShadow: [
-            BoxShadow(color: Colors.black12, blurRadius: 6, offset: Offset(0, -2))
+            BoxShadow(
+                color: Colors.black12,
+                blurRadius: 6,
+                offset: Offset(0, -2))
           ]),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -984,14 +1044,16 @@ Widget _previewBottomNavBar(
                   width: 20,
                   height: 12,
                   decoration: BoxDecoration(
-                      color: isActive ? active : const Color(0xFFBDBDBD),
+                      color:
+                          isActive ? active : const Color(0xFFBDBDBD),
                       borderRadius: BorderRadius.circular(4))),
               const SizedBox(height: 2),
               Container(
                   width: 24,
                   height: 4,
                   decoration: BoxDecoration(
-                      color: isActive ? active : const Color(0xFFBDBDBD),
+                      color:
+                          isActive ? active : const Color(0xFFBDBDBD),
                       borderRadius: BorderRadius.circular(2))),
             ],
           );
@@ -1007,136 +1069,180 @@ class _AndroidTemplatePreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => switch (template) {
-    AndroidTemplate.emptyActivity    => _empty(),
-    AndroidTemplate.basicViews       => _basicViews(),
-    AndroidTemplate.emptyCompose     => _compose(),
-    AndroidTemplate.bottomNavigation => _bottomNav(),
-    AndroidTemplate.loginActivity    => _login(),
-    AndroidTemplate.scrollingActivity => _scrolling(),
-    AndroidTemplate.navigationDrawer => _navDrawer(),
-  };
+        AndroidTemplate.emptyActivity => _empty(),
+        AndroidTemplate.basicViews => _basicViews(),
+        AndroidTemplate.emptyCompose => _compose(),
+        AndroidTemplate.bottomNavigation => _bottomNav(),
+        AndroidTemplate.loginActivity => _login(),
+        AndroidTemplate.scrollingActivity => _scrolling(),
+        AndroidTemplate.navigationDrawer => _navDrawer(),
+      };
 
   Widget _empty() => Container(
       color: const Color(0xFFF5F5F5),
       child: Center(child: _previewBar()));
 
   Widget _basicViews() => Column(children: [
-      _previewAppBar(),
-      Expanded(
-        child: Container(
-          color: const Color(0xFFF5F5F5),
-          child: Stack(children: [
-            Center(child: _previewBar()),
-            Positioned(
-              right: 10, bottom: 10,
-              child: Container(
-                width: 22, height: 22,
-                decoration: const BoxDecoration(
-                    color: Color(0xFFFB8C00), shape: BoxShape.circle,
-                    boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2))]),
-                child: const Icon(Icons.add, size: 13, color: Colors.white),
+        _previewAppBar(),
+        Expanded(
+          child: Container(
+            color: const Color(0xFFF5F5F5),
+            child: Stack(children: [
+              Center(child: _previewBar()),
+              Positioned(
+                right: 10,
+                bottom: 10,
+                child: Container(
+                  width: 22,
+                  height: 22,
+                  decoration: const BoxDecoration(
+                      color: Color(0xFFFB8C00),
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                            color: Colors.black26,
+                            blurRadius: 4,
+                            offset: Offset(0, 2))
+                      ]),
+                  child:
+                      const Icon(Icons.add, size: 13, color: Colors.white),
+                ),
               ),
-            ),
-          ]),
+            ]),
+          ),
         ),
-      ),
-    ]);
+      ]);
 
   Widget _compose() => Container(
       decoration: const BoxDecoration(
           gradient: LinearGradient(
-              begin: Alignment.topLeft, end: Alignment.bottomRight,
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
               colors: [Color(0xFF6750A4), Color(0xFF7C4DFF)])),
       child: Center(
-        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        child:
+            Column(mainAxisAlignment: MainAxisAlignment.center, children: [
           Container(
-            width: 30, height: 30,
+            width: 30,
+            height: 30,
             decoration: BoxDecoration(
                 color: Colors.white.withValues(alpha: 0.18),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.4), width: 1.5)),
-            child: const Icon(Icons.widgets_rounded, size: 16, color: Colors.white),
+                border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.4),
+                    width: 1.5)),
+            child: const Icon(Icons.widgets_rounded,
+                size: 16, color: Colors.white),
           ),
           const SizedBox(height: 8),
-          _previewBar(width: 54, color: Colors.white.withValues(alpha: 0.75)),
+          _previewBar(
+              width: 54, color: Colors.white.withValues(alpha: 0.75)),
           const SizedBox(height: 4),
-          _previewBar(width: 36, color: Colors.white.withValues(alpha: 0.4)),
+          _previewBar(
+              width: 36, color: Colors.white.withValues(alpha: 0.4)),
         ]),
       ));
 
   Widget _bottomNav() => Column(children: [
-      Expanded(child: Container(color: const Color(0xFFF5F5F5),
-          child: Center(child: _previewBar()))),
-      _previewBottomNavBar(),
-    ]);
+        Expanded(
+            child: Container(
+                color: const Color(0xFFF5F5F5),
+                child: Center(child: _previewBar()))),
+        _previewBottomNavBar(),
+      ]);
 
   Widget _login() => Container(
       color: const Color(0xFFF5F5F5),
       padding: const EdgeInsets.all(10),
       child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-        _previewBar(width: 40, height: 9, color: const Color(0xFF424242)),
+        _previewBar(
+            width: 40, height: 9, color: const Color(0xFF424242)),
         const SizedBox(height: 10),
-        Container(height: 18, decoration: BoxDecoration(
-            border: Border.all(color: const Color(0xFF9E9E9E)),
-            borderRadius: BorderRadius.circular(4),
-            color: Colors.white)),
+        Container(
+            height: 18,
+            decoration: BoxDecoration(
+                border:
+                    Border.all(color: const Color(0xFF9E9E9E)),
+                borderRadius: BorderRadius.circular(4),
+                color: Colors.white)),
         const SizedBox(height: 6),
-        Container(height: 18, decoration: BoxDecoration(
-            border: Border.all(color: const Color(0xFF9E9E9E)),
-            borderRadius: BorderRadius.circular(4),
-            color: Colors.white)),
+        Container(
+            height: 18,
+            decoration: BoxDecoration(
+                border:
+                    Border.all(color: const Color(0xFF9E9E9E)),
+                borderRadius: BorderRadius.circular(4),
+                color: Colors.white)),
         const SizedBox(height: 10),
-        Container(height: 20, decoration: BoxDecoration(
-            color: const Color(0xFF1565C0),
-            borderRadius: BorderRadius.circular(4)),
-          child: Center(child: _previewBar(width: 36, height: 5, color: Colors.white)),
+        Container(
+          height: 20,
+          decoration: BoxDecoration(
+              color: const Color(0xFF1565C0),
+              borderRadius: BorderRadius.circular(4)),
+          child: Center(
+              child: _previewBar(
+                  width: 36, height: 5, color: Colors.white)),
         ),
       ]));
 
   Widget _scrolling() => Column(children: [
-      Container(
-        height: 48,
-        color: const Color(0xFF1565C0),
-        alignment: Alignment.bottomLeft,
-        padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-        child: _previewBar(width: 52, color: Colors.white.withValues(alpha: 0.8)),
-      ),
-      Expanded(
-        child: Container(
-          color: const Color(0xFFF5F5F5),
-          padding: const EdgeInsets.all(8),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            _previewBar(width: 80, height: 5),
-            const SizedBox(height: 4),
-            _previewBar(width: 60, height: 5),
-            const SizedBox(height: 4),
-            _previewBar(width: 70, height: 5),
-          ]),
+        Container(
+          height: 48,
+          color: const Color(0xFF1565C0),
+          alignment: Alignment.bottomLeft,
+          padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+          child: _previewBar(
+              width: 52, color: Colors.white.withValues(alpha: 0.8)),
         ),
-      ),
-    ]);
+        Expanded(
+          child: Container(
+            color: const Color(0xFFF5F5F5),
+            padding: const EdgeInsets.all(8),
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _previewBar(width: 80, height: 5),
+                  const SizedBox(height: 4),
+                  _previewBar(width: 60, height: 5),
+                  const SizedBox(height: 4),
+                  _previewBar(width: 70, height: 5),
+                ]),
+          ),
+        ),
+      ]);
 
   Widget _navDrawer() => Row(children: [
-      Container(
-        width: 50,
-        color: const Color(0xFFFAFAFA),
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Container(height: 20, color: const Color(0xFF1565C0).withValues(alpha: 0.15),
-              margin: const EdgeInsets.only(bottom: 6)),
-          ...List.generate(3, (_) => Container(
-              height: 12, margin: const EdgeInsets.only(bottom: 4),
-              color: const Color(0xFFBDBDBD))),
-        ]),
-      ),
-      Expanded(
-        child: Column(children: [
-          _previewAppBar(),
-          Expanded(child: Container(color: const Color(0xFFF5F5F5),
-              child: Center(child: _previewBar()))),
-        ]),
-      ),
-    ]);
+        Container(
+          width: 50,
+          color: const Color(0xFFFAFAFA),
+          padding:
+              const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
+          child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                    height: 20,
+                    color: const Color(0xFF1565C0)
+                        .withValues(alpha: 0.15),
+                    margin: const EdgeInsets.only(bottom: 6)),
+                ...List.generate(
+                    3,
+                    (_) => Container(
+                        height: 12,
+                        margin: const EdgeInsets.only(bottom: 4),
+                        color: const Color(0xFFBDBDBD))),
+              ]),
+        ),
+        Expanded(
+          child: Column(children: [
+            _previewAppBar(),
+            Expanded(
+                child: Container(
+                    color: const Color(0xFFF5F5F5),
+                    child: Center(child: _previewBar()))),
+          ]),
+        ),
+      ]);
 }
 
 // ── Flutter previews ──────────────────────────────────────────────────────────
@@ -1147,129 +1253,177 @@ class _FlutterTemplatePreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => switch (template) {
-    FlutterTemplate.counterApp   => _counter(),
-    FlutterTemplate.emptyApp     => _empty(),
-    FlutterTemplate.materialApp  => _material(),
-    FlutterTemplate.bottomNavApp => _bottomNav(),
-    FlutterTemplate.drawerApp    => _drawer(),
-    FlutterTemplate.loginScreen  => _login(),
-    FlutterTemplate.listApp      => _listView(),
-    FlutterTemplate.tabsApp      => _tabs(),
-  };
+        FlutterTemplate.counterApp => _counter(),
+        FlutterTemplate.emptyApp => _empty(),
+        FlutterTemplate.materialApp => _material(),
+        FlutterTemplate.bottomNavApp => _bottomNav(),
+        FlutterTemplate.drawerApp => _drawer(),
+        FlutterTemplate.loginScreen => _login(),
+        FlutterTemplate.listApp => _listView(),
+        FlutterTemplate.tabsApp => _tabs(),
+      };
 
   Widget _counter() => Column(children: [
-      _previewAppBar(color: const Color(0xFF1565C0)),
-      Expanded(
-        child: Container(
-          color: const Color(0xFFF5F5F5),
-          child: Stack(children: [
-            Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-              _previewBar(width: 40, height: 5),
-              const SizedBox(height: 6),
-              Container(width: 28, height: 28,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: const Color(0xFF1565C0), width: 2)),
-                child: Center(child: _previewBar(width: 14, height: 5,
-                    color: const Color(0xFF1565C0)))),
-            ])),
-            Positioned(right: 10, bottom: 10,
-              child: Container(width: 22, height: 22,
-                decoration: const BoxDecoration(
-                    color: Color(0xFF1565C0), shape: BoxShape.circle),
-                child: const Icon(Icons.add, size: 13, color: Colors.white))),
-          ]),
+        _previewAppBar(color: const Color(0xFF1565C0)),
+        Expanded(
+          child: Container(
+            color: const Color(0xFFF5F5F5),
+            child: Stack(children: [
+              Center(
+                  child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                    _previewBar(width: 40, height: 5),
+                    const SizedBox(height: 6),
+                    Container(
+                        width: 28,
+                        height: 28,
+                        decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                                color: const Color(0xFF1565C0),
+                                width: 2)),
+                        child: Center(
+                            child: _previewBar(
+                                width: 14,
+                                height: 5,
+                                color: const Color(0xFF1565C0)))),
+                  ])),
+              Positioned(
+                  right: 10,
+                  bottom: 10,
+                  child: Container(
+                      width: 22,
+                      height: 22,
+                      decoration: const BoxDecoration(
+                          color: Color(0xFF1565C0),
+                          shape: BoxShape.circle),
+                      child: const Icon(Icons.add,
+                          size: 13, color: Colors.white))),
+            ]),
+          ),
         ),
-      ),
-    ]);
+      ]);
 
   Widget _empty() => Container(
       color: const Color(0xFFF5F5F5),
-      child: Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-        const Icon(Icons.flutter_dash, size: 28, color: Color(0xFF54C5F8)),
-        const SizedBox(height: 6),
-        _previewBar(width: 48),
-      ])));
+      child: Center(
+          child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+            const Icon(Icons.flutter_dash,
+                size: 28, color: Color(0xFF54C5F8)),
+            const SizedBox(height: 6),
+            _previewBar(width: 48),
+          ])));
 
   Widget _material() => Column(children: [
-      _previewAppBar(color: const Color(0xFF6750A4)),
-      Expanded(
-        child: Container(
-          color: const Color(0xFFF3F0FA),
-          padding: const EdgeInsets.all(8),
-          child: Column(children: [
-            Container(height: 22, margin: const EdgeInsets.only(bottom: 6),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(6),
-                boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 3)]),
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Row(children: [
-                Container(width: 8, height: 8, decoration: BoxDecoration(
-                    color: const Color(0xFF6750A4), shape: BoxShape.circle)),
-                const SizedBox(width: 6),
-                _previewBar(width: 40, height: 5),
-              ])),
-            Container(height: 22,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(6),
-                boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 3)]),
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Row(children: [
-                Container(width: 8, height: 8, decoration: BoxDecoration(
-                    color: const Color(0xFF7D5260), shape: BoxShape.circle)),
-                const SizedBox(width: 6),
-                _previewBar(width: 36, height: 5),
-              ])),
-          ]),
+        _previewAppBar(color: const Color(0xFF6750A4)),
+        Expanded(
+          child: Container(
+            color: const Color(0xFFF3F0FA),
+            padding: const EdgeInsets.all(8),
+            child: Column(children: [
+              Container(
+                  height: 22,
+                  margin: const EdgeInsets.only(bottom: 6),
+                  decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(6),
+                      boxShadow: const [
+                        BoxShadow(color: Colors.black12, blurRadius: 3)
+                      ]),
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Row(children: [
+                    Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                            color: const Color(0xFF6750A4),
+                            shape: BoxShape.circle)),
+                    const SizedBox(width: 6),
+                    _previewBar(width: 40, height: 5),
+                  ])),
+              Container(
+                  height: 22,
+                  decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(6),
+                      boxShadow: const [
+                        BoxShadow(color: Colors.black12, blurRadius: 3)
+                      ]),
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Row(children: [
+                    Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                            color: const Color(0xFF7D5260),
+                            shape: BoxShape.circle)),
+                    const SizedBox(width: 6),
+                    _previewBar(width: 36, height: 5),
+                  ])),
+            ]),
+          ),
         ),
-      ),
-    ]);
+      ]);
 
   Widget _bottomNav() => Column(children: [
-      _previewAppBar(color: const Color(0xFF6750A4)),
-      Expanded(child: Container(color: const Color(0xFFF5F5F5),
-          child: Center(child: _previewBar()))),
-      _previewBottomNavBar(active: const Color(0xFF6750A4)),
-    ]);
+        _previewAppBar(color: const Color(0xFF6750A4)),
+        Expanded(
+            child: Container(
+                color: const Color(0xFFF5F5F5),
+                child: Center(child: _previewBar()))),
+        _previewBottomNavBar(active: const Color(0xFF6750A4)),
+      ]);
 
   Widget _drawer() => Row(children: [
-      // Narrow drawer panel
-      Container(
-        width: 44,
-        color: const Color(0xFFF7F5FF),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Container(height: 28,
-              color: const Color(0xFF3F2C91).withValues(alpha: 0.12)),
-          const SizedBox(height: 6),
-          ...List.generate(3, (i) => Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-            child: Container(
-              height: 10,
-              decoration: BoxDecoration(
-                color: i == 0
-                    ? const Color(0xFF3F2C91).withValues(alpha: 0.3)
-                    : const Color(0xFFBDBDBD),
-                borderRadius: BorderRadius.circular(4),
-              ),
-            ),
-          )),
-        ]),
-      ),
-      // Main area
-      Expanded(child: Column(children: [
-        _previewAppBar(color: const Color(0xFF3F2C91)),
-        Expanded(child: Container(color: const Color(0xFFF5F5F5),
-            child: Center(child: _previewBar()))),
-      ])),
-    ]);
+        Container(
+          width: 44,
+          color: const Color(0xFFF7F5FF),
+          child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Container(
+                    height: 28,
+                    color: const Color(0xFF3F2C91)
+                        .withValues(alpha: 0.12)),
+                const SizedBox(height: 6),
+                ...List.generate(
+                    3,
+                    (i) => Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 3),
+                          child: Container(
+                            height: 10,
+                            decoration: BoxDecoration(
+                              color: i == 0
+                                  ? const Color(0xFF3F2C91)
+                                      .withValues(alpha: 0.3)
+                                  : const Color(0xFFBDBDBD),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                          ),
+                        )),
+              ]),
+        ),
+        Expanded(
+            child: Column(children: [
+          _previewAppBar(color: const Color(0xFF3F2C91)),
+          Expanded(
+              child: Container(
+                  color: const Color(0xFFF5F5F5),
+                  child: Center(child: _previewBar()))),
+        ])),
+      ]);
 
   Widget _login() => Container(
       color: const Color(0xFFF5F5F5),
       padding: const EdgeInsets.symmetric(horizontal: 10),
       child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-        Container(width: 28, height: 28,
+        Container(
+          width: 28,
+          height: 28,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             color: const Color(0xFF6750A4).withValues(alpha: 0.15),
@@ -1278,82 +1432,121 @@ class _FlutterTemplatePreview extends StatelessWidget {
               size: 15, color: Color(0xFF6750A4)),
         ),
         const SizedBox(height: 6),
-        _previewBar(width: 34, height: 5, color: const Color(0xFF424242)),
+        _previewBar(
+            width: 34, height: 5, color: const Color(0xFF424242)),
         const SizedBox(height: 8),
-        Container(height: 14, decoration: BoxDecoration(
-            border: Border.all(color: const Color(0xFFBDBDBD)),
-            borderRadius: BorderRadius.circular(4),
-            color: Colors.white)),
+        Container(
+            height: 14,
+            decoration: BoxDecoration(
+                border:
+                    Border.all(color: const Color(0xFFBDBDBD)),
+                borderRadius: BorderRadius.circular(4),
+                color: Colors.white)),
         const SizedBox(height: 5),
-        Container(height: 14, decoration: BoxDecoration(
-            border: Border.all(color: const Color(0xFFBDBDBD)),
-            borderRadius: BorderRadius.circular(4),
-            color: Colors.white)),
+        Container(
+            height: 14,
+            decoration: BoxDecoration(
+                border:
+                    Border.all(color: const Color(0xFFBDBDBD)),
+                borderRadius: BorderRadius.circular(4),
+                color: Colors.white)),
         const SizedBox(height: 8),
-        Container(height: 18,
+        Container(
+          height: 18,
           decoration: BoxDecoration(
               color: const Color(0xFF6750A4),
               borderRadius: BorderRadius.circular(4)),
-          child: Center(child: _previewBar(
-              width: 28, height: 5, color: Colors.white)),
+          child: Center(
+              child: _previewBar(
+                  width: 28, height: 5, color: Colors.white)),
         ),
       ]));
 
   Widget _listView() => Column(children: [
-      _previewAppBar(color: const Color(0xFF00796B)),
-      Expanded(child: Container(
-        color: Colors.white,
-        child: Column(children: [
-          ...List.generate(3, (i) => Column(children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-              child: Row(children: [
-                Container(width: 12, height: 12,
-                    decoration: BoxDecoration(
-                        color: const Color(0xFF00796B).withValues(alpha: 0.25),
-                        shape: BoxShape.circle)),
-                const SizedBox(width: 7),
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  _previewBar(width: 50, height: 5),
-                  const SizedBox(height: 3),
-                  _previewBar(width: 36, height: 4),
-                ]),
-              ]),
-            ),
-            if (i < 2)
-              Container(height: 1, color: const Color(0xFFEEEEEE)),
-          ])),
-        ]),
-      )),
-    ]);
+        _previewAppBar(color: const Color(0xFF00796B)),
+        Expanded(
+            child: Container(
+          color: Colors.white,
+          child: Column(children: [
+            ...List.generate(
+                3,
+                (i) => Column(children: [
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 6),
+                        child: Row(children: [
+                          Container(
+                              width: 12,
+                              height: 12,
+                              decoration: BoxDecoration(
+                                  color: const Color(0xFF00796B)
+                                      .withValues(alpha: 0.25),
+                                  shape: BoxShape.circle)),
+                          const SizedBox(width: 7),
+                          Column(
+                              crossAxisAlignment:
+                                  CrossAxisAlignment.start,
+                              children: [
+                                _previewBar(width: 50, height: 5),
+                                const SizedBox(height: 3),
+                                _previewBar(width: 36, height: 4),
+                              ]),
+                        ]),
+                      ),
+                      if (i < 2)
+                        Container(
+                            height: 1,
+                            color: const Color(0xFFEEEEEE)),
+                    ])),
+          ]),
+        )),
+      ]);
 
   Widget _tabs() => Column(children: [
-      Container(
-        color: const Color(0xFF1565C0),
-        child: Column(children: [
-          // AppBar row
-          SizedBox(height: 24,
-            child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Align(alignment: Alignment.centerLeft,
-                child: _previewBar(width: 46, height: 5,
-                    color: Colors.white.withValues(alpha: 0.55))))),
-          // Tab row
-          Row(mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: List.generate(3, (i) => Column(children: [
-              SizedBox(height: 16,
-                child: Center(child: _previewBar(width: 20, height: 4,
-                    color: i == 0
-                        ? Colors.white
-                        : Colors.white.withValues(alpha: 0.4)))),
-              Container(height: 2, width: 30,
-                  color: i == 0 ? Colors.white : Colors.transparent),
-            ])),
-          ),
-        ]),
-      ),
-      Expanded(child: Container(color: const Color(0xFFF5F5F5),
-          child: Center(child: _previewBar()))),
-    ]);
+        Container(
+          color: const Color(0xFF1565C0),
+          child: Column(children: [
+            SizedBox(
+                height: 24,
+                child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: _previewBar(
+                            width: 46,
+                            height: 5,
+                            color: Colors.white
+                                .withValues(alpha: 0.55))))),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: List.generate(
+                  3,
+                  (i) => Column(children: [
+                        SizedBox(
+                            height: 16,
+                            child: Center(
+                                child: _previewBar(
+                                    width: 20,
+                                    height: 4,
+                                    color: i == 0
+                                        ? Colors.white
+                                        : Colors.white
+                                            .withValues(alpha: 0.4)))),
+                        Container(
+                            height: 2,
+                            width: 30,
+                            color: i == 0
+                                ? Colors.white
+                                : Colors.transparent),
+                      ])),
+            ),
+          ]),
+        ),
+        Expanded(
+            child: Container(
+                color: const Color(0xFFF5F5F5),
+                child: Center(child: _previewBar()))),
+      ]);
 }
 
 // ── React Native previews ─────────────────────────────────────────────────────
@@ -1364,147 +1557,223 @@ class _RnTemplatePreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => switch (template) {
-    ReactNativeTemplate.blank           => _blank(),
-    ReactNativeTemplate.blankTypescript => _blankTs(),
-    ReactNativeTemplate.tabs            => _tabs(),
-    ReactNativeTemplate.flatList        => _flatList(),
-    ReactNativeTemplate.settings        => _settings(),
-    ReactNativeTemplate.login           => _login(),
-  };
+        ReactNativeTemplate.blank => _blank(),
+        ReactNativeTemplate.blankTypescript => _blankTs(),
+        ReactNativeTemplate.tabs => _tabs(),
+        ReactNativeTemplate.flatList => _flatList(),
+        ReactNativeTemplate.settings => _settings(),
+        ReactNativeTemplate.login => _login(),
+      };
 
   Widget _blank() => Container(
       color: const Color(0xFF1C1E21),
-      child: Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-        Container(width: 24, height: 24,
-          decoration: BoxDecoration(
-              color: const Color(0xFF61DAFB).withValues(alpha: 0.15),
-              shape: BoxShape.circle,
-              border: Border.all(color: const Color(0xFF61DAFB), width: 1.5)),
-          child: const Icon(Icons.code, size: 13, color: Color(0xFF61DAFB))),
-        const SizedBox(height: 8),
-        _previewBar(width: 46, color: Colors.white.withValues(alpha: 0.7)),
-      ])));
+      child: Center(
+          child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+            Container(
+                width: 24,
+                height: 24,
+                decoration: BoxDecoration(
+                    color: const Color(0xFF61DAFB)
+                        .withValues(alpha: 0.15),
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                        color: const Color(0xFF61DAFB), width: 1.5)),
+                child: const Icon(Icons.code,
+                    size: 13, color: Color(0xFF61DAFB))),
+            const SizedBox(height: 8),
+            _previewBar(
+                width: 46,
+                color: Colors.white.withValues(alpha: 0.7)),
+          ])));
 
   Widget _blankTs() => Container(
       color: const Color(0xFF1C1E21),
-      child: Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-        Container(width: 30, height: 22,
-          decoration: BoxDecoration(
-              color: const Color(0xFF3178C6),
-              borderRadius: BorderRadius.circular(4)),
-          child: Center(child: Text('TS',
-              style: TextStyle(color: Colors.white, fontSize: 11,
-                  fontWeight: FontWeight.bold)))),
-        const SizedBox(height: 8),
-        _previewBar(width: 46, color: Colors.white.withValues(alpha: 0.7)),
-      ])));
+      child: Center(
+          child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+            Container(
+                width: 30,
+                height: 22,
+                decoration: BoxDecoration(
+                    color: const Color(0xFF3178C6),
+                    borderRadius: BorderRadius.circular(4)),
+                child: Center(
+                    child: Text('TS',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold)))),
+            const SizedBox(height: 8),
+            _previewBar(
+                width: 46,
+                color: Colors.white.withValues(alpha: 0.7)),
+          ])));
 
   Widget _tabs() => Column(children: [
-      // Status bar
-      Container(height: 14, color: const Color(0xFF1C1E21)),
-      // Content
-      Expanded(child: Container(color: const Color(0xFF1C1E21),
-          child: Center(child: _previewBar(width: 48,
-              color: Colors.white.withValues(alpha: 0.7))))),
-      // Tab bar
-      Container(height: 36,
-        decoration: BoxDecoration(
-            color: const Color(0xFF2C2E33),
-            boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 8, offset: Offset(0, -2))]),
-        child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: List.generate(3, (i) {
-            final active = i == 0;
-            return Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-              Container(width: 18, height: 10,
-                decoration: BoxDecoration(
-                    color: active ? const Color(0xFF61DAFB) : const Color(0xFF555555),
-                    borderRadius: BorderRadius.circular(3))),
-              const SizedBox(height: 2),
-              Container(width: 22, height: 4,
-                decoration: BoxDecoration(
-                    color: active ? const Color(0xFF61DAFB) : const Color(0xFF555555),
-                    borderRadius: BorderRadius.circular(2))),
-            ]);
-          })),
-      ),
-    ]);
+        Container(height: 14, color: const Color(0xFF1C1E21)),
+        Expanded(
+            child: Container(
+                color: const Color(0xFF1C1E21),
+                child: Center(
+                    child: _previewBar(
+                        width: 48,
+                        color:
+                            Colors.white.withValues(alpha: 0.7))))),
+        Container(
+          height: 36,
+          decoration: BoxDecoration(
+              color: const Color(0xFF2C2E33),
+              boxShadow: const [
+                BoxShadow(
+                    color: Colors.black45,
+                    blurRadius: 8,
+                    offset: Offset(0, -2))
+              ]),
+          child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: List.generate(3, (i) {
+                final active = i == 0;
+                return Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Container(
+                          width: 18,
+                          height: 10,
+                          decoration: BoxDecoration(
+                              color: active
+                                  ? const Color(0xFF61DAFB)
+                                  : const Color(0xFF555555),
+                              borderRadius:
+                                  BorderRadius.circular(3))),
+                      const SizedBox(height: 2),
+                      Container(
+                          width: 22,
+                          height: 4,
+                          decoration: BoxDecoration(
+                              color: active
+                                  ? const Color(0xFF61DAFB)
+                                  : const Color(0xFF555555),
+                              borderRadius:
+                                  BorderRadius.circular(2))),
+                    ]);
+              })),
+        ),
+      ]);
 
   Widget _flatList() => Column(children: [
-      Container(height: 24, color: const Color(0xFF2196F3),
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        alignment: Alignment.centerLeft,
-        child: _previewBar(width: 38, height: 5,
-            color: Colors.white.withValues(alpha: 0.85)),
-      ),
-      Expanded(child: Container(
-        color: const Color(0xFF252628),
-        child: Column(children: [
-          ...List.generate(3, (i) => Column(children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                _previewBar(width: 56, height: 5,
-                    color: Colors.white.withValues(alpha: 0.8)),
-                const SizedBox(height: 3),
-                _previewBar(width: 40, height: 4,
-                    color: Colors.white.withValues(alpha: 0.4)),
-              ]),
-            ),
-            if (i < 2)
-              Container(height: 1,
-                  color: Colors.white.withValues(alpha: 0.07)),
-          ])),
-        ]),
-      )),
-    ]);
+        Container(
+          height: 24,
+          color: const Color(0xFF2196F3),
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          alignment: Alignment.centerLeft,
+          child: _previewBar(
+              width: 38,
+              height: 5,
+              color: Colors.white.withValues(alpha: 0.85)),
+        ),
+        Expanded(
+            child: Container(
+          color: const Color(0xFF252628),
+          child: Column(children: [
+            ...List.generate(
+                3,
+                (i) => Column(children: [
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 7),
+                        child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _previewBar(
+                                  width: 56,
+                                  height: 5,
+                                  color: Colors.white
+                                      .withValues(alpha: 0.8)),
+                              const SizedBox(height: 3),
+                              _previewBar(
+                                  width: 40,
+                                  height: 4,
+                                  color: Colors.white
+                                      .withValues(alpha: 0.4)),
+                            ]),
+                      ),
+                      if (i < 2)
+                        Container(
+                            height: 1,
+                            color:
+                                Colors.white.withValues(alpha: 0.07)),
+                    ])),
+          ]),
+        )),
+      ]);
 
   Widget _settings() => Container(
       color: const Color(0xFF1C1E21),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(8, 10, 8, 4),
-          child: _previewBar(width: 38, height: 4,
+          child: _previewBar(
+              width: 38,
+              height: 4,
               color: Colors.white.withValues(alpha: 0.35)),
         ),
-        Container(color: const Color(0xFF2C2E33),
+        Container(
+          color: const Color(0xFF2C2E33),
           child: Column(children: [
-            ...List.generate(2, (i) => Column(children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 10, vertical: 10),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    _previewBar(width: 48, height: 5,
-                        color: Colors.white.withValues(alpha: 0.75)),
-                    Container(width: 24, height: 13,
-                      decoration: BoxDecoration(
-                        color: i == 0
-                            ? const Color(0xFF61DAFB)
-                                .withValues(alpha: 0.85)
-                            : const Color(0xFF555555),
-                        borderRadius: BorderRadius.circular(7),
+            ...List.generate(
+                2,
+                (i) => Column(children: [
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 10),
+                        child: Row(
+                          mainAxisAlignment:
+                              MainAxisAlignment.spaceBetween,
+                          children: [
+                            _previewBar(
+                                width: 48,
+                                height: 5,
+                                color: Colors.white
+                                    .withValues(alpha: 0.75)),
+                            Container(
+                              width: 24,
+                              height: 13,
+                              decoration: BoxDecoration(
+                                color: i == 0
+                                    ? const Color(0xFF61DAFB)
+                                        .withValues(alpha: 0.85)
+                                    : const Color(0xFF555555),
+                                borderRadius: BorderRadius.circular(7),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-              ),
-              if (i < 1)
-                Container(height: 1,
-                    color: Colors.white.withValues(alpha: 0.07)),
-            ])),
+                      if (i < 1)
+                        Container(
+                            height: 1,
+                            color: Colors.white
+                                .withValues(alpha: 0.07)),
+                    ])),
           ]),
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
-          child: _previewBar(width: 32, height: 4,
+          child: _previewBar(
+              width: 32,
+              height: 4,
               color: Colors.white.withValues(alpha: 0.35)),
         ),
-        Container(color: const Color(0xFF2C2E33),
-          padding: const EdgeInsets.symmetric(
-              horizontal: 10, vertical: 10),
-          child: _previewBar(width: 48, height: 5,
+        Container(
+          color: const Color(0xFF2C2E33),
+          padding:
+              const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+          child: _previewBar(
+              width: 48,
+              height: 5,
               color: Colors.white.withValues(alpha: 0.75)),
         ),
       ]));
@@ -1513,87 +1782,58 @@ class _RnTemplatePreview extends StatelessWidget {
       color: const Color(0xFF1C1E21),
       padding: const EdgeInsets.symmetric(horizontal: 12),
       child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-        Container(width: 26, height: 26,
+        Container(
+          width: 26,
+          height: 26,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             color: const Color(0xFF2196F3).withValues(alpha: 0.18),
-            border: Border.all(
-                color: const Color(0xFF2196F3), width: 1.5),
+            border:
+                Border.all(color: const Color(0xFF2196F3), width: 1.5),
           ),
           child: const Icon(Icons.lock_outline,
               size: 13, color: Color(0xFF2196F3)),
         ),
         const SizedBox(height: 7),
-        _previewBar(width: 32, height: 5,
+        _previewBar(
+            width: 32,
+            height: 5,
             color: Colors.white.withValues(alpha: 0.8)),
         const SizedBox(height: 9),
-        Container(height: 15,
+        Container(
+          height: 15,
           decoration: BoxDecoration(
-            border: Border.all(
-                color: Colors.white.withValues(alpha: 0.18)),
+            border:
+                Border.all(color: Colors.white.withValues(alpha: 0.18)),
             borderRadius: BorderRadius.circular(4),
             color: const Color(0xFF2C2E33),
           ),
         ),
         const SizedBox(height: 5),
-        Container(height: 15,
+        Container(
+          height: 15,
           decoration: BoxDecoration(
-            border: Border.all(
-                color: Colors.white.withValues(alpha: 0.18)),
+            border:
+                Border.all(color: Colors.white.withValues(alpha: 0.18)),
             borderRadius: BorderRadius.circular(4),
             color: const Color(0xFF2C2E33),
           ),
         ),
         const SizedBox(height: 9),
-        Container(height: 18,
+        Container(
+          height: 18,
           decoration: BoxDecoration(
             color: const Color(0xFF2196F3),
             borderRadius: BorderRadius.circular(4),
           ),
-          child: Center(child: _previewBar(
-              width: 28, height: 5, color: Colors.white)),
+          child: Center(
+              child: _previewBar(
+                  width: 28, height: 5, color: Colors.white)),
         ),
       ]));
 }
 
-// ── SDK picker dialog ──────────────────────────────────────────────────────────
-
-class _SdkPickerDialog extends StatelessWidget {
-  final List<SdkType> options;
-  final SdkType? selected;
-
-  const _SdkPickerDialog({required this.options, required this.selected});
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return AlertDialog(
-      title: Text(AppStrings.of(context).selectSdk),
-      contentPadding: const EdgeInsets.symmetric(vertical: 8),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: options.map((sdk) {
-          final isSelected = sdk == selected;
-          return ListTile(
-            leading:
-                Text(sdk.icon, style: GoogleFonts.openSans(fontSize: 22)),
-            title: Text(sdk.displayName),
-            subtitle: Text(sdk.description,
-                style: GoogleFonts.openSans(
-                    color: cs.onSurfaceVariant, fontSize: 12)),
-            trailing: isSelected
-                ? Icon(Icons.check_rounded, color: cs.primary)
-                : null,
-            selected: isSelected,
-            onTap: () => Navigator.pop(context, sdk),
-          );
-        }).toList(),
-      ),
-    );
-  }
-}
-
-// ── SDK detecting tile ─────────────────────────────────────────────────────────
+// ── SDK detecting tile ────────────────────────────────────────────────────────
 
 class _SdkDetectingTile extends StatelessWidget {
   @override
@@ -1625,7 +1865,7 @@ class _SdkDetectingTile extends StatelessWidget {
   }
 }
 
-// ── No SDK warning ─────────────────────────────────────────────────────────────
+// ── No SDK warning ────────────────────────────────────────────────────────────
 
 class _NoSdkWarning extends StatelessWidget {
   @override
@@ -1647,94 +1887,6 @@ class _NoSdkWarning extends StatelessWidget {
               AppStrings.of(context).noSdkInstalled,
               style: GoogleFonts.openSans(
                   color: cs.onErrorContainer, fontSize: 14),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ── Creating progress dialog ───────────────────────────────────────────────────
-
-class _CreatingProgressDialog extends StatelessWidget {
-  final String projectName;
-  final ValueNotifier<double> progressNotifier;
-
-  const _CreatingProgressDialog({
-    required this.projectName,
-    required this.progressNotifier,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return PopScope(
-      canPop: false,
-      child: Stack(
-        children: [
-          BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-            child:
-                Container(color: Colors.black.withValues(alpha: 0.35)),
-          ),
-          Center(
-            child: Material(
-              color: Colors.transparent,
-              child: AlertDialog(
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20)),
-                title: Row(
-                  children: [
-                    Icon(Icons.folder_open_rounded,
-                        color: cs.primary, size: 22),
-                    const SizedBox(width: 10),
-                    const Text('Criando projeto'),
-                  ],
-                ),
-                content: ValueListenableBuilder<double>(
-                  valueListenable: progressNotifier,
-                  builder: (_, progress, __) {
-                    final pct =
-                        (progress * 100).clamp(0, 100).round();
-                    return Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          projectName,
-                          style: GoogleFonts.openSans(
-                              color: cs.onSurfaceVariant, fontSize: 13),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 16),
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(4),
-                          child: LinearProgressIndicator(
-                            value: progress,
-                            minHeight: 6,
-                            backgroundColor:
-                                cs.surfaceContainerHighest,
-                            valueColor: AlwaysStoppedAnimation(cs.primary),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: Text(
-                            '$pct%',
-                            style: GoogleFonts.openSans(
-                              color: cs.primary,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      ],
-                    );
-                  },
-                ),
-              ),
             ),
           ),
         ],

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Android 12+ (API 31) splash-screen config — light mode.
+
+    Goal: make the pre-Flutter window look identical to the Lottie splash
+    background so there is no visible transition when the Flutter engine
+    renders its first frame.
+
+    • windowSplashScreenBackground  — matches MorphingDevicesSplash.backgroundLightColor (#FFFFFF)
+    • windowSplashScreenAnimatedIcon — blank vector to suppress the app icon
+    • windowSplashScreenIconBackgroundColor — same as main background
+-->
+<resources>
+    <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        <item name="android:windowSplashScreenBackground">#FFFFFF</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_blank_icon</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">#FFFFFF</item>
+        <item name="android:windowBackground">@drawable/launch_background</item>
+    </style>
+    <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        <item name="android:windowBackground">#FFFFFF</item>
+    </style>
+</resources>

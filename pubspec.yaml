@@ -63,9 +63,7 @@ dependencies:
     path: ../quill_code
    
   expressive_theme_bridge:
-    git:
-      url: https://github.com/YatoNorai/expressive_theme_bridge.git
-      ref: main    
+    path: E:/apps/expressive_theme_bridge
            
   url_launcher: ^6.3.2
   permission_handler: ^11.3.1
@@ -81,6 +79,7 @@ dependencies:
   google_fonts: ^8.0.2
   icons_launcher: ^3.1.0
   tofu_expressive: ^0.0.3
+  lottie: ^3.3.1
 
 dev_dependencies:
   flutter_test:
@@ -92,6 +91,7 @@ flutter:
   assets:
 
     - assets/logo.png
+    - assets/animations/
     - assets/icons/
     - assets/themes/
     - assets/fonts/

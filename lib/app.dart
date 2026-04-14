@@ -3,6 +3,7 @@ import 'package:quill_code/quill_code.dart' show EditorTheme, QuillThemeDark, Qu
 import 'package:build_runner_pkg/build_runner_pkg.dart';
 import 'package:code_editor/code_editor.dart';
 import 'package:core/core.dart';
+import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -17,13 +18,13 @@ import 'package:ssh_pkg/ssh_pkg.dart';
 import 'package:tofu_expressive/tofu_expressive.dart';
 import 'package:expressive_theme_bridge/expressive_theme_bridge.dart';
 
-import 'main.dart' show AppBootData;
 import 'providers/ai_provider.dart';
 import 'providers/chat_provider.dart';
 import 'providers/extensions_provider.dart';
 import 'providers/settings_provider.dart';
 import 'screens/home_screen.dart';
 import 'screens/onboarding_screen.dart';
+import 'screens/splash_screen.dart';
 import 'screens/workspace_screen.dart';
 
 export 'package:core/core.dart' show showThemedDialog;
@@ -78,11 +79,20 @@ class _FlIdeAppState extends State<FlIdeApp> {
   @override
   void initState() {
     super.initState();
-    _themeController = ExpressiveThemeController()..initialize();
+    _themeController = ExpressiveThemeController();
+    // Rebuild when initialize() completes (success or failure) so we can
+    // switch between the expressive-theme and dynamic_color code paths.
+    _themeController.addListener(_onThemeChanged);
+    _themeController.initialize();
+  }
+
+  void _onThemeChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    _themeController.removeListener(_onThemeChanged);
     _themeController.dispose();
     super.dispose();
   }
@@ -91,8 +101,6 @@ class _FlIdeAppState extends State<FlIdeApp> {
     if (!settings.isLoaded) return;
     if (_lastAppliedMaterialYou == settings.useDynamicColors) return;
     _lastAppliedMaterialYou = settings.useDynamicColors;
-    // Apply directly — avoid addPostFrameCallback which delays by one frame
-    // and causes a visible color flash when settings load synchronously.
     if (settings.useDynamicColors) {
       _themeController.enableMaterialYou();
     } else {
@@ -100,118 +108,182 @@ class _FlIdeAppState extends State<FlIdeApp> {
     }
   }
 
+  // ── Providers are created once here and survive all theme rebuilds ─────────
+  static const _kLocDelegates = [
+    GlobalMaterialLocalizations.delegate,
+    GlobalWidgetsLocalizations.delegate,
+    GlobalCupertinoLocalizations.delegate,
+  ];
+  static const _kSupportedLocales = [
+    Locale('pt', 'BR'),
+    Locale('pt'),
+    Locale('en'),
+    Locale('es'),
+    Locale('fr'),
+    Locale('de'),
+  ];
+
   @override
   Widget build(BuildContext context) {
-    return ExpressiveThemeScope(
-      controller: _themeController,
-      child: ExpressiveThemeBuilder(
-        controller: _themeController,
-        builder: (context, snapshot) {
-          return MultiProvider(
-            providers: [
-              ChangeNotifierProvider(create: (_) => SettingsProvider()),
-              ChangeNotifierProvider(create: (_) => AiProvider()),
-              ChangeNotifierProvider(create: (_) => ChatProvider()),
-              ChangeNotifierProvider(create: (_) => ExtensionsProvider()),
-              ChangeNotifierProvider(create: (_) => RootfsProvider()..checkBootstrap()),
-              ChangeNotifierProvider(create: (_) => SdkManagerProvider()..initialize()),
-              ChangeNotifierProvider(create: (_) => ProjectManagerProvider()..initialize()),
-              ChangeNotifierProxyProvider<SettingsProvider, SshProvider>(
-                create: (_) => SshProvider(),
-                update: (ctx, settings, ssh) {
-                  ssh!.onSettingsReady(
-                    enabled: settings.sshEnabled,
-                    host: settings.sshHost,
-                    port: settings.sshPort,
-                    username: settings.sshUsername,
-                    password: settings.sshPassword,
-                    keyPath: settings.sshKeyPath,
-                    useKey: settings.sshUseKey,
-                    remoteProjectsPath: settings.sshProjectsPath,
-                  );
-                  return ssh;
-                },
-              ),
-            ],
-            child: Consumer2<SettingsProvider, ExtensionsProvider>(
-              builder: (context, settings, extensions, _) {
-                _syncMaterialYou(settings);
-
-                final activeEditorTheme = extensions.activeEditorTheme;
-                final activeMeta = extensions.activeMeta;
-
-                const locDelegates = [
-                  GlobalMaterialLocalizations.delegate,
-                  GlobalWidgetsLocalizations.delegate,
-                  GlobalCupertinoLocalizations.delegate,
-                ];
-                const supportedLocales = [
-                  Locale('pt', 'BR'),
-                  Locale('pt'),
-                  Locale('en'),
-                  Locale('es'),
-                  Locale('fr'),
-                  Locale('de'),
-                ];
-                final locale = settings.languageLocale;
-
-                late final ThemeData lightTheme;
-                late final ThemeData darkTheme;
-                late final ThemeMode themeMode;
-
-                if (activeEditorTheme != null && activeMeta != null) {
-                  // Tema do editor ativo — usa as cores do editor
-                  final brightness = activeMeta.dark ? Brightness.dark : Brightness.light;
-
-                  final editorTheme = _buildEditorThemeData(
-                    editorTheme: activeEditorTheme,
-                    brightness: brightness,
-                    amoled: settings.useAmoled,
-                  );
-
-                  lightTheme = editorTheme;
-                  darkTheme = editorTheme;
-                  themeMode = activeMeta.dark ? ThemeMode.dark : ThemeMode.light;
-                } else {
-                  // Quando Material You está desativado, o controller cai no
-                  // seed roxo padrão do M3 e tinta todas as surfaces.
-                  // Neutralizamos só as surfaces, preservando o expressive theme.
-                  final applyFix = !settings.useDynamicColors;
-
-                  lightTheme = applyFix
-                      ? _neutralizeSurfaces(snapshot.lightTheme, Brightness.light)
-                      : snapshot.lightTheme;
-
-                  final baseDark = applyFix
-                      ? _neutralizeSurfaces(snapshot.darkTheme, Brightness.dark)
-                      : snapshot.darkTheme;
-
-                  darkTheme = settings.useAmoled
-                      ? _applyAmoledThemeData(baseDark)
-                      : baseDark;
-
-                  themeMode = settings.followSystemTheme
-                      ? ThemeMode.system
-                      : (settings.useDarkMode ? ThemeMode.dark : ThemeMode.light);
-                }
-
-                return MaterialApp(
-                  title: 'L A Y E R',
-                  debugShowCheckedModeBanner: false,
-                  themeMode: themeMode,
-                  theme: lightTheme.copyWith(pageTransitionsTheme: _kFadeTransitionsTheme),
-                  darkTheme: darkTheme.copyWith(pageTransitionsTheme: _kFadeTransitionsTheme),
-                  locale: locale,
-                  localizationsDelegates: locDelegates,
-                  supportedLocales: supportedLocales,
-                  builder: _systemBarsBuilder,
-                  home: const _AppShell(),
-                );
-              },
-            ),
-          );
-        },
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => SettingsProvider()),
+        ChangeNotifierProvider(create: (_) => AiProvider()),
+        ChangeNotifierProvider(create: (_) => ChatProvider()),
+        ChangeNotifierProvider(create: (_) => ExtensionsProvider()),
+        ChangeNotifierProvider(create: (_) => RootfsProvider()..checkBootstrap()),
+        ChangeNotifierProvider(create: (_) => SdkManagerProvider()..initialize()),
+        ChangeNotifierProvider(create: (_) => ProjectManagerProvider()..initialize()),
+        ChangeNotifierProxyProvider<SettingsProvider, SshProvider>(
+          create: (_) => SshProvider(),
+          update: (ctx, settings, ssh) {
+            ssh!.onSettingsReady(
+              enabled: settings.sshEnabled,
+              host: settings.sshHost,
+              port: settings.sshPort,
+              username: settings.sshUsername,
+              password: settings.sshPassword,
+              keyPath: settings.sshKeyPath,
+              useKey: settings.sshUseKey,
+              remoteProjectsPath: settings.sshProjectsPath,
+            );
+            return ssh;
+          },
+        ),
+      ],
+      // AnimatedBuilder reacts to expressive-theme live updates (wallpaper
+      // changes, dark-mode toggle from native side, etc.).
+      child: AnimatedBuilder(
+        animation: _themeController,
+        builder: (context, _) => _buildThemeLayer(),
       ),
+    );
+  }
+
+  // ── Theme source selection ────────────────────────────────────────────────
+
+  Widget _buildThemeLayer() {
+    final snapshot = _themeController.snapshot;
+
+    // Expressive theme: Android 12+ with proper dynamic-color resources.
+    if (_themeController.isSupported && snapshot != null) {
+      return ExpressiveThemeScope(
+        controller: _themeController,
+        child: _buildConsumerApp(
+          lightBase: snapshot.lightTheme,
+          darkBase: snapshot.darkTheme,
+          isExpressive: true,
+        ),
+      );
+    }
+
+    // Fallback: expressive not supported — use dynamic_color package.
+    // DynamicColorBuilder returns null color schemes on devices that lack
+    // wallpaper-based colors, in which case we fall back to a static blue seed.
+    if (_themeController.initialized && !_themeController.isSupported) {
+      return DynamicColorBuilder(
+        builder: (ColorScheme? lightDynamic, ColorScheme? darkDynamic) =>
+            _buildConsumerApp(
+          lightDynamic: lightDynamic,
+          darkDynamic: darkDynamic,
+          isExpressive: false,
+        ),
+      );
+    }
+
+    // Brief init period (< 1 frame on most devices) — static blue seed theme.
+    return _buildConsumerApp(isExpressive: false);
+  }
+
+  Widget _buildConsumerApp({
+    ThemeData? lightBase,
+    ThemeData? darkBase,
+    ColorScheme? lightDynamic,
+    ColorScheme? darkDynamic,
+    required bool isExpressive,
+  }) {
+    return Consumer2<SettingsProvider, ExtensionsProvider>(
+      builder: (context, settings, extensions, _) {
+        if (isExpressive) _syncMaterialYou(settings);
+
+        final activeEditorTheme = extensions.activeEditorTheme;
+        final activeMeta = extensions.activeMeta;
+        final locale = settings.languageLocale;
+
+        late ThemeData lightTheme;
+        late ThemeData darkTheme;
+        late ThemeMode themeMode;
+
+        if (activeEditorTheme != null && activeMeta != null) {
+          // Editor theme overrides everything — expressive/dynamic ignored.
+          final brightness =
+              activeMeta.dark ? Brightness.dark : Brightness.light;
+          final editorTheme = _buildEditorThemeData(
+            editorTheme: activeEditorTheme,
+            brightness: brightness,
+            amoled: settings.useAmoled,
+          );
+          lightTheme = editorTheme;
+          darkTheme = editorTheme;
+          themeMode =
+              activeMeta.dark ? ThemeMode.dark : ThemeMode.light;
+        } else {
+          final useDynamic = settings.useDynamicColors;
+
+          if (isExpressive && lightBase != null) {
+            // Expressive theme path — neutralize the default M3 purple seed
+            // when dynamic colors are disabled by the user.
+            final applyFix = !useDynamic;
+            lightTheme = applyFix
+                ? _neutralizeSurfaces(lightBase, Brightness.light)
+                : lightBase;
+            final baseDark = applyFix
+                ? _neutralizeSurfaces(darkBase!, Brightness.dark)
+                : darkBase!;
+            darkTheme = settings.useAmoled
+                ? _applyAmoledThemeData(baseDark)
+                : baseDark;
+          } else {
+            // Dynamic-color / static fallback path.
+            // Use wallpaper seed when available and the user wants it;
+            // otherwise fall back to a static Material-blue seed.
+            const _kDefaultSeed = Color(0xFF1976D2);
+            final seedLight = useDynamic
+                ? (lightDynamic?.primary ?? _kDefaultSeed)
+                : _kDefaultSeed;
+            final seedDark = useDynamic
+                ? (darkDynamic?.primary ?? seedLight)
+                : seedLight;
+            lightTheme = TofuTheme.light(seedColor: seedLight);
+            final baseDark = TofuTheme.dark(seedColor: seedDark);
+            darkTheme = settings.useAmoled
+                ? _applyAmoledThemeData(baseDark)
+                : baseDark;
+          }
+
+          themeMode = settings.followSystemTheme
+              ? ThemeMode.system
+              : (settings.useDarkMode ? ThemeMode.dark : ThemeMode.light);
+        }
+
+        return MaterialApp(
+          title: 'L A Y E R',
+          debugShowCheckedModeBanner: false,
+          themeMode: themeMode,
+          theme: lightTheme.copyWith(
+              pageTransitionsTheme: _kFadeTransitionsTheme),
+          darkTheme: darkTheme.copyWith(
+              pageTransitionsTheme: _kFadeTransitionsTheme),
+          locale: locale,
+          localizationsDelegates: _kLocDelegates,
+          supportedLocales: _kSupportedLocales,
+          builder: _systemBarsBuilder,
+          home: const MorphingDevicesSplash(
+            nextPage: _AppShell(),
+            assetPath: 'assets/animations/device_morphing_exact.json',
+          ),
+        );
+      },
     );
   }
 
@@ -714,19 +786,8 @@ class _AppShellState extends State<_AppShell> {
     return Consumer<SettingsProvider>(
       builder: (context, settings, _) {
         if (!settings.isLoaded || !_uiReady) {
-          // Splash: logo centered, no theme-dependent colours so there is
-          // nothing to flash even if the theme hasn't settled yet.
-          return Scaffold(
-            body: Center(
-              child: Image.asset(
-                'assets/logo.png',
-                width: 80,
-                height: 80,
-                fit: BoxFit.contain,
-                color: Theme.of(context).textTheme.bodyLarge?.color,
-              ),
-            ),
-          );
+          // Brief 2-frame wait for theme to settle after the splash transition.
+          return const Scaffold(body: SizedBox.shrink());
         }
 
         if (!settings.onboardingDone) return const OnboardingScreen();
@@ -752,6 +813,7 @@ class _AppShellState extends State<_AppShell> {
                       ChangeNotifierProvider(create: (_) => BuildProvider()),
                       ChangeNotifierProvider(create: (_) => LspProvider()),
                       ChangeNotifierProvider(create: (_) => DebugProvider()),
+                      ChangeNotifierProvider(create: (_) => LogcatProvider()),
                       ChangeNotifierProvider(
                         create: (_) => AppInstallerProvider(),
                       ),

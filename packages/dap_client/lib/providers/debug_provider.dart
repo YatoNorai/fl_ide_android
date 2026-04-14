@@ -26,8 +26,24 @@ class DebugProvider extends ChangeNotifier {
   // For TCP mode (e.g. dlv dap): the adapter process is separate from _client.
   Process? _adapterProcess;
   StreamSubscription<Map<String, dynamic>>? _eventSub;
+  // Build-session stdout/stderr subscriptions — cancelled in _cleanup/dispose
+  // to prevent notifyListeners() from firing after the provider is disposed.
+  StreamSubscription<String>? _buildStdoutSub;
+  StreamSubscription<String>? _buildStderrSub;
   Process? _metroProcess;
   bool _isMetroSession = false;
+  bool _disposed = false;
+
+  // Debounce timer for build output — prevents 100+ widget rebuilds/s during
+  // heavy Gradle output bursts while still flushing every ~80 ms.
+  Timer? _outputNotifyTimer;
+
+  void _scheduleOutputNotify() {
+    _outputNotifyTimer ??= Timer(const Duration(milliseconds: 80), () {
+      _outputNotifyTimer = null;
+      if (!_disposed) notifyListeners();
+    });
+  }
 
   DebugStatus _status = DebugStatus.idle;
   String _output = '';
@@ -320,6 +336,7 @@ class DebugProvider extends ChangeNotifier {
       notifyListeners();
 
       void handleLine(String line) {
+        if (_disposed) return;
         _output += '$line\n';
         if (_isBuilding) {
           if (line.contains('BUILD SUCCESSFUL')) {
@@ -356,24 +373,26 @@ class DebugProvider extends ChangeNotifier {
               'is installed and ANDROID_HOME is set correctly.\n'
               '────────────────────────────────────────────────────\n';
         }
-        notifyListeners(); // stream output line-by-line in real time
+        _scheduleOutputNotify(); // debounced — avoids 100+ rebuilds/s
       }
 
-      _metroProcess!.stdout
+      _buildStdoutSub = _metroProcess!.stdout
           .transform(const Utf8Decoder(allowMalformed: true))
           .transform(const LineSplitter())
           .listen(handleLine);
-      _metroProcess!.stderr
+      _buildStderrSub = _metroProcess!.stderr
           .transform(const Utf8Decoder(allowMalformed: true))
           .transform(const LineSplitter())
           .listen(handleLine);
 
       _metroProcess!.exitCode.then((code) {
+        _outputNotifyTimer?.cancel();
+        _outputNotifyTimer = null;
         _isBuilding = false;
         if (code != 0 && _error == null) {
           _error = 'Build exited with code $code.';
-          notifyListeners();
         }
+        if (!_disposed) notifyListeners();
         Future.microtask(_cleanup);
       });
     } catch (e) {
@@ -579,6 +598,10 @@ fs.watch = function (filename, options, listener) {
     _metroProcess = null;
     _adapterProcess?.kill();
     _adapterProcess = null;
+    await _buildStdoutSub?.cancel();
+    _buildStdoutSub = null;
+    await _buildStderrSub?.cancel();
+    _buildStderrSub = null;
     await _eventSub?.cancel();
     _eventSub = null;
     await _client?.dispose();
@@ -698,20 +721,45 @@ fs.watch = function (filename, options, listener) {
                   '--no-start-paused',
                 ];
         } else if (deviceId.isNotEmpty) {
-          // Native device: validate availability before launching.
+          // Native device: resolve and validate against available devices.
           final devsCmd = _dapConfig.resolvedDevicesCommand;
+          String resolvedDeviceId = deviceId;
+
           if (devsCmd.isNotEmpty) {
-            final available = await _getAvailableDeviceIds(devsCmd);
-            if (!available.any((id) => id == deviceId || id.startsWith('$deviceId-'))) {
-              _output += '[DAP] Error: device "$deviceId" not found.\n'
-                  'Available: ${available.isEmpty ? "none" : available.join(", ")}\n'
+            final devices = await _getAvailableDevices(devsCmd);
+            final ids = devices.map((d) => d['id'] as String? ?? '').where((id) => id.isNotEmpty).toList();
+
+            // When the config says "android" (a platform name, not a real ID),
+            // auto-pick the first connected Android device by targetPlatform.
+            if (deviceId == 'android') {
+              final androidDevice = devices.firstWhere(
+                (d) {
+                  final platform = (d['targetPlatform'] as String? ?? '').toLowerCase();
+                  return platform.contains('android');
+                },
+                orElse: () => {},
+              );
+              if (androidDevice.isEmpty) {
+                _output += '[DAP] Error: no Android device connected.\n'
+                    'Available: ${ids.isEmpty ? "none" : ids.join(", ")}\n'
+                    'Connect a device via ADB and try again.\n';
+                notifyListeners();
+                await _cleanup();
+                return;
+              }
+              resolvedDeviceId = androidDevice['id'] as String;
+              _output += '[DAP] Auto-selected Android device: $resolvedDeviceId\n';
+              notifyListeners();
+            } else if (!ids.any((id) => id == resolvedDeviceId || id.startsWith('$resolvedDeviceId-'))) {
+              _output += '[DAP] Error: device "$resolvedDeviceId" not found.\n'
+                  'Available: ${ids.isEmpty ? "none" : ids.join(", ")}\n'
                   'Connect a device or change the debug platform in Settings.\n';
               notifyListeners();
               await _cleanup();
               return;
             }
           }
-          launchArgs['deviceId'] = deviceId;
+          launchArgs['deviceId'] = resolvedDeviceId;
         }
       }
 
@@ -1050,9 +1098,9 @@ fs.watch = function (filename, options, listener) {
     ],
   );
 
-  /// Runs [devicesCmd] and returns device IDs from JSON output.
+  /// Runs [devicesCmd] and returns full device objects from JSON output.
   /// [devicesCmd] is a full shell command, e.g. `flutter devices --machine`.
-  Future<List<String>> _getAvailableDeviceIds(String devicesCmd) async {
+  Future<List<Map<String, dynamic>>> _getAvailableDevices(String devicesCmd) async {
     try {
       final parts = devicesCmd.split(' ');
       final result = await Process.run(
@@ -1063,16 +1111,12 @@ fs.watch = function (filename, options, listener) {
       ).timeout(const Duration(seconds: 15));
       if (result.exitCode != 0) return [];
       final list = jsonDecode(result.stdout as String) as List?;
-      return list
-              ?.cast<Map<String, dynamic>>()
-              .map((d) => d['id'] as String? ?? '')
-              .where((id) => id.isNotEmpty)
-              .toList() ??
-          [];
+      return list?.cast<Map<String, dynamic>>() ?? [];
     } catch (_) {
       return [];
     }
   }
+
 
   // ── Reset ─────────────────────────────────────────────────────────────────
 
@@ -1113,8 +1157,12 @@ fs.watch = function (filename, options, listener) {
 
   @override
   void dispose() {
+    _disposed = true;
+    _outputNotifyTimer?.cancel();
     _metroProcess?.kill();
     _adapterProcess?.kill();
+    _buildStdoutSub?.cancel();
+    _buildStderrSub?.cancel();
     _eventSub?.cancel();
     _client?.dispose();
     super.dispose();

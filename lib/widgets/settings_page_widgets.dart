@@ -342,22 +342,23 @@ void settingsShowInfoDialog(BuildContext context, String title, String body) {
   final s = AppStrings.of(context);
   showThemedDialog<void>(
     context: context,
-    builder: (ctx) => AlertDialog(
-      title: Text(s.settingInfoTitle),
-      shape: RoundedRectangleBorder(side: BorderSide(color: Colors.grey, width: 0.2), borderRadius: BorderRadiusGeometry.circular(30)),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(title, style:  GoogleFonts.openSans(fontWeight: FontWeight.w600, fontSize: 15)),
-          const SizedBox(height: 10),
-          Text(body, style:  GoogleFonts.openSans(height: 1.5)),
-        ],
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx), child: Text(s.close)),
-      ],
+    title: s.settingInfoTitle,
+    builder: (ctx) =>  Padding(
+      padding: const EdgeInsets.all(10.0),
+      child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style:  GoogleFonts.openSans(fontWeight: FontWeight.w600, fontSize: 15)),
+            const SizedBox(height: 10),
+            Text(body, style:  GoogleFonts.openSans(height: 1.5)),
+          ],
+        ),
     ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: Text(s.close)),
+      ],
+    
   );
 }
 
@@ -406,12 +407,9 @@ void settingsShowPickerDialog(
 ) {
   showThemedDialog<void>(
     context: context,
+    title: title,
     builder: (ctx) {
-      return AlertDialog(
-        title: Text(title),
-        contentPadding: const EdgeInsets.symmetric(vertical: 8),
-        shape: RoundedRectangleBorder(side: BorderSide(color:  Colors.grey, width: 0.2), borderRadius: BorderRadiusGeometry.circular(30)),
-        content: Column(
+      return  Column(
           mainAxisSize: MainAxisSize.min,
           children: options.map((o) {
             return RadioListTile<String>(
@@ -426,7 +424,7 @@ void settingsShowPickerDialog(
               },
             );
           }).toList(),
-        ),
+        
       );
     },
   );

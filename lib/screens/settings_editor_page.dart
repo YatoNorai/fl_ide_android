@@ -433,12 +433,9 @@ class EditorSettingsPage extends StatelessWidget {
         onTap: () {
           showThemedDialog<void>(
             context: context,
+            title: AppStrings.of(context).fontFamily,
             builder: (ctx) {
-              return AlertDialog(
-                title: Text(AppStrings.of(context).fontFamily),
-                 shape: RoundedRectangleBorder(side: BorderSide(color: Colors.grey, width: 0.2), borderRadius: BorderRadiusGeometry.circular(30)),
-                contentPadding: const EdgeInsets.symmetric(vertical: 8),
-                content: Column(
+              return  Column(
                   mainAxisSize: MainAxisSize.min,
                   children: fonts.map((f) {
                     return RadioListTile<String>(
@@ -464,7 +461,7 @@ class EditorSettingsPage extends StatelessWidget {
                       },
                     );
                   }).toList(),
-                ),
+                
               );
             },
           );

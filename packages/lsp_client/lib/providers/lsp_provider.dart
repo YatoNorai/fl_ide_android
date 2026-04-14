@@ -45,7 +45,7 @@ class LspProvider extends ChangeNotifier {
       // Known language but binary not installed → show error so the user
       // knows why there is no LSP support, instead of silently stopping.
       const _knownLangs = {'dart', 'js', 'jsx', 'ts', 'tsx', 'py',
-          'kt', 'kotlin', 'java', 'go', 'swift'};
+          'kt', 'kotlin', 'java', 'go', 'swift', 'xml'};
       if (_knownLangs.contains(extension.toLowerCase())) {
         _status = LspStatus.error;
         _error = _missingBinaryMessage(extension);
@@ -62,6 +62,15 @@ class LspProvider extends ChangeNotifier {
     _status = LspStatus.starting;
     notifyListeners();
 
+    // JVM-based servers (Kotlin, Java, XML/LemMinX) need more time to spin up.
+    // Native servers (gopls, dart, pylsp) respond in < 2 s so the default is fine.
+    final isJvm = const {'kt', 'kotlin', 'java', 'xml'}.contains(extension.toLowerCase());
+
+    // jdtls/kotlin-ls need 60 s; LemMinX (XML) 15 s; native servers 5 s.
+    final timeoutSecs = const {'kt', 'kotlin', 'java'}.contains(extension.toLowerCase())
+        ? 60
+        : isJvm ? 15 : 5;
+
     _lspConfig = QuillLspStdioConfig(
       executable: cmd.first,
       args: cmd.sublist(1),
@@ -70,6 +79,7 @@ class LspProvider extends ChangeNotifier {
       // Pass Termux PATH so the LSP process can find node, python, etc.
       // Without this the process inherits the app's restricted environment.
       environment: _envForExtension(extension),
+      initializeTimeoutSeconds: timeoutSecs,
     );
     _status = LspStatus.warming;
     notifyListeners();
@@ -78,6 +88,13 @@ class LspProvider extends ChangeNotifier {
   void stop() {
     _lspConfig = null;
     _status = LspStatus.stopped;
+    notifyListeners();
+  }
+
+  /// Called by the editor when the LSP process crashes or initialize fails.
+  void setError(String message) {
+    _status = LspStatus.error;
+    _error = message;
     notifyListeners();
   }
 
@@ -117,6 +134,8 @@ class LspProvider extends ChangeNotifier {
         return 'gopls';
       case 'swift':
         return 'sourcekit-lsp';
+      case 'xml':
+        return 'java -jar ~/opt/lemminx/lemminx.jar';
       default:
         return null;
     }
@@ -254,6 +273,22 @@ class LspProvider extends ChangeNotifier {
         }
         return [sourcekitLsp];
 
+      // ── XML (Eclipse LemMinX) ─────────────────────────────────────────────
+      case 'xml':
+        final java = RuntimeEnvir.javaPath;
+        if (!File(java).existsSync()) {
+          debugPrint('[LspProvider] java not found at $java.'
+              ' Install via: pkg install openjdk-17');
+          return null;
+        }
+        final jar = RuntimeEnvir.lemminxJar;
+        if (!File(jar).existsSync()) {
+          debugPrint('[LspProvider] LemMinX jar not found at $jar.'
+              ' Install via Android SDK extension.');
+          return null;
+        }
+        return [java, '-jar', jar];
+
       default:
         return null;
     }
@@ -275,6 +310,9 @@ class LspProvider extends ChangeNotifier {
       case 'swift':
         return 'Swift LSP (sourcekit-lsp) not found.\n'
             'Run: pkg install swift';
+      case 'xml':
+        return 'XML LSP (LemMinX) not found.\n'
+            'Install the Android SDK extension and run its install steps.';
       default:
         return 'LSP server not installed for .$ext files.';
     }
@@ -373,11 +411,26 @@ class LspProvider extends ChangeNotifier {
   Map<String, String> _envForExtension(String ext) {
     final base = RuntimeEnvir.baseEnv;
     switch (ext.toLowerCase()) {
-      case 'java':
       case 'kt':
       case 'kotlin':
-        final home = RuntimeEnvir.javaHome;
-        return home.isNotEmpty ? {...base, 'JAVA_HOME': home} : base;
+        // kotlin-language-server needs JAVA_HOME for the JVM.
+        // KOTLIN_LS_HOME helps the launcher find its lib/ dir if $0-resolution
+        // fails inside the Termux sandbox (process started without a tty).
+        // JAVA_TOOL_OPTIONS caps heap to avoid OOM on Android devices with
+        // limited RAM — kotlin-language-server defaults to 512 MB which kills
+        // the process on low-memory devices.
+        final jHome = RuntimeEnvir.javaHome;
+        final env = <String, String>{...base};
+        if (jHome.isNotEmpty) env['JAVA_HOME'] = jHome;
+        env['KOTLIN_LS_HOME'] = RuntimeEnvir.kotlinLsHome;
+        env['JAVA_TOOL_OPTIONS'] = '-Xmx200m -Xms32m';
+        return env;
+      case 'java':
+        final jHome = RuntimeEnvir.javaHome;
+        final javaEnv = jHome.isNotEmpty ? <String, String>{...base, 'JAVA_HOME': jHome} : <String, String>{...base};
+        // Cap jdtls heap to avoid OOM on Android.
+        javaEnv['JAVA_TOOL_OPTIONS'] = '-Xmx256m -Xms32m';
+        return javaEnv;
       default:
         return base;
     }
@@ -396,6 +449,7 @@ class LspProvider extends ChangeNotifier {
       case 'java':    return 'java';
       case 'go':      return 'go';
       case 'swift':   return 'swift';
+      case 'xml':     return 'xml';
       default:        return ext;
     }
   }

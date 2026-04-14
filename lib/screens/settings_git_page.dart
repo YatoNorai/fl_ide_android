@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:core/core.dart' show RuntimeEnvir;
+import 'package:core/core.dart' show RuntimeEnvir, showThemedDialog;
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -83,35 +83,34 @@ class _GitSettingsPageState extends State<GitSettingsPage> {
     required Future<void> Function(String) onSave,
   }) async {
     final ctrl = TextEditingController(text: current);
-    final result = await showDialog<String>(
+    final result = await showThemedDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(title),
-        shape: RoundedRectangleBorder(
-          side: const BorderSide(color: Colors.grey, width: 0.2),
-          borderRadius: BorderRadius.circular(30),
-        ),
-        content: TextField(
-          controller: ctrl,
-          autofocus: true,
-          keyboardType: keyboard,
-          decoration: InputDecoration(
-            hintText: hint,
-            border: const OutlineInputBorder(),
+      title: title,
+      builder: (ctx) =>  Padding(
+        padding: const EdgeInsets.all(10),
+        child: TextField(
+            controller: ctrl,
+            autofocus: true,
+            keyboardType: keyboard,
+            decoration: InputDecoration(
+              hintText: hint,
+              border: OutlineInputBorder(borderSide: BorderSide.none)
+           //   border:  OutlineInputBorder(borderRadius: BorderRadius.circular(20)),
+            ),
+            onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
           ),
-          onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
-        ),
+      ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx),
+            onPressed: () => Navigator.pop(context),
             child: const Text('Cancelar'),
           ),
           FilledButton(
-            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            onPressed: () => Navigator.pop(context, ctrl.text.trim()),
             child: const Text('Salvar'),
           ),
         ],
-      ),
+      
     );
     if (result == null || result == current) return;
     await onSave(result);

@@ -62,6 +62,10 @@ class RuntimeEnvir {
   // Swift — sourcekit-lsp ships with the Termux Swift package
   static String get sourcekitLspBin => '$usrPath/bin/sourcekit-lsp';
 
+  // Eclipse LemMinX — XML Language Server (standalone uber jar)
+  // Installed by the Android SDK extension at $PREFIX/opt/lemminx/lemminx.jar
+  static String get lemminxJar => '$usrPath/opt/lemminx/lemminx.jar';
+
   // Projects dir
   static String get projectsPath => '$homePath/projects';
 
@@ -82,6 +86,10 @@ class RuntimeEnvir {
       'ANDROID_HOME': androidSdkPath,
       'FLUTTER_ROOT': flutterPath,
       'PUB_CACHE': '$homePath/.pub-cache',
+      // Gradle/JVM performance: avoid 30-45s daemon startup overhead by
+      // pre-configuring the heap and disabling unnecessary features.
+      'GRADLE_OPTS': '-Xmx512m -Xms128m -Dfile.encoding=UTF-8',
+      'JAVA_OPTS':   '-Xmx512m -Xms128m -Dfile.encoding=UTF-8',
     };
 
     // Only preload the exec interceptor when the .so is actually on disk.

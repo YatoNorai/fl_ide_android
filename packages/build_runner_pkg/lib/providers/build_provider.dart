@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -64,10 +65,33 @@ List<BuildPlatform> supportedPlatforms(SdkType sdk) {
 class BuildProvider extends ChangeNotifier {
   BuildResult _result = const BuildResult();
   Process? _buildProcess;
+  Process? _syncProcess;
   BuildPlatform? _selectedPlatform;
+  bool _isSyncing = false;
+
+  // Debounce timer — prevents hundreds of widget rebuilds per second during
+  // heavy Gradle output bursts.
+  Timer? _notifyTimer;
+  bool _pendingNotify = false;
+
+  void _scheduleNotify() {
+    _pendingNotify = true;
+    _notifyTimer ??= Timer(const Duration(milliseconds: 80), () {
+      _notifyTimer = null;
+      if (_pendingNotify) {
+        _pendingNotify = false;
+        notifyListeners();
+      }
+    });
+  }
+
+  // Cached APK path — recomputed only when a new APK marker line arrives,
+  // not on every stdout chunk.
+  String? _cachedApkPath;
 
   BuildResult get result => _result;
   bool get isBuilding => _result.isRunning;
+  bool get isSyncing => _isSyncing;
   String? get apkPath => _result.apkPath;
 
   BuildPlatform selectedPlatform(SdkType sdk) =>
@@ -82,38 +106,44 @@ class BuildProvider extends ChangeNotifier {
     if (_result.isRunning) return;
 
     _buildProcess?.kill();
+    _cachedApkPath = null;
     _result = const BuildResult(status: BuildStatus.running, output: '');
     notifyListeners();
 
     try {
       final platform = selectedPlatform(project.sdk);
       final cmd = _buildCommand(project.sdk, platform);
-      final parts = cmd.split(' ');
 
       _buildProcess = await Process.start(
-        parts.first,
-        parts.sublist(1),
+        RuntimeEnvir.bashPath,
+        ['-c', cmd],
         workingDirectory: project.path,
         environment: RuntimeEnvir.baseEnv,
-        runInShell: true,
       );
 
       final outputBuffer = StringBuffer();
 
       void appendOutput(String data) {
         outputBuffer.write(data);
-        final apk = _detectApkPath(data, project.path);
-        var newResult = _result.copyWith(output: outputBuffer.toString());
-        if (apk != null) newResult = newResult.copyWith(apkPath: apk);
-        if (_isSuccess(outputBuffer.toString())) {
+        // Only scan for APK path when output contains the relevant marker.
+        if (_cachedApkPath == null &&
+            (data.contains('.apk') || data.contains('Built '))) {
+          _cachedApkPath = _detectApkPath(data, project.path);
+        }
+        final fullOutput = outputBuffer.toString();
+        var newResult = _result.copyWith(
+          output: fullOutput,
+          apkPath: _cachedApkPath ?? _result.apkPath,
+        );
+        if (_isSuccess(fullOutput)) {
           newResult = newResult.copyWith(
               status: BuildStatus.success, finishedAt: DateTime.now());
-        } else if (_isError(outputBuffer.toString())) {
+        } else if (_isError(fullOutput)) {
           newResult = newResult.copyWith(
               status: BuildStatus.error, finishedAt: DateTime.now());
         }
         _result = newResult;
-        notifyListeners();
+        _scheduleNotify();
       }
 
       _buildProcess!.stdout
@@ -124,6 +154,8 @@ class BuildProvider extends ChangeNotifier {
           .listen(appendOutput);
 
       final exitCode = await _buildProcess!.exitCode;
+      _notifyTimer?.cancel();
+      _notifyTimer = null;
       if (_result.isRunning) {
         _result = _result.copyWith(
           status: exitCode == 0 ? BuildStatus.success : BuildStatus.error,
@@ -132,6 +164,8 @@ class BuildProvider extends ChangeNotifier {
         notifyListeners();
       }
     } catch (e) {
+      _notifyTimer?.cancel();
+      _notifyTimer = null;
       _result = _result.copyWith(
         status: BuildStatus.error,
         output: '${_result.output}\nError: $e',
@@ -155,6 +189,84 @@ class BuildProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Runs [command] in [workingDir] as a background process and streams
+  /// stdout + stderr to the OUTPUT tab (via [result.output]).
+  /// Separate from [build] so build state is not disturbed.
+  Future<void> sync(String command, String workingDir) async {
+    if (_isSyncing) return;
+    _isSyncing = true;
+    _result = BuildResult(
+      status: BuildStatus.running,
+      output: '> $command\n',
+    );
+    notifyListeners();
+
+    try {
+      _syncProcess = await Process.start(
+        RuntimeEnvir.bashPath,
+        ['-c', command],
+        workingDirectory: workingDir,
+        environment: RuntimeEnvir.baseEnv,
+      );
+
+      final buf = StringBuffer(_result.output);
+
+      void appendOutput(String data) {
+        buf.write(data);
+        _result = _result.copyWith(output: buf.toString());
+        _scheduleNotify();
+      }
+
+      _syncProcess!.stdout
+          .transform(const Utf8Decoder(allowMalformed: true))
+          .listen(appendOutput);
+      _syncProcess!.stderr
+          .transform(const Utf8Decoder(allowMalformed: true))
+          .listen(appendOutput);
+
+      final code = await _syncProcess!.exitCode;
+      _notifyTimer?.cancel();
+      _notifyTimer = null;
+      final done = code == 0 ? '\n\u2714 Done\n' : '\n\u2716 Exited with code $code\n';
+      _result = _result.copyWith(
+        status: code == 0 ? BuildStatus.success : BuildStatus.error,
+        output: buf.toString() + done,
+        finishedAt: DateTime.now(),
+      );
+    } catch (e) {
+      _notifyTimer?.cancel();
+      _notifyTimer = null;
+      _result = _result.copyWith(
+        status: BuildStatus.error,
+        output: '${_result.output}\nError: $e\n',
+        finishedAt: DateTime.now(),
+      );
+    }
+
+    _isSyncing = false;
+    _syncProcess = null;
+    notifyListeners();
+  }
+
+  void cancelSync() {
+    _syncProcess?.kill();
+    _syncProcess = null;
+    _isSyncing = false;
+    _result = _result.copyWith(
+      status: BuildStatus.error,
+      output: '${_result.output}\n[Sync cancelled]\n',
+    );
+    notifyListeners();
+  }
+
+  // Gradle flags that speed up every build significantly:
+  //   --parallel           — build subprojects concurrently
+  //   --build-cache        — reuse outputs from prior builds
+  //   --configure-on-demand — skip configuring unused subprojects
+  //   -x lint              — skip lint (slow, not needed for debug APK)
+  static const _gradleFlags =
+      '--parallel --build-cache --configure-on-demand -x lint';
+
   String _buildCommand(SdkType sdk, BuildPlatform platform) {
     switch (sdk) {
       case SdkType.flutter:
@@ -167,7 +279,7 @@ class BuildProvider extends ChangeNotifier {
             return 'flutter build apk --debug';
         }
       case SdkType.androidSdk:
-        return './gradlew assembleDebug';
+        return './gradlew assembleDebug $_gradleFlags';
       case SdkType.reactNative:
         return 'npx react-native build-android --mode=debug';
       case SdkType.nodejs:
@@ -212,7 +324,9 @@ class BuildProvider extends ChangeNotifier {
 
   @override
   void dispose() {
+    _notifyTimer?.cancel();
     _buildProcess?.kill();
+    _syncProcess?.kill();
     super.dispose();
   }
 }

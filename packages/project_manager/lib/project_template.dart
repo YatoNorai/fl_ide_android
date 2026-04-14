@@ -958,30 +958,60 @@ const styles = StyleSheet.create({
   // ── Flutter Android fixes ─────────────────────────────────────────────────
 
   static String _flutterAndroidFixes(String projectPath) {
-    const ndkVersion = '27.0.12077973';
     const androidSdkDir = r'$PREFIX/opt/android-sdk';
+    // Pinned versions known to be present in the Termux Android SDK package.
+    const ndkVersion        = '27.1.12297006';
+    const buildToolsVersion = '35.0.0';
     return r'''
 (
+  SDK_ROOT="${ANDROID_HOME:-''' +
+        androidSdkDir +
+        r'''}"
+
+  # ── flutter config ────────────────────────────────────────────────────────
+  flutter config --android-sdk "$SDK_ROOT" 2>/dev/null && echo "✓ flutter config --android-sdk"
+
+  # ── local.properties ──────────────────────────────────────────────────────
+  PROPS="''' +
+        projectPath +
+        r'''/android/local.properties"
+  NDK_DIR=$(ls -d "$SDK_ROOT/ndk/''' +
+        ndkVersion +
+        r'''" 2>/dev/null || ls -d "$SDK_ROOT/ndk/"* 2>/dev/null | sort -rV | head -1)
+  CMAKE_DIR=$(ls -d "$SDK_ROOT/cmake/"*/bin/cmake 2>/dev/null | sort -rV | head -1 | sed 's|/bin/cmake||')
+  {
+    printf 'sdk.dir=%s\n' "$SDK_ROOT"
+    [ -n "$NDK_DIR" ]   && printf 'ndk.dir=%s\n'   "$NDK_DIR"
+    [ -n "$CMAKE_DIR" ] && printf 'cmake.dir=%s\n' "$CMAKE_DIR"
+  } > "$PROPS"
+  echo "✓ Wrote local.properties"
+
+  # ── build.gradle.kts ──────────────────────────────────────────────────────
   GRADLE="''' +
         projectPath +
         r'''/android/app/build.gradle.kts"
   if [ -f "$GRADLE" ]; then
-    sed -i 's/ndkVersion = flutter\.ndkVersion/ndkVersion = "''' +
+    # Replace flutter.ndkVersion with pinned version; remove stray ndkVersion lines.
+    sed -i 's/ndkVersion\s*=\s*flutter\.ndkVersion/ndkVersion = "''' +
         ndkVersion +
         r'''"/g' "$GRADLE"
-    echo "✓ Pinned ndkVersion"
-  fi
-  PROPS="''' +
-        projectPath +
-        r'''/android/local.properties"
-  printf 'sdk.dir=''' +
-        androidSdkDir +
-        r'''\nndk.dir=''' +
-        androidSdkDir +
-        r'''/ndk/''' +
+    sed -i '/ndkVersion/!b; /ndkVersion = "''' +
         ndkVersion +
-        r'''\n' > "$PROPS"
-  echo "✓ Wrote local.properties"
+        r'''"/b; d' "$GRADLE"
+    # Inject buildToolsVersion after the first `compileSdk` line if not present.
+    if ! grep -q 'buildToolsVersion' "$GRADLE"; then
+      sed -i '/compileSdk/a\    buildToolsVersion = "''' +
+        buildToolsVersion +
+        r'''"' "$GRADLE"
+    fi
+    echo "✓ Set ndkVersion=''' +
+        ndkVersion +
+        r''' buildToolsVersion=''' +
+        buildToolsVersion +
+        r'''"
+  fi
+
+  # ── gradle.properties ─────────────────────────────────────────────────────
   GPROPS="''' +
         projectPath +
         r'''/android/gradle.properties"
@@ -989,16 +1019,16 @@ const styles = StyleSheet.create({
     sed -i 's/-Xmx[0-9]*[mMgG]/-Xmx512m/g' "$GPROPS"
     sed -i '/-XX:MaxMetaspaceSize/d' "$GPROPS"
     sed -i '/-XX:+HeapDumpOnOutOfMemoryError/d' "$GPROPS"
-    echo "✓ Capped Gradle JVM"
+    echo "✓ Capped Gradle JVM heap"
   fi
-  SDK_ROOT="${ANDROID_HOME:-''' +
-        androidSdkDir +
-        r'''}"
-  AAPT2_BIN=$(find "$SDK_ROOT/build-tools" -name aapt2 2>/dev/null | sort -rV | head -1)
+  AAPT2_BIN=$(find "$SDK_ROOT/build-tools/''' +
+        buildToolsVersion +
+        r'''" -name aapt2 2>/dev/null | head -1)
+  [ -z "$AAPT2_BIN" ] && AAPT2_BIN=$(find "$SDK_ROOT/build-tools" -name aapt2 2>/dev/null | sort -rV | head -1)
   if [ -n "$AAPT2_BIN" ] && [ -f "$GPROPS" ]; then
     sed -i '/android\.aapt2FromMavenOverride/d' "$GPROPS"
     printf '\nandroid.aapt2FromMavenOverride=%s\n' "$AAPT2_BIN" >> "$GPROPS"
-    echo "✓ Set aapt2 override"
+    echo "✓ Set aapt2 override → $AAPT2_BIN"
   fi
 ) 2>&1''';
   }
@@ -1094,7 +1124,15 @@ cat > "$projectPath/app/src/main/res/values/strings.xml" << \'__LAYEREOF__\'
 </resources>
 __LAYEREOF__
 
-printf "sdk.dir=\$PREFIX/opt/android-sdk\\nndk.dir=\$PREFIX/opt/android-sdk/ndk/27.0.12077973\\n" > "$projectPath/local.properties"
+SDK_ROOT_LP="\${ANDROID_HOME:-\$PREFIX/opt/android-sdk}"
+# Detect the highest installed NDK version (ls -d sorts; sort -rV picks latest)
+NDK_DIR=\$(ls -d "\$SDK_ROOT_LP/ndk/"* 2>/dev/null | sort -rV | head -1)
+if [ -n "\$NDK_DIR" ]; then
+  printf "sdk.dir=\$SDK_ROOT_LP\\nndk.dir=\$NDK_DIR\\n" > "$projectPath/local.properties"
+else
+  # No NDK installed — write only sdk.dir so Gradle doesn't fail on a bad ndk.dir
+  printf "sdk.dir=\$SDK_ROOT_LP\\n" > "$projectPath/local.properties"
+fi
 
 SDK_ROOT="\${ANDROID_HOME:-\$PREFIX/opt/android-sdk}"
 AAPT2_BIN=\$(find "\$SDK_ROOT/build-tools" -name aapt2 2>/dev/null | sort -rV | head -1)

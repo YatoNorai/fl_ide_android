@@ -204,11 +204,8 @@ class GeneralSettingsPage extends StatelessWidget {
     final s = AppStrings.of(context);
     showThemedDialog<void>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(s.language),
-        shape: RoundedRectangleBorder(side: BorderSide(color: Colors.grey, width: 0.2), borderRadius: BorderRadiusGeometry.circular(30)),
-        contentPadding: const EdgeInsets.symmetric(vertical: 8),
-        content: Column(
+      title: s.language,
+      builder: (ctx) => Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             for (final lang in kSupportedLanguages)
@@ -231,7 +228,7 @@ class GeneralSettingsPage extends StatelessWidget {
                 },
               ),
           ],
-        ),
+        
       ),
     );
   }

@@ -43,6 +43,11 @@ class _ExtensionsPageContentState extends State<ExtensionsPageContent>
     with SingleTickerProviderStateMixin {
   late final TabController _tab;
   int _tabIndex = 0;
+  final _extensionsPage = [
+            _StoreContent(),
+            _SdkContent(),
+            _InstalledContent(),
+          ];
 
   @override
   void initState() {
@@ -107,15 +112,11 @@ class _ExtensionsPageContentState extends State<ExtensionsPageContent>
         // ── IndexedStack keeps all 3 tab bodies alive ───────────────────────
         // Invisible tabs are not painted but their widget trees stay in memory,
         // so returning to a tab is instant (no reload, scroll position preserved).
-        IndexedStack(
+       /*  IndexedStack(
           index: _tabIndex,
-          children: const [
-            _StoreContent(),
-            _SdkContent(),
-            _InstalledContent(),
-          ],
-        ),
-
+          children: const ,
+        ), */
+        _extensionsPage[_tabIndex],
         const SizedBox(height: 32),
       ],
     );
@@ -371,17 +372,18 @@ class _ThemeCard extends StatelessWidget {
     final prov = context.read<ExtensionsProvider>();
     showThemedDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-              title: Text('${s.extInstallQ} "${meta.name}"'),
-               shape: RoundedRectangleBorder(side: BorderSide(color: Colors.grey, width: 0.2), borderRadius: BorderRadiusGeometry.circular(30)),
-              content: Text(s.extInstallBody),
+      title: '${s.extInstallQ} "${meta.name}"',
+      builder: (ctx) =>  Padding(
+        padding: const EdgeInsets.all(10.0),
+        child: Text(s.extInstallBody),
+      ),
               actions: [
                 TextButton(
-            onPressed: () => Navigator.pop(ctx),
+            onPressed: () => Navigator.pop(context),
             child: Text(s.cancel)),
                 FilledButton(
                   onPressed: () {
-            Navigator.pop(ctx);
+            Navigator.pop(context);
             prov.downloadTheme(meta).then((_) {
               if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -393,7 +395,7 @@ class _ThemeCard extends StatelessWidget {
                   child: Text(s.extInstall),
                 ),
               ],
-            ),
+            
     );
   }
 
@@ -514,23 +516,25 @@ class _InstalledCard extends StatelessWidget {
     final prov = context.read<ExtensionsProvider>();
     showThemedDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-              title: Text('${s.extDeleteQ.replaceAll('?', '')} "${meta.name}"?'),
-              content: Text(s.extDeleteBody),
+      title: '${s.extDeleteQ.replaceAll('?', '')} "${meta.name}"?',
+      builder: (ctx) =>  Padding(
+        padding: const EdgeInsets.all(10.0),
+        child: Text(s.extDeleteBody),
+      ),
               actions: [
                 TextButton(
-            onPressed: () => Navigator.pop(ctx),
+            onPressed: () => Navigator.pop(context),
             child: Text(s.cancel)),
                 FilledButton(
                   style: FilledButton.styleFrom(backgroundColor: Colors.red),
                   onPressed: () {
-            Navigator.pop(ctx);
+            Navigator.pop(context);
             prov.deleteTheme(meta.id);
                   },
                   child: Text(s.delete),
                 ),
               ],
-            ),
+            
     );
   }
 }
@@ -730,6 +734,8 @@ class _SdkCard extends StatelessWidget {
                     icon: const Icon(Icons.delete_outline_rounded, size: 14),
                     label: Text(s.extUninstall),
                   ),
+
+
                 ] else ...[
                   FilledButton.icon(
                     onPressed: () async {

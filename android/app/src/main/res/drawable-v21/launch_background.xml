@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Modify this file to customize your launch splash screen -->
+<!--
+    Pre-launch background shown while the Flutter engine initializes
+    (Android < 12, or as the windowBackground fallback on all versions).
+
+    Uses ?android:colorBackground so it automatically adapts to the system
+    light/dark mode — white in light mode, black in dark mode.
+    This matches the Lottie splash backgrounds so the transition is seamless.
+-->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:drawable="?android:colorBackground" />
-
-    <!-- You can insert your own image assets here -->
-    <!-- <item>
-        <bitmap
-            android:gravity="center"
-            android:src="@mipmap/launch_image" />
-    </item> -->
 </layer-list>

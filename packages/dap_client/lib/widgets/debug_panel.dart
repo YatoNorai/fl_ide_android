@@ -267,9 +267,11 @@ class _OutputTab extends StatelessWidget {
             style: TextStyle(color: cs.onSurfaceVariant, fontSize: 12)),
       );
     }
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(10),
-      child: _ColorizedOutput(text: dbg.output, onNavigate: onNavigate),
+    return SelectionArea(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(10),
+        child: _ColorizedOutput(text: dbg.output, onNavigate: onNavigate),
+      ),
     );
   }
 }

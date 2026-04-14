@@ -23,10 +23,10 @@ void main() async {
   // pre-caching all finish before the first frame is drawn.
   final results = await Future.wait([
     SettingsProvider.warmUp(),
-    _checkGit(),
+   // _checkGit(),
     _precacheAssets(),
   ]);
-  AppBootData.gitAvailable = results[1] as bool;
+ // AppBootData.gitAvailable = results[1] as bool;
 
   // Foreground service init — keeps FL IDE alive when backgrounded.
   FlutterForegroundTask.initCommunicationPort();
