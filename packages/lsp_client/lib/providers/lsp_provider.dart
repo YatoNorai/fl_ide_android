@@ -66,10 +66,11 @@ class LspProvider extends ChangeNotifier {
     // Native servers (gopls, dart, pylsp) respond in < 2 s so the default is fine.
     final isJvm = const {'kt', 'kotlin', 'java', 'xml'}.contains(extension.toLowerCase());
 
-    // jdtls/kotlin-ls need 60 s; LemMinX (XML) 15 s; native servers 5 s.
+    // jdtls/kotlin-ls need up to 120 s on Android (cold JVM start + OSGi load);
+    // LemMinX 30 s; native servers 5 s.
     final timeoutSecs = const {'kt', 'kotlin', 'java'}.contains(extension.toLowerCase())
-        ? 60
-        : isJvm ? 15 : 5;
+        ? 120
+        : isJvm ? 30 : 5;
 
     _lspConfig = QuillLspStdioConfig(
       executable: cmd.first,
@@ -227,12 +228,19 @@ class LspProvider extends ChangeNotifier {
       // ── Kotlin ────────────────────────────────────────────────────────────
       case 'kt':
       case 'kotlin':
-        // kotlin-language-server is a bash launcher script installed by the
-        // Android SDK extension at $PREFIX/opt/kotlin-language-server/server/.
-        // Prefer the full path; fall back to the symlink in $PREFIX/bin.
-        final klsHome = '${RuntimeEnvir.kotlinLsHome}/bin/kotlin-language-server';
-        final klsBin  = RuntimeEnvir.kotlinLsBin;
-        final ktlsBin = File(klsHome).existsSync() ? klsHome
+        // Prefer direct Java invocation over the bash launcher script — more
+        // reliable in Termux's sandbox where exec() syscall quirks can trip up
+        // shell scripts that internally call `exec java`.
+        final klsLib = '${RuntimeEnvir.kotlinLsHome}/lib';
+        final java3  = RuntimeEnvir.javaPath;
+        if (Directory(klsLib).existsSync() && File(java3).existsSync()) {
+          // kotlin-language-server main class; --stdio selects stdin/stdout transport.
+          return [java3, '-cp', '$klsLib/*', 'org.javacs.kt.MainKt', '--stdio'];
+        }
+        // Fallback: run the bash launcher script.
+        final klsScript = '${RuntimeEnvir.kotlinLsHome}/bin/kotlin-language-server';
+        final klsBin    = RuntimeEnvir.kotlinLsBin;
+        final ktlsBin   = File(klsScript).existsSync() ? klsScript
             : File(klsBin).existsSync() ? klsBin
             : null;
         if (ktlsBin == null) {
@@ -245,8 +253,6 @@ class LspProvider extends ChangeNotifier {
           debugPrint('[LspProvider] bash not found');
           return null;
         }
-        // kotlin-language-server defaults to TCP on port 16718.
-        // --stdio makes it use stdin/stdout (required for QuillLspStdioConfig).
         return [bash3, ktlsBin, '--stdio'];
 
       // ── Java (Eclipse JDT Language Server) ────────────────────────────────
@@ -287,7 +293,9 @@ class LspProvider extends ChangeNotifier {
               ' Install via Android SDK extension.');
           return null;
         }
-        return [java, '-jar', jar];
+        // --stdio explicitly selects stdin/stdout transport (required for older
+        // lsp4xml jars which default to TCP unless told otherwise).
+        return [java, '-jar', jar, '--stdio'];
 
       default:
         return null;
@@ -323,20 +331,32 @@ class LspProvider extends ChangeNotifier {
   ///
   /// Returns null and logs if jdtls is not installed or Java is missing.
   List<String>? _jdtlsCommand() {
-    final bash = RuntimeEnvir.bashPath;
-    final dataDir = RuntimeEnvir.jdtlsDataPath;
+    final bash     = RuntimeEnvir.bashPath;
+    final dataDir  = RuntimeEnvir.jdtlsDataPath;
+    final jdtlsHome = RuntimeEnvir.jdtlsHome;
 
-    // 1. Prefer the wrapper script — it's always created by the install step
-    //    and handles classpath/config automatically.
+    // 1. Custom wrapper created by the Android SDK extension install step.
     final wrapper = RuntimeEnvir.jdtlsBin;
     if (File(wrapper).existsSync()) {
       if (!File(bash).existsSync()) return null;
       Directory(dataDir).createSync(recursive: true);
+      debugPrint('[LspProvider] jdtls: using custom wrapper $wrapper');
       return [bash, wrapper, '-data', dataDir];
     }
 
-    // 2. Fall back to direct launcher JAR invocation.
-    final jdtlsHome = RuntimeEnvir.jdtlsHome;
+    // 2. Built-in launcher script shipped inside the jdtls distribution tarball
+    //    (present in jdtls ≥ 1.x as opt/jdtls/bin/jdtls). More reliable than
+    //    the raw-jar invocation because the script already sets the correct
+    //    OSGi flags and JVM options for the installed version.
+    final distBin = '$jdtlsHome/bin/jdtls';
+    if (File(distBin).existsSync()) {
+      if (!File(bash).existsSync()) return null;
+      Directory(dataDir).createSync(recursive: true);
+      debugPrint('[LspProvider] jdtls: using distribution launcher $distBin');
+      return [bash, distBin, '-data', dataDir];
+    }
+
+    // 3. Last resort: invoke the launcher JAR directly with Java.
     final pluginsDir = Directory('$jdtlsHome/plugins');
     if (!pluginsDir.existsSync()) {
       debugPrint('[LspProvider] jdtls not found at $jdtlsHome.'
@@ -344,7 +364,6 @@ class LspProvider extends ChangeNotifier {
       return null;
     }
 
-    // Find the launcher JAR (org.eclipse.equinox.launcher_<version>.jar).
     final jars = pluginsDir
         .listSync()
         .whereType<File>()
@@ -367,17 +386,16 @@ class LspProvider extends ChangeNotifier {
       return null;
     }
 
-    // Prefer the ARM64-specific config; fall back to the generic Linux one.
+    // Prefer ARM64-specific config dir; fall back to generic Linux.
     String configDir = '$jdtlsHome/config_linux_arm64';
-    if (!Directory(configDir).existsSync()) {
-      configDir = '$jdtlsHome/config_linux';
-    }
+    if (!Directory(configDir).existsSync()) configDir = '$jdtlsHome/config_linux';
     if (!Directory(configDir).existsSync()) {
       debugPrint('[LspProvider] jdtls config directory not found in $jdtlsHome');
       return null;
     }
 
     Directory(dataDir).createSync(recursive: true);
+    debugPrint('[LspProvider] jdtls: using raw jar $launcherJar');
 
     return [
       java,
@@ -385,8 +403,6 @@ class LspProvider extends ChangeNotifier {
       '-Dosgi.bundles.defaultStartLevel=4',
       '-Declipse.product=org.eclipse.jdt.ls.core.product',
       '-Dlog.level=ERROR',
-      '-noverify',
-      '-Xmx512m',
       '--add-modules=ALL-SYSTEM',
       '--add-opens', 'java.base/java.util=ALL-UNNAMED',
       '--add-opens', 'java.base/java.lang=ALL-UNNAMED',
