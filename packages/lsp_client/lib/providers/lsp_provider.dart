@@ -295,9 +295,9 @@ class LspProvider extends ChangeNotifier {
               ' Install via Android SDK extension.');
           return null;
         }
-        // --stdio explicitly selects stdin/stdout transport (required for older
-        // lsp4xml jars which default to TCP unless told otherwise).
-        return [java, '-jar', jar, '--stdio'];
+        // lsp4xml/LemMinX uses stdio by default — no extra flags needed.
+        // The --stdio flag does NOT exist in lsp4xml 0.3.0 and causes a crash.
+        return [java, '-jar', jar];
 
       default:
         return null;
@@ -333,35 +333,42 @@ class LspProvider extends ChangeNotifier {
   ///
   /// Returns null and logs if jdtls is not installed or Java is missing.
   List<String>? _jdtlsCommand() {
-    final bash     = RuntimeEnvir.bashPath;
-    final dataDir  = RuntimeEnvir.jdtlsDataPath;
+    final dataDir   = RuntimeEnvir.jdtlsDataPath;
     final jdtlsHome = RuntimeEnvir.jdtlsHome;
 
-    // 1. Custom wrapper created by the Android SDK extension install step.
+    // jdtls uses stdio by default — just do NOT set CLIENT_PORT / CLIENT_HOST
+    // in the environment. The three launch paths below all omit those vars.
+
+    // 1. Custom bash wrapper created by the Android SDK extension config step.
+    final bash    = RuntimeEnvir.bashPath;
     final wrapper = RuntimeEnvir.jdtlsBin;
-    if (File(wrapper).existsSync()) {
-      if (!File(bash).existsSync()) return null;
+    if (File(wrapper).existsSync() && File(bash).existsSync()) {
       Directory(dataDir).createSync(recursive: true);
       debugPrint('[LspProvider] jdtls: using custom wrapper $wrapper');
       return [bash, wrapper, '-data', dataDir];
     }
 
-    // 2. Built-in launcher script shipped inside the jdtls distribution tarball
-    //    (present in jdtls ≥ 1.x as opt/jdtls/bin/jdtls). More reliable than
-    //    the raw-jar invocation because the script already sets the correct
-    //    OSGi flags and JVM options for the installed version.
-    final distBin = '$jdtlsHome/bin/jdtls';
-    if (File(distBin).existsSync()) {
-      if (!File(bash).existsSync()) return null;
+    // 2. Distribution's built-in launcher at opt/jdtls/bin/jdtls.
+    //    In jdtls ≥ 1.x this is a Python 3 script (jdtls.py) — run it with
+    //    python3, NOT bash, or it will be interpreted as shell and crash.
+    final distBin  = '$jdtlsHome/bin/jdtls';
+    final python3  = RuntimeEnvir.pythonPath;
+    if (File(distBin).existsSync() && File(python3).existsSync()) {
       Directory(dataDir).createSync(recursive: true);
-      debugPrint('[LspProvider] jdtls: using distribution launcher $distBin');
-      return [bash, distBin, '-data', dataDir];
+      debugPrint('[LspProvider] jdtls: using python3 distribution launcher $distBin');
+      return [python3, distBin, '-data', dataDir];
     }
 
-    // 3. Last resort: invoke the launcher JAR directly with Java.
+    // 3. Direct Java invocation using the OSGi launcher JAR.
+    final java = RuntimeEnvir.javaPath;
+    if (!File(java).existsSync()) {
+      debugPrint('[LspProvider] java not found at $java. Install openjdk-17.');
+      return null;
+    }
+
     final pluginsDir = Directory('$jdtlsHome/plugins');
     if (!pluginsDir.existsSync()) {
-      debugPrint('[LspProvider] jdtls not found at $jdtlsHome.'
+      debugPrint('[LspProvider] jdtls plugins dir not found.'
           ' Install via Android SDK extension.');
       return null;
     }
@@ -382,23 +389,20 @@ class LspProvider extends ChangeNotifier {
     }
     final launcherJar = jars.last;
 
-    final java = RuntimeEnvir.javaPath;
-    if (!File(java).existsSync()) {
-      debugPrint('[LspProvider] java not found at $java. Install openjdk-17.');
-      return null;
-    }
-
-    // Prefer ARM64-specific config dir; fall back to generic Linux.
+    // config_linux_arm64 does not exist in most distros; config_linux works on ARM64.
     String configDir = '$jdtlsHome/config_linux_arm64';
     if (!Directory(configDir).existsSync()) configDir = '$jdtlsHome/config_linux';
     if (!Directory(configDir).existsSync()) {
-      debugPrint('[LspProvider] jdtls config directory not found in $jdtlsHome');
+      debugPrint('[LspProvider] jdtls config dir not found in $jdtlsHome');
       return null;
     }
 
     Directory(dataDir).createSync(recursive: true);
-    debugPrint('[LspProvider] jdtls: using raw jar $launcherJar');
+    debugPrint('[LspProvider] jdtls: using raw jar $launcherJar / config $configDir');
 
+    // Required OSGi flags + Java 9+ module access (confirmed by official wiki).
+    // Do NOT include -noverify (removed in Java 13+) or CLIENT_PORT/CLIENT_HOST
+    // (those would switch from stdio to socket mode).
     return [
       java,
       '-Declipse.application=org.eclipse.jdt.ls.core.id1',
@@ -445,10 +449,20 @@ class LspProvider extends ChangeNotifier {
         return env;
       case 'java':
         final jHome = RuntimeEnvir.javaHome;
-        final javaEnv = jHome.isNotEmpty ? <String, String>{...base, 'JAVA_HOME': jHome} : <String, String>{...base};
+        final javaEnv = jHome.isNotEmpty
+            ? <String, String>{...base, 'JAVA_HOME': jHome}
+            : <String, String>{...base};
         // Cap jdtls heap to avoid OOM on Android.
         javaEnv['JAVA_TOOL_OPTIONS'] = '-Xmx256m -Xms32m';
         return javaEnv;
+      case 'xml':
+        // LemMinX/lsp4xml is also JVM-based — cap heap to avoid OOM.
+        final xmlJHome = RuntimeEnvir.javaHome;
+        final xmlEnv = xmlJHome.isNotEmpty
+            ? <String, String>{...base, 'JAVA_HOME': xmlJHome}
+            : <String, String>{...base};
+        xmlEnv['JAVA_TOOL_OPTIONS'] = '-Xmx128m -Xms16m';
+        return xmlEnv;
       default:
         return base;
     }
