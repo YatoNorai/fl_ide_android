@@ -279,8 +279,12 @@ class LogcatProvider extends ChangeNotifier {
         if (entity is! Directory) continue;
         final pidStr = entity.path.split('/').last;
         if (int.tryParse(pidStr) == null) continue;
+        // The process may exit between listSync() and the read — check first
+        // to avoid throwing PathNotFoundException in the Flutter debugger.
+        final cmdlineFile = File('${entity.path}/cmdline');
+        if (!cmdlineFile.existsSync()) continue;
         try {
-          final bytes = File('${entity.path}/cmdline').readAsBytesSync();
+          final bytes = cmdlineFile.readAsBytesSync();
           if (bytes.isEmpty) continue;
           final nullIdx = bytes.indexOf(0);
           final name = utf8.decode(
