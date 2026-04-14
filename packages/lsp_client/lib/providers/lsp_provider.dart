@@ -231,13 +231,15 @@ class LspProvider extends ChangeNotifier {
         // Prefer direct Java invocation over the bash launcher script — more
         // reliable in Termux's sandbox where exec() syscall quirks can trip up
         // shell scripts that internally call `exec java`.
+        // KLS v1.3.x uses stdio by default when no --tcpPort is given.
+        // Do NOT pass --stdio — JCommander in this version does not define it
+        // and throws ParameterException if it receives an unrecognised flag.
         final klsLib = '${RuntimeEnvir.kotlinLsHome}/lib';
         final java3  = RuntimeEnvir.javaPath;
         if (Directory(klsLib).existsSync() && File(java3).existsSync()) {
-          // kotlin-language-server main class; --stdio selects stdin/stdout transport.
-          return [java3, '-cp', '$klsLib/*', 'org.javacs.kt.MainKt', '--stdio'];
+          return [java3, '-cp', '$klsLib/*', 'org.javacs.kt.MainKt'];
         }
-        // Fallback: run the bash launcher script.
+        // Fallback: run the bash launcher script (no --stdio flag).
         final klsScript = '${RuntimeEnvir.kotlinLsHome}/bin/kotlin-language-server';
         final klsBin    = RuntimeEnvir.kotlinLsBin;
         final ktlsBin   = File(klsScript).existsSync() ? klsScript
@@ -253,7 +255,7 @@ class LspProvider extends ChangeNotifier {
           debugPrint('[LspProvider] bash not found');
           return null;
         }
-        return [bash3, ktlsBin, '--stdio'];
+        return [bash3, ktlsBin];
 
       // ── Java (Eclipse JDT Language Server) ────────────────────────────────
       case 'java':
