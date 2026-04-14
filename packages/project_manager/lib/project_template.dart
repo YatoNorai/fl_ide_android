@@ -961,91 +961,74 @@ const styles = StyleSheet.create({
 
   static String _flutterAndroidFixes(String projectPath,
       {bool useGroovy = false}) {
-    const androidSdkDir = r'$PREFIX/opt/android-sdk';
-    // Pinned versions known to be present in the Termux Android SDK package.
+    // All version constants embedded directly — no Dart interpolation inside
+    // shell sed patterns, which avoids quote-delimiter collisions.
     const ndkVersion        = '27.1.12297006';
     const buildToolsVersion = '35.0.0';
-    // Flutter projects use KTS by default; with useGroovy the app module uses build.gradle
+    const androidSdkDir     = r'$PREFIX/opt/android-sdk';
+
+    // Gradle file path depends on DSL choice.
     final gradleFile = useGroovy
         ? '$projectPath/android/app/build.gradle'
         : '$projectPath/android/app/build.gradle.kts';
-    // ndkVersion assignment syntax differs between KTS (= "…") and Groovy ("…")
-    final ndkKtsPattern   = r's/ndkVersion\s*=\s*flutter\.ndkVersion/ndkVersion = "' + ndkVersion + r'"/g';
-    final ndkGroovyPattern = r's/ndkVersion\s\+flutter\.ndkVersion/ndkVersion "' + ndkVersion + r'"/g';
-    final ndkPattern      = useGroovy ? ndkGroovyPattern : ndkKtsPattern;
-    final ndkPinned       = useGroovy ? 'ndkVersion "$ndkVersion"' : 'ndkVersion = "$ndkVersion"';
-    final btoolsInject    = useGroovy
-        ? r'    buildToolsVersion "' + buildToolsVersion + r'"'
-        : r'    buildToolsVersion = "' + buildToolsVersion + r'"';
-    return r'''
-(
-  SDK_ROOT="${ANDROID_HOME:-''' +
-        androidSdkDir +
-        r'''}"
 
-  # ── flutter config ────────────────────────────────────────────────────────
-  flutter config --android-sdk "$SDK_ROOT" 2>/dev/null && echo "✓ flutter config --android-sdk"
+    // Build the KTS/Groovy-specific sed snippets as plain Dart strings so
+    // there is never a raw-string delimiter collision with shell quotes.
+    final ndkReplaceExpr = useGroovy
+        ? 's/ndkVersion flutter.ndkVersion/ndkVersion "$ndkVersion"/g'
+        : 's/ndkVersion = flutter.ndkVersion/ndkVersion = "$ndkVersion"/g';
+    final btoolsLine = useGroovy
+        ? '    buildToolsVersion "$buildToolsVersion"'
+        : '    buildToolsVersion = "$buildToolsVersion"';
 
-  # ── local.properties ──────────────────────────────────────────────────────
-  PROPS="''' +
-        projectPath +
-        r'''/android/local.properties"
-  NDK_DIR=$(ls -d "$SDK_ROOT/ndk/''' +
-        ndkVersion +
-        r'''" 2>/dev/null || ls -d "$SDK_ROOT/ndk/"* 2>/dev/null | sort -rV | head -1)
-  CMAKE_DIR=$(ls -d "$SDK_ROOT/cmake/"*/bin/cmake 2>/dev/null | sort -rV | head -1 | sed 's|/bin/cmake||')
-  {
-    printf 'sdk.dir=%s\n' "$SDK_ROOT"
-    [ -n "$NDK_DIR" ]   && printf 'ndk.dir=%s\n'   "$NDK_DIR"
-    [ -n "$CMAKE_DIR" ] && printf 'cmake.dir=%s\n' "$CMAKE_DIR"
-  } > "$PROPS"
-  echo "✓ Wrote local.properties"
-
-  # ── build.gradle(.kts) ────────────────────────────────────────────────────
-  GRADLE="''' +
-        gradleFile +
-        r'''"
-  if [ -f "$GRADLE" ]; then
-    # Replace flutter.ndkVersion with pinned version; remove stray ndkVersion lines.
-    sed -i ''' +
-        ndkPattern +
-        r"""' "$GRADLE"
-    sed -i '/ndkVersion/!b; /""" +
-        ndkPinned +
-        r'''/b; d' "$GRADLE"
-    # Inject buildToolsVersion after the first `compileSdk` line if not present.
-    if ! grep -q 'buildToolsVersion' "$GRADLE"; then
-      sed -i '/compileSdk/a\''' +
-        btoolsInject +
-        r''''' "$GRADLE"
-    fi
-    echo "✓ Set ndkVersion=''' +
-        ndkVersion +
-        r''' buildToolsVersion=''' +
-        buildToolsVersion +
-        r'''"
-  fi
-
-  # ── gradle.properties ─────────────────────────────────────────────────────
-  GPROPS="''' +
-        projectPath +
-        r'''/android/gradle.properties"
-  if [ -f "$GPROPS" ]; then
-    sed -i 's/-Xmx[0-9]*[mMgG]/-Xmx512m/g' "$GPROPS"
-    sed -i '/-XX:MaxMetaspaceSize/d' "$GPROPS"
-    sed -i '/-XX:+HeapDumpOnOutOfMemoryError/d' "$GPROPS"
-    echo "✓ Capped Gradle JVM heap"
-  fi
-  AAPT2_BIN=$(find "$SDK_ROOT/build-tools/''' +
-        buildToolsVersion +
-        r'''" -name aapt2 2>/dev/null | head -1)
-  [ -z "$AAPT2_BIN" ] && AAPT2_BIN=$(find "$SDK_ROOT/build-tools" -name aapt2 2>/dev/null | sort -rV | head -1)
-  if [ -n "$AAPT2_BIN" ] && [ -f "$GPROPS" ]; then
-    sed -i '/android\.aapt2FromMavenOverride/d' "$GPROPS"
-    printf '\nandroid.aapt2FromMavenOverride=%s\n' "$AAPT2_BIN" >> "$GPROPS"
-    echo "✓ Set aapt2 override → $AAPT2_BIN"
-  fi
-) 2>&1''';
+    // Use a shell variable for the NDK version so the sed expression stays
+    // entirely in double quotes — no single-quote/raw-string nesting needed.
+    return '(\n'
+        '  NDK_VER="$ndkVersion"\n'
+        '  BTOOLS_VER="$buildToolsVersion"\n'
+        '  SDK_ROOT="\${ANDROID_HOME:-$androidSdkDir}"\n'
+        '\n'
+        '  # ── flutter config ──────────────────────────────────────────────\n'
+        '  flutter config --android-sdk "\$SDK_ROOT" 2>/dev/null && echo "✓ flutter config --android-sdk"\n'
+        '\n'
+        '  # ── local.properties ────────────────────────────────────────────\n'
+        '  PROPS="$projectPath/android/local.properties"\n'
+        '  NDK_DIR=\$(ls -d "\$SDK_ROOT/ndk/\$NDK_VER" 2>/dev/null || ls -d "\$SDK_ROOT/ndk/"* 2>/dev/null | sort -rV | head -1)\n'
+        '  CMAKE_DIR=\$(ls -d "\$SDK_ROOT/cmake/"*/bin/cmake 2>/dev/null | sort -rV | head -1 | sed "s|/bin/cmake||")\n'
+        '  {\n'
+        '    printf "sdk.dir=%s\\n" "\$SDK_ROOT"\n'
+        '    [ -n "\$NDK_DIR" ]   && printf "ndk.dir=%s\\n"   "\$NDK_DIR"\n'
+        '    [ -n "\$CMAKE_DIR" ] && printf "cmake.dir=%s\\n" "\$CMAKE_DIR"\n'
+        '  } > "\$PROPS"\n'
+        '  echo "✓ Wrote local.properties"\n'
+        '\n'
+        '  # ── build.gradle(.kts) ──────────────────────────────────────────\n'
+        '  GRADLE="$gradleFile"\n'
+        '  if [ -f "\$GRADLE" ]; then\n'
+        '    sed -i "$ndkReplaceExpr" "\$GRADLE"\n'
+        '    grep -qF "ndkVersion" "\$GRADLE" || true\n'
+        '    if ! grep -qF "buildToolsVersion" "\$GRADLE"; then\n'
+        '      sed -i "/compileSdk/a\\\\\\n$btoolsLine" "\$GRADLE"\n'
+        '    fi\n'
+        '    echo "✓ ndkVersion=\$NDK_VER buildToolsVersion=\$BTOOLS_VER"\n'
+        '  fi\n'
+        '\n'
+        '  # ── gradle.properties ───────────────────────────────────────────\n'
+        '  GPROPS="$projectPath/android/gradle.properties"\n'
+        '  if [ -f "\$GPROPS" ]; then\n'
+        '    sed -i "s/-Xmx[0-9]*[mMgG]/-Xmx512m/g" "\$GPROPS"\n'
+        '    sed -i "/-XX:MaxMetaspaceSize/d" "\$GPROPS"\n'
+        '    sed -i "/-XX:+HeapDumpOnOutOfMemoryError/d" "\$GPROPS"\n'
+        '    echo "✓ Capped Gradle JVM heap"\n'
+        '  fi\n'
+        '  AAPT2_BIN=\$(find "\$SDK_ROOT/build-tools/\$BTOOLS_VER" -name aapt2 2>/dev/null | head -1)\n'
+        '  [ -z "\$AAPT2_BIN" ] && AAPT2_BIN=\$(find "\$SDK_ROOT/build-tools" -name aapt2 2>/dev/null | sort -rV | head -1)\n'
+        '  if [ -n "\$AAPT2_BIN" ] && [ -f "\$GPROPS" ]; then\n'
+        '    sed -i "/android.aapt2FromMavenOverride/d" "\$GPROPS"\n'
+        '    printf "\\nandroid.aapt2FromMavenOverride=%s\\n" "\$AAPT2_BIN" >> "\$GPROPS"\n'
+        '    echo "✓ aapt2 → \$AAPT2_BIN"\n'
+        '  fi\n'
+        ') 2>&1';
   }
 
   // ── Native Android scaffold ───────────────────────────────────────────────
@@ -1325,6 +1308,9 @@ dependencies {
       final fragDep  = template == AndroidTemplate.bottomNavigation
           ? "\n    implementation 'androidx.fragment:fragment${isKotlin ? '-ktx' : ''}:1.6.2'"
           : '';
+      final drawerDepG = template == AndroidTemplate.navigationDrawer
+          ? "\n    implementation 'androidx.drawerlayout:drawerlayout:1.2.0'"
+          : '';
       return """
 plugins {
     id 'com.android.application'$ktPlugin
@@ -1349,7 +1335,7 @@ dependencies {
     implementation 'androidx.core:$coreLib:1.13.1'
     implementation 'androidx.appcompat:appcompat:1.7.0'
     implementation 'com.google.android.material:material:1.12.0'
-    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'$fragDep
+    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'$fragDep$drawerDepG
 }""";
     }
 
@@ -1358,6 +1344,9 @@ dependencies {
     final ktOpts   = isKotlin ? '\n    kotlinOptions { jvmTarget = "17" }' : '';
     final fragDep  = template == AndroidTemplate.bottomNavigation
         ? '\n    implementation("androidx.fragment:fragment${isKotlin ? '-ktx' : ''}:1.6.2")'
+        : '';
+    final drawerDep = template == AndroidTemplate.navigationDrawer
+        ? '\n    implementation("androidx.drawerlayout:drawerlayout:1.2.0")'
         : '';
 
     return '''
@@ -1384,7 +1373,7 @@ dependencies {
     implementation("androidx.core:$coreLib:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("com.google.android.material:material:1.12.0")
-    implementation("androidx.constraintlayout:constraintlayout:2.1.4")$fragDep
+    implementation("androidx.constraintlayout:constraintlayout:2.1.4")$fragDep$drawerDep
 }''';
   }
 
@@ -1419,23 +1408,23 @@ dependencies {
   /// and Material Components work correctly out of the box.
   static String _aThemesXml(bool isCompose) {
     if (isCompose) {
-      // Compose projects do not need AppCompat or an ActionBar parent.
+      // Compose uses ComponentActivity. The theme must still be a Material3
+      // descendant so that the window insets and dynamic color APIs work
+      // correctly on Android 12+.  NoActionBar avoids a duplicate system bar.
       return '''
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.AppTheme" parent="android:Theme.Material">
-        <item name="android:windowBackground">@android:color/white</item>
-    </style>
+    <style name="Theme.AppTheme" parent="Theme.Material3.DayNight.NoActionBar" />
 </resources>''';
     }
 
     // Views-based projects: Material3 with DayNight + NoActionBar so the app
-    // can set its own Toolbar via setSupportActionBar().
+    // can set its own MaterialToolbar via setSupportActionBar().
     return '''
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="Theme.AppTheme" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Customize your theme here -->
+        <!-- Customize your Material 3 theme here -->
     </style>
 </resources>''';
   }
@@ -1469,7 +1458,7 @@ package $pkg
 
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
-import androidx.appcompat.widget.Toolbar
+import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.snackbar.Snackbar
 
@@ -1477,7 +1466,7 @@ class $className : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-        setSupportActionBar(findViewById<Toolbar>(R.id.toolbar))
+        setSupportActionBar(findViewById<MaterialToolbar>(R.id.toolbar))
         findViewById<FloatingActionButton>(R.id.fab).setOnClickListener { view ->
             Snackbar.make(view, "Replace with your action", Snackbar.LENGTH_LONG)
                 .setAction("Action", null).show()
@@ -1580,14 +1569,14 @@ package $pkg
 
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
-import androidx.appcompat.widget.Toolbar
 import com.google.android.material.appbar.CollapsingToolbarLayout
+import com.google.android.material.appbar.MaterialToolbar
 
 class $className : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-        val toolbar = findViewById<Toolbar>(R.id.toolbar)
+        val toolbar = findViewById<MaterialToolbar>(R.id.toolbar)
         setSupportActionBar(toolbar)
         val collapsingToolbar = findViewById<CollapsingToolbarLayout>(R.id.toolbar_layout)
         collapsingToolbar.title = getString(R.string.app_name)
@@ -1601,9 +1590,9 @@ package $pkg
 import android.os.Bundle
 import androidx.appcompat.app.ActionBarDrawerToggle
 import androidx.appcompat.app.AppCompatActivity
-import androidx.appcompat.widget.Toolbar
 import androidx.core.view.GravityCompat
 import androidx.drawerlayout.widget.DrawerLayout
+import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.navigation.NavigationView
 
 class $className : AppCompatActivity() {
@@ -1612,7 +1601,7 @@ class $className : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-        val toolbar: Toolbar = findViewById(R.id.toolbar)
+        val toolbar: MaterialToolbar = findViewById(R.id.toolbar)
         setSupportActionBar(toolbar)
         drawerLayout = findViewById(R.id.drawer_layout)
         val toggle = ActionBarDrawerToggle(
@@ -1663,7 +1652,7 @@ package $pkg;
 
 import android.os.Bundle;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.appcompat.widget.Toolbar;
+import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
 import com.google.android.material.snackbar.Snackbar;
 
@@ -1672,7 +1661,7 @@ public class $className extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-        Toolbar toolbar = findViewById(R.id.toolbar);
+        MaterialToolbar toolbar = findViewById(R.id.toolbar);
         setSupportActionBar(toolbar);
         FloatingActionButton fab = findViewById(R.id.fab);
         fab.setOnClickListener(view ->
@@ -1750,15 +1739,15 @@ package $pkg;
 
 import android.os.Bundle;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.appcompat.widget.Toolbar;
 import com.google.android.material.appbar.CollapsingToolbarLayout;
+import com.google.android.material.appbar.MaterialToolbar;
 
 public class $className extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-        Toolbar toolbar = findViewById(R.id.toolbar);
+        MaterialToolbar toolbar = findViewById(R.id.toolbar);
         setSupportActionBar(toolbar);
         CollapsingToolbarLayout collapsingToolbar = findViewById(R.id.toolbar_layout);
         collapsingToolbar.setTitle(getString(R.string.app_name));
@@ -1772,9 +1761,9 @@ package $pkg;
 import android.os.Bundle;
 import androidx.appcompat.app.ActionBarDrawerToggle;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.appcompat.widget.Toolbar;
 import androidx.core.view.GravityCompat;
 import androidx.drawerlayout.widget.DrawerLayout;
+import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.navigation.NavigationView;
 
 public class $className extends AppCompatActivity {
@@ -1784,7 +1773,7 @@ public class $className extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-        Toolbar toolbar = findViewById(R.id.toolbar);
+        MaterialToolbar toolbar = findViewById(R.id.toolbar);
         setSupportActionBar(toolbar);
         drawerLayout = findViewById(R.id.drawer_layout);
         ActionBarDrawerToggle toggle = new ActionBarDrawerToggle(
@@ -1842,12 +1831,12 @@ public class $className extends AppCompatActivity {
     android:layout_height="match_parent">
     <com.google.android.material.appbar.AppBarLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content">
-        <androidx.appcompat.widget.Toolbar
+        android:layout_height="wrap_content"
+        android:fitsSystemWindows="true">
+        <com.google.android.material.appbar.MaterialToolbar
             android:id="@+id/toolbar"
             android:layout_width="match_parent"
-            android:layout_height="?attr/actionBarSize"
-            app:popupTheme="@style/ThemeOverlay.AppCompat.Light" />
+            android:layout_height="?attr/actionBarSize" />
     </com.google.android.material.appbar.AppBarLayout>
     <include layout="@layout/content_main" />
     <com.google.android.material.floatingactionbutton.FloatingActionButton
@@ -1906,7 +1895,7 @@ public class $className extends AppCompatActivity {
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:hint="Email"
-            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
             android:layout_marginBottom="16dp">
             <com.google.android.material.textfield.TextInputEditText
                 android:id="@+id/email_input"
@@ -1918,7 +1907,7 @@ public class $className extends AppCompatActivity {
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:hint="Password"
-            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
             android:layout_marginBottom="24dp">
             <com.google.android.material.textfield.TextInputEditText
                 android:id="@+id/password_input"
@@ -1952,13 +1941,12 @@ public class $className extends AppCompatActivity {
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             app:layout_scrollFlags="scroll|exitUntilCollapsed"
-            app:contentScrim="?attr/colorPrimary">
-            <androidx.appcompat.widget.Toolbar
+            app:contentScrim="?attr/colorPrimaryContainer">
+            <com.google.android.material.appbar.MaterialToolbar
                 android:id="@+id/toolbar"
                 android:layout_width="match_parent"
                 android:layout_height="?attr/actionBarSize"
-                app:layout_collapseMode="pin"
-                app:popupTheme="@style/ThemeOverlay.AppCompat.Light" />
+                app:layout_collapseMode="pin" />
         </com.google.android.material.appbar.CollapsingToolbarLayout>
     </com.google.android.material.appbar.AppBarLayout>
     <androidx.core.widget.NestedScrollView
@@ -1986,12 +1974,10 @@ public class $className extends AppCompatActivity {
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:orientation="vertical">
-        <androidx.appcompat.widget.Toolbar
+        <com.google.android.material.appbar.MaterialToolbar
             android:id="@+id/toolbar"
             android:layout_width="match_parent"
-            android:layout_height="?attr/actionBarSize"
-            android:background="?attr/colorPrimary"
-            android:theme="@style/ThemeOverlay.AppCompat.Dark.ActionBar" />
+            android:layout_height="?attr/actionBarSize" />
         <FrameLayout
             android:id="@+id/content_frame"
             android:layout_width="match_parent"
