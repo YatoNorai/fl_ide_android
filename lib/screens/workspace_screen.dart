@@ -338,6 +338,24 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
               if (mounted) setState(() => _initPhase = _InitPhase.ready);
             };
           }
+
+          // Fallback: JVM-based LSPs may never send diagnostics for clean
+          // files, so the loading spinner would never clear.  Mark ready
+          // slightly after the server's initialize timeout so a successful
+          // init on a zero-error file still dismisses the spinner.
+          final isJvmLsp = const {'java', 'kt', 'kotlin', 'xml'}
+              .contains(lspExt.toLowerCase());
+          if (isJvmLsp) {
+            final fallbackSecs =
+                const {'java', 'kt', 'kotlin'}.contains(lspExt.toLowerCase())
+                    ? 130   // 10 s buffer over the 120 s initialize timeout
+                    : 35;  // 5 s buffer over the 30 s XML timeout
+            Future.delayed(Duration(seconds: fallbackSecs), () {
+              if (!mounted) return;
+              context.read<LspProvider>().markReady();
+              setState(() => _initPhase = _InitPhase.ready);
+            });
+          }
         } else {
           setState(() => _initPhase = _InitPhase.ready);
         }

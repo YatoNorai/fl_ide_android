@@ -244,10 +244,19 @@ class _ActiveEditorState extends State<_ActiveEditor> {
           languageId:               cfg.languageId,
           environment:              cfg.environment,
           initializeTimeoutSeconds: cfg.initializeTimeoutSeconds,
-          // Wire onError before the process starts so early stderr/crashes
-          // are surfaced in the UI rather than silently swallowed.
+          // Wire onError so crashes and timeouts surface in the UI.
+          // JVM-based servers (jdtls, kotlin-ls, LemMinX) always write
+          // harmless lines to stderr during startup (JAVA_TOOL_OPTIONS
+          // echo, SLF4J warnings, OSGi class-loader progress).  Calling
+          // setError() on every stderr byte would flip the UI into an
+          // error state while the server is still initialising normally,
+          // so we only forward truly fatal messages.
           onError: (msg) {
-            if (mounted) context.read<LspProvider>().setError(msg);
+            if (!mounted) return;
+            final fatal = msg.contains('timed out after') ||
+                          msg.contains('exited with code') ||
+                          msg.contains('write error');
+            if (fatal) context.read<LspProvider>().setError(msg);
           },
         );
       } else if (cfg is QuillLspSocketConfig) {
@@ -276,6 +285,16 @@ class _ActiveEditorState extends State<_ActiveEditor> {
     if (!client.isReady) {
       debugPrint('[EditorArea] LSP client not ready after start, discarding');
       client.shutdown();
+      if (mounted) {
+        final timeoutSecs = cfg is QuillLspStdioConfig
+            ? cfg.initializeTimeoutSeconds
+            : null;
+        context.read<LspProvider>().setError(
+          'LSP (${cfg.languageId}) failed to initialize'
+          '${timeoutSecs != null ? ' within ${timeoutSecs}s' : ''}. '
+          'The server may need more time on first run.',
+        );
+      }
       return;
     }
 
