@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:core/core.dart' show FileNode, showThemedDialog;
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -172,7 +173,10 @@ class _FileLeaf extends StatelessWidget {
         if (_isApk) {
           onApkTap?.call(node.path);
         } else {
-          context.read<EditorProvider>().openFile(node.path);
+          // Images and text files both go through openFile — the editor area
+          // will show the correct viewer based on file.isImage.
+          // bringToFront: already-open files move to the first tab position.
+          context.read<EditorProvider>().openFile(node.path, bringToFront: true);
           onFileSelected?.call();
         }
       },
@@ -597,6 +601,11 @@ class _DirActionsSheet extends StatelessWidget {
               onTap: () => _showRename(context),
             ),
             _SheetAction(
+              icon: Icons.add_photo_alternate_outlined,
+              label: 'Importar imagem',
+              onTap: () => _importImages(context),
+            ),
+            _SheetAction(
               icon: Icons.copy_outlined,
               label: 'Copy path',
               onTap: () {
@@ -610,6 +619,45 @@ class _DirActionsSheet extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Future<void> _importImages(BuildContext context) async {
+    Navigator.pop(context);
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.image,
+      allowMultiple: true,
+    );
+    if (result == null || result.files.isEmpty) return;
+
+    final errors = <String>[];
+    for (final f in result.files) {
+      final srcPath = f.path;
+      if (srcPath == null) continue;
+      final dest = '${dir.path}/${f.name}';
+      try {
+        await File(srcPath).copy(dest);
+      } catch (e) {
+        errors.add(f.name);
+      }
+    }
+
+    onRefresh();
+
+    if (parentContext.mounted) {
+      if (errors.isEmpty) {
+        ScaffoldMessenger.of(parentContext).showSnackBar(
+          SnackBar(content: Text(
+            result.files.length == 1
+                ? 'Imagem importada com sucesso'
+                : '${result.files.length} imagens importadas',
+          )),
+        );
+      } else {
+        ScaffoldMessenger.of(parentContext).showSnackBar(
+          SnackBar(content: Text('Erro ao importar: ${errors.join(', ')}')),
+        );
+      }
+    }
   }
 
   void _confirmDelete(BuildContext context) {

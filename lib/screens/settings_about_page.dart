@@ -115,11 +115,11 @@ class AboutSettingsPage extends StatelessWidget {
               ),
               subtitle: const Padding(
                 padding: EdgeInsets.only(bottom: 6),
-                child: Text('github.com/YatoNorai'),
+                child: Text('github.com'),
               ),
               trailing: const Icon(Icons.open_in_new, size: 18),
               onTap: () => launchUrl(
-                Uri.parse('https://github.com/YatoNorai'),
+                Uri.parse('https://google.com'),
                 mode: LaunchMode.externalApplication,
               ),
             ),

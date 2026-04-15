@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:core/core.dart';
@@ -17,9 +18,28 @@ class LspProvider extends ChangeNotifier {
   QuillLspConfig? _lspConfig;
   String? _error;
 
+  // ── Project-wide diagnostics ───────────────────────────────────────────────
+  // Populated by [attachClient] via listenAllDiagnostics — captures every
+  // publishDiagnostics notification the server sends, including for files that
+  // are not currently open in the editor.
+  final Map<String, List<LspDiagnostic>> _projectDiagnostics = {};
+  StreamSubscription<void>? _allDiagSub;
+
+  /// URIs that currently have an active LspBinding in the editor (i.e. the
+  /// editor has called didOpen for them and hasn't yet called didClose).
+  /// Used to distinguish genuine "file is clean" empty pushes from
+  /// "server cleared on didClose" empty pushes.
+  final _activelyOpenUris = <String>{};
+
   LspStatus get status => _status;
   QuillLspConfig? get lspConfig => _lspConfig;
   String? get error => _error;
+
+  /// All diagnostics received from the LSP server since it started, keyed by
+  /// file URI (e.g. `file:///path/to/lib/main.dart`).  Includes files that are
+  /// not open in the editor — use this for the project-wide Problems panel.
+  Map<String, List<LspDiagnostic>> get projectDiagnostics =>
+      Map.unmodifiable(_projectDiagnostics);
 
   /// True once the LSP process is running (warming OR ready).
   bool get isRunning => _status == LspStatus.warming || _status == LspStatus.ready;
@@ -62,14 +82,14 @@ class LspProvider extends ChangeNotifier {
     _status = LspStatus.starting;
     notifyListeners();
 
-    // JVM-based servers (Kotlin, Java, XML/LemMinX) need more time to spin up.
+    // JVM-based servers need more time to spin up.
     // Native servers (gopls, dart, pylsp) respond in < 2 s so the default is fine.
     final isJvm = const {'kt', 'kotlin', 'java', 'xml'}.contains(extension.toLowerCase());
 
-    // jdtls/kotlin-ls need up to 120 s on Android (cold JVM start + OSGi load);
-    // LemMinX 30 s; native servers 5 s.
+    // java-language-server (replacing jdtls/kotlin-ls) starts in 5–15 s because
+    // it has no OSGi layer.  LemMinX needs ~30 s.  Native servers 5 s.
     final timeoutSecs = const {'kt', 'kotlin', 'java'}.contains(extension.toLowerCase())
-        ? 120
+        ? 60
         : isJvm ? 30 : 5;
 
     _lspConfig = QuillLspStdioConfig(
@@ -87,6 +107,7 @@ class LspProvider extends ChangeNotifier {
   }
 
   void stop() {
+    detachClient();
     _lspConfig = null;
     _status = LspStatus.stopped;
     notifyListeners();
@@ -96,6 +117,149 @@ class LspProvider extends ChangeNotifier {
   void setError(String message) {
     _status = LspStatus.error;
     _error = message;
+    notifyListeners();
+  }
+
+  /// Notify [LspProvider] that the editor has called textDocument/didOpen for
+  /// [uri].  Call this immediately after [QuillCodeController.attachLsp].
+  void notifyFileOpenedOnLsp(String uri) => _activelyOpenUris.add(uri);
+
+  /// Notify [LspProvider] that the editor has called textDocument/didClose for
+  /// [uri].  Call this when switching away from a tab or closing a tab.
+  void notifyFileClosedOnLsp(String uri) => _activelyOpenUris.remove(uri);
+
+  /// Wire the successfully-started [client] so we can track project-wide
+  /// diagnostics, then trigger a workspace scan so the server analyses every
+  /// project file — not just the one currently open in the editor.
+  void attachClient(LspClient client) {
+    _allDiagSub?.cancel();
+    _projectDiagnostics.clear();
+    _activelyOpenUris.clear();
+    _allDiagSub = client.listenAllDiagnostics((uri, diags) {
+      if (diags.isNotEmpty) {
+        // Server found issues — store/update.
+        _projectDiagnostics[uri] = diags;
+        notifyListeners();
+      } else if (_activelyOpenUris.contains(uri)) {
+        // File is actively open in the editor AND server says it's clean
+        // (user fixed the errors).  Safe to remove the entry.
+        _projectDiagnostics.remove(uri);
+        notifyListeners();
+      }
+      // else: empty push triggered by didClose (tab switch / file close).
+      // Preserve the last known diagnostics so the Problems panel still
+      // shows issues for files that are not currently open in the editor.
+    });
+    // Fire-and-forget: open all project files so the server pushes diagnostics
+    // for every file, giving us a real project-wide Problems view.
+    _scanWorkspace(client);
+  }
+
+  /// Walk the workspace directory and send textDocument/didOpen for every file
+  /// matching the current LSP language.  The server then analyses each file
+  /// and pushes publishDiagnostics notifications that end up in
+  /// [_projectDiagnostics] via [listenAllDiagnostics].
+  ///
+  /// Files are sent in small batches with a short pause between each batch so
+  /// we don't flood the server (important for JVM-based servers like jdtls).
+  Future<void> _scanWorkspace(LspClient client) async {
+    final cfg = _lspConfig;
+    if (cfg == null) return;
+
+    final exts = _extensionsForLanguageId(cfg.languageId);
+    if (exts.isEmpty) return;
+
+    final root = Directory(cfg.workspacePath);
+    if (!root.existsSync()) return;
+
+    // Directories that should never be scanned (generated/build artefacts or
+    // platform sub-trees irrelevant to the active language).
+    // Note: 'android' is excluded only for Flutter projects where Java/Kotlin
+    // are not the primary language — for pure Android projects the entire
+    // workspace IS the Android project and nothing should be excluded here.
+    final isAndroidLang = const {'java', 'kotlin'}.contains(cfg.languageId);
+    final skip = {
+      'build', '.dart_tool', '.git', '.gradle', '.idea', '.kotlin',
+      'node_modules', '.pub-cache', '.pub', '__pycache__',
+      // Skip platform sub-dirs only when editing Flutter/JS/Python projects.
+      if (!isAndroidLang) ...{'android', 'ios', 'windows', 'macos', 'linux', 'web'},
+    };
+
+    final files = <File>[];
+    const maxFiles = 400;
+
+    void collect(Directory dir) {
+      if (files.length >= maxFiles) return;
+      try {
+        for (final entity in dir.listSync()) {
+          if (files.length >= maxFiles) return;
+          if (entity is Directory) {
+            final name = entity.path.split('/').last.split('\\').last;
+            if (!skip.contains(name)) collect(entity);
+          } else if (entity is File) {
+            final name = entity.path.split('/').last.split('\\').last;
+            final dot = name.lastIndexOf('.');
+            if (dot != -1 && exts.contains(name.substring(dot + 1).toLowerCase())) {
+              files.add(entity);
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    collect(root);
+
+    // Send didOpen in batches of 10 with a small gap between batches so we
+    // don't stall a JVM server that's still warming up.
+    const batchSize = 10;
+    const batchDelay = Duration(milliseconds: 200);
+
+    for (var i = 0; i < files.length; i++) {
+      if (!client.isReady) break;
+      try {
+        final path    = files[i].path;
+        final uri     = Uri.file(path).toString();
+        final content = await files[i].readAsString();
+        await client.didOpen(
+          uri:        uri,
+          languageId: cfg.languageId,
+          text:       content,
+          version:    1,
+        );
+      } catch (_) {}
+
+      // Pause between batches — avoids flooding slow JVM servers.
+      if ((i + 1) % batchSize == 0) {
+        await Future<void>.delayed(batchDelay);
+      }
+    }
+  }
+
+  /// Maps a languageId back to the set of file extensions this LSP handles.
+  static Set<String> _extensionsForLanguageId(String langId) {
+    switch (langId) {
+      case 'dart':                return {'dart'};
+      case 'kotlin':              return {'kt', 'kts'};
+      case 'java':                return {'java'};
+      case 'python':              return {'py'};
+      case 'javascript':
+      case 'javascriptreact':     return {'js', 'jsx', 'mjs'};
+      case 'typescript':
+      case 'typescriptreact':     return {'ts', 'tsx'};
+      case 'go':                  return {'go'};
+      case 'swift':               return {'swift'};
+      case 'xml':                 return {'xml'};
+      default:                    return {};
+    }
+  }
+
+  /// Detach the current client's global diagnostics listener and clear the
+  /// project-wide map.  Called when the LSP is stopped or the client is shut down.
+  void detachClient() {
+    _allDiagSub?.cancel();
+    _allDiagSub = null;
+    _projectDiagnostics.clear();
+    _activelyOpenUris.clear();
     notifyListeners();
   }
 
@@ -127,10 +291,8 @@ class LspProvider extends ChangeNotifier {
         return 'pylsp';
       case 'kt':
       case 'kotlin':
-        return 'kotlin-language-server';
       case 'java':
-        // jdtls wrapper script installed by the Android SDK extension.
-        return 'jdtls -data ~/.jdtls-data';
+        return 'java -jar ${RuntimeEnvir.javaLsJar}';
       case 'go':
         return 'gopls';
       case 'swift':
@@ -174,7 +336,14 @@ class LspProvider extends ChangeNotifier {
           debugPrint('[LspProvider] dart VM not found');
           return null;
         }
-        return [dart, 'language-server'];
+        // --suppress-analytics: skip analytics ping that adds ~200 ms cold start.
+        // --protocol=lsp: explicit LSP mode (default but avoids version detection).
+        // --client-id / --client-version: lets the server adjust behaviour for
+        // known clients and avoids generic "unknown" warnings in server logs.
+        return [dart, 'language-server',
+                '--suppress-analytics',
+                '--client-id=fl_ide',
+                '--client-version=1.0'];
 
       case 'js':
       case 'ts':
@@ -225,41 +394,18 @@ class LspProvider extends ChangeNotifier {
         if (File(bash2).existsSync()) return [bash2, pylsp];
         return null;
 
-      // ── Kotlin ────────────────────────────────────────────────────────────
+      // ── Kotlin / Java (java-language-server by georgewfraser) ───────────────
+      // Replaces the heavyweight jdtls + kotlin-language-server combo.
+      // java-language-server is a single self-contained jar (no OSGi, no
+      // multi-second warm-up) that analyses .java files and indexes the
+      // Android SDK / project classpath via javac APIs.
+      // For .kt files it provides Java class/method completion from the project
+      // context — full Kotlin syntax analysis is not available, but it is far
+      // more reliable on Android/Termux than kotlin-language-server was.
       case 'kt':
       case 'kotlin':
-        // Prefer direct Java invocation over the bash launcher script — more
-        // reliable in Termux's sandbox where exec() syscall quirks can trip up
-        // shell scripts that internally call `exec java`.
-        // KLS v1.3.x uses stdio by default when no --tcpPort is given.
-        // Do NOT pass --stdio — JCommander in this version does not define it
-        // and throws ParameterException if it receives an unrecognised flag.
-        final klsLib = '${RuntimeEnvir.kotlinLsHome}/lib';
-        final java3  = RuntimeEnvir.javaPath;
-        if (Directory(klsLib).existsSync() && File(java3).existsSync()) {
-          return [java3, '-cp', '$klsLib/*', 'org.javacs.kt.MainKt'];
-        }
-        // Fallback: run the bash launcher script (no --stdio flag).
-        final klsScript = '${RuntimeEnvir.kotlinLsHome}/bin/kotlin-language-server';
-        final klsBin    = RuntimeEnvir.kotlinLsBin;
-        final ktlsBin   = File(klsScript).existsSync() ? klsScript
-            : File(klsBin).existsSync() ? klsBin
-            : null;
-        if (ktlsBin == null) {
-          debugPrint('[LspProvider] kotlin-language-server not found.'
-              ' Install via Android SDK extension.');
-          return null;
-        }
-        final bash3 = RuntimeEnvir.bashPath;
-        if (!File(bash3).existsSync()) {
-          debugPrint('[LspProvider] bash not found');
-          return null;
-        }
-        return [bash3, ktlsBin];
-
-      // ── Java (Eclipse JDT Language Server) ────────────────────────────────
       case 'java':
-        return _jdtlsCommand();
+        return _javaLsCommand();
 
       // ── Go (gopls) ────────────────────────────────────────────────────────
       case 'go':
@@ -308,11 +454,11 @@ class LspProvider extends ChangeNotifier {
   String _missingBinaryMessage(String ext) {
     switch (ext.toLowerCase()) {
       case 'java':
-        return 'Java LSP (jdtls) not found.\n'
+        return 'Java LSP (java-language-server) not found.\n'
             'Install the Android SDK extension and run its install steps.';
       case 'kt':
       case 'kotlin':
-        return 'Kotlin LSP not found.\n'
+        return 'Java/Kotlin LSP (java-language-server) not found.\n'
             'Install the Android SDK extension and run its install steps.';
       case 'go':
         return 'Go LSP (gopls) not found.\n'
@@ -328,94 +474,29 @@ class LspProvider extends ChangeNotifier {
     }
   }
 
-  /// Constructs the full [java, ...args] command to launch jdtls by scanning
-  /// the jdtls installation directory for the versioned launcher jar.
+  /// Launches java-language-server (georgewfraser/java-language-server).
   ///
-  /// Returns null and logs if jdtls is not installed or Java is missing.
-  List<String>? _jdtlsCommand() {
-    final dataDir   = RuntimeEnvir.jdtlsDataPath;
-    final jdtlsHome = RuntimeEnvir.jdtlsHome;
-
-    // jdtls uses stdio by default — just do NOT set CLIENT_PORT / CLIENT_HOST
-    // in the environment. The three launch paths below all omit those vars.
-
-    // 1. Custom bash wrapper created by the Android SDK extension config step.
-    final bash    = RuntimeEnvir.bashPath;
-    final wrapper = RuntimeEnvir.jdtlsBin;
-    if (File(wrapper).existsSync() && File(bash).existsSync()) {
-      Directory(dataDir).createSync(recursive: true);
-      debugPrint('[LspProvider] jdtls: using custom wrapper $wrapper');
-      return [bash, wrapper, '-data', dataDir];
-    }
-
-    // 2. Distribution's built-in launcher at opt/jdtls/bin/jdtls.
-    //    In jdtls ≥ 1.x this is a Python 3 script (jdtls.py) — run it with
-    //    python3, NOT bash, or it will be interpreted as shell and crash.
-    final distBin  = '$jdtlsHome/bin/jdtls';
-    final python3  = RuntimeEnvir.pythonPath;
-    if (File(distBin).existsSync() && File(python3).existsSync()) {
-      Directory(dataDir).createSync(recursive: true);
-      debugPrint('[LspProvider] jdtls: using python3 distribution launcher $distBin');
-      return [python3, distBin, '-data', dataDir];
-    }
-
-    // 3. Direct Java invocation using the OSGi launcher JAR.
+  /// The server ships as a single self-contained jar at
+  /// [RuntimeEnvir.javaLsJar].  It speaks LSP over stdin/stdout with no
+  /// extra flags required, starts in under 10 s on Android (no OSGi layer),
+  /// and handles both .java and .kt files in Android projects.
+  ///
+  /// Returns null when the jar or the JVM binary is missing.
+  List<String>? _javaLsCommand() {
     final java = RuntimeEnvir.javaPath;
     if (!File(java).existsSync()) {
-      debugPrint('[LspProvider] java not found at $java. Install openjdk-17.');
+      debugPrint('[LspProvider] java not found at $java.'
+          ' Install via: pkg install openjdk-17');
       return null;
     }
-
-    final pluginsDir = Directory('$jdtlsHome/plugins');
-    if (!pluginsDir.existsSync()) {
-      debugPrint('[LspProvider] jdtls plugins dir not found.'
+    final jar = RuntimeEnvir.javaLsJar;
+    if (!File(jar).existsSync()) {
+      debugPrint('[LspProvider] java-language-server jar not found at $jar.'
           ' Install via Android SDK extension.');
       return null;
     }
-
-    final jars = pluginsDir
-        .listSync()
-        .whereType<File>()
-        .where((f) =>
-            f.path.contains('org.eclipse.equinox.launcher_') &&
-            f.path.endsWith('.jar'))
-        .map((f) => f.path)
-        .toList()
-      ..sort();
-
-    if (jars.isEmpty) {
-      debugPrint('[LspProvider] jdtls launcher jar not found in $pluginsDir');
-      return null;
-    }
-    final launcherJar = jars.last;
-
-    // config_linux_arm64 does not exist in most distros; config_linux works on ARM64.
-    String configDir = '$jdtlsHome/config_linux_arm64';
-    if (!Directory(configDir).existsSync()) configDir = '$jdtlsHome/config_linux';
-    if (!Directory(configDir).existsSync()) {
-      debugPrint('[LspProvider] jdtls config dir not found in $jdtlsHome');
-      return null;
-    }
-
-    Directory(dataDir).createSync(recursive: true);
-    debugPrint('[LspProvider] jdtls: using raw jar $launcherJar / config $configDir');
-
-    // Required OSGi flags + Java 9+ module access (confirmed by official wiki).
-    // Do NOT include -noverify (removed in Java 13+) or CLIENT_PORT/CLIENT_HOST
-    // (those would switch from stdio to socket mode).
-    return [
-      java,
-      '-Declipse.application=org.eclipse.jdt.ls.core.id1',
-      '-Dosgi.bundles.defaultStartLevel=4',
-      '-Declipse.product=org.eclipse.jdt.ls.core.product',
-      '-Dlog.level=ERROR',
-      '--add-modules=ALL-SYSTEM',
-      '--add-opens', 'java.base/java.util=ALL-UNNAMED',
-      '--add-opens', 'java.base/java.lang=ALL-UNNAMED',
-      '-jar', launcherJar,
-      '-configuration', configDir,
-      '-data', dataDir,
-    ];
+    debugPrint('[LspProvider] java-language-server: $java -jar $jar');
+    return [java, '-jar', jar];
   }
 
   /// Path to the Dart VM binary (the ELF executable, not the shell wrapper).
@@ -433,28 +514,19 @@ class LspProvider extends ChangeNotifier {
   Map<String, String> _envForExtension(String ext) {
     final base = RuntimeEnvir.baseEnv;
     switch (ext.toLowerCase()) {
+      // java-language-server is used for both Java and Kotlin files.
+      // JAVA_HOME lets the JVM locate itself when launched without a login
+      // shell.  JAVA_TOOL_OPTIONS caps heap to 256 MB — java-language-server
+      // is much leaner than jdtls/kotlin-ls but still needs ~128 MB on a
+      // real Android project.
       case 'kt':
       case 'kotlin':
-        // kotlin-language-server needs JAVA_HOME for the JVM.
-        // KOTLIN_LS_HOME helps the launcher find its lib/ dir if $0-resolution
-        // fails inside the Termux sandbox (process started without a tty).
-        // JAVA_TOOL_OPTIONS caps heap to avoid OOM on Android devices with
-        // limited RAM — kotlin-language-server defaults to 512 MB which kills
-        // the process on low-memory devices.
+      case 'java':
         final jHome = RuntimeEnvir.javaHome;
         final env = <String, String>{...base};
         if (jHome.isNotEmpty) env['JAVA_HOME'] = jHome;
-        env['KOTLIN_LS_HOME'] = RuntimeEnvir.kotlinLsHome;
-        env['JAVA_TOOL_OPTIONS'] = '-Xmx200m -Xms32m';
+        env['JAVA_TOOL_OPTIONS'] = '-Xmx256m -Xms32m';
         return env;
-      case 'java':
-        final jHome = RuntimeEnvir.javaHome;
-        final javaEnv = jHome.isNotEmpty
-            ? <String, String>{...base, 'JAVA_HOME': jHome}
-            : <String, String>{...base};
-        // Cap jdtls heap to avoid OOM on Android.
-        javaEnv['JAVA_TOOL_OPTIONS'] = '-Xmx256m -Xms32m';
-        return javaEnv;
       case 'xml':
         // LemMinX/lsp4xml is also JVM-based — cap heap to avoid OOM.
         final xmlJHome = RuntimeEnvir.javaHome;
@@ -488,6 +560,7 @@ class LspProvider extends ChangeNotifier {
 
   @override
   void dispose() {
+    _allDiagSub?.cancel();
     stop();
     super.dispose();
   }

@@ -46,6 +46,10 @@ class CreateProjectScreen extends StatefulWidget {
   /// Called instead of session.start() for SSH-backed terminal sessions.
   final Future<void> Function(TerminalSession)? sshTerminalSetup;
 
+  /// Called when the user taps "Install SDK" in the no-SDK warning banner.
+  /// The host app should navigate to the SDK settings screen.
+  final VoidCallback? onOpenSdkSettings;
+
   const CreateProjectScreen({
     super.key,
     this.remoteProjectsPath,
@@ -54,6 +58,7 @@ class CreateProjectScreen extends StatefulWidget {
     this.isSshDetecting = false,
     this.remoteIsWindows = false,
     this.sshTerminalSetup,
+    this.onOpenSdkSettings,
   });
 
   @override
@@ -409,7 +414,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                   if (detecting)
                     _SdkDetectingTile()
                   else if (noSdks)
-                    _NoSdkWarning()
+                    _NoSdkWarning(onInstallTap: widget.onOpenSdkSettings)
                   else
                     _SdkSelectorTile(
                       selected: _selectedSdk,
@@ -1904,28 +1909,56 @@ class _SdkDetectingTile extends StatelessWidget {
 // ── No SDK warning ────────────────────────────────────────────────────────────
 
 class _NoSdkWarning extends StatelessWidget {
+  final VoidCallback? onInstallTap;
+  const _NoSdkWarning({this.onInstallTap});
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: cs.errorContainer.withValues(alpha: 0.3),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: cs.error.withValues(alpha: 0.4)),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.warning_amber_rounded, color: cs.error, size: 20),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              AppStrings.of(context).noSdkInstalled,
-              style: GoogleFonts.openSans(
-                  color: cs.onErrorContainer, fontSize: 14),
+    final s  = AppStrings.of(context);
+    return InkWell(
+      onTap: onInstallTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: cs.errorContainer.withValues(alpha: 0.3),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: cs.error.withValues(alpha: 0.4)),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: cs.error, size: 20),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    s.noSdkInstalled,
+                    style: GoogleFonts.openSans(
+                        color: cs.onErrorContainer, fontSize: 14),
+                  ),
+                  if (onInstallTap != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      'Toque aqui para instalar um SDK',
+                      style: GoogleFonts.openSans(
+                        color: cs.error,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        decoration: TextDecoration.underline,
+                        decorationColor: cs.error,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
             ),
-          ),
-        ],
+            if (onInstallTap != null)
+              Icon(Icons.arrow_forward_ios_rounded, size: 14, color: cs.error),
+          ],
+        ),
       ),
     );
   }

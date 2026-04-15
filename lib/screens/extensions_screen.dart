@@ -13,7 +13,9 @@ import '../widgets/settings_page_widgets.dart';
 
 
 class ExtensionsSettingsPage extends StatelessWidget {
-  const ExtensionsSettingsPage({super.key});
+  /// Which tab to open (0 = Store, 1 = SDKs, 2 = Installed). Defaults to 0.
+  final int initialTab;
+  const ExtensionsSettingsPage({super.key, this.initialTab = 0});
 
   @override
   Widget build(BuildContext context) {
@@ -23,7 +25,7 @@ class ExtensionsSettingsPage extends StatelessWidget {
       canPop: false,
       onBackPressed: () => Navigator.of(context).pop(),
       onSystemBack: () => Navigator.of(context).pop(),
-      child: const ExtensionsPageContent(),
+      child: ExtensionsPageContent(initialTab: initialTab),
     );
   }
 }
@@ -33,7 +35,9 @@ class ExtensionsSettingsPage extends StatelessWidget {
 // Uses a local tab index instead of TabBarView so it scrolls as one block.
 
 class ExtensionsPageContent extends StatefulWidget {
-  const ExtensionsPageContent({super.key});
+  /// Which tab to open initially (0 = Store, 1 = SDKs, 2 = Installed).
+  final int initialTab;
+  const ExtensionsPageContent({super.key, this.initialTab = 0});
 
   @override
   State<ExtensionsPageContent> createState() => _ExtensionsPageContentState();
@@ -52,7 +56,8 @@ class _ExtensionsPageContentState extends State<ExtensionsPageContent>
   @override
   void initState() {
     super.initState();
-    _tab = TabController(length: 3, vsync: this);
+    _tab = TabController(length: 3, vsync: this, initialIndex: widget.initialTab);
+    _tabIndex = widget.initialTab;
     // Only rebuild when animation finishes (indexIsChanging == false),
     // not on every intermediate frame during the tab slide animation.
     _tab.addListener(_onTabChanged);

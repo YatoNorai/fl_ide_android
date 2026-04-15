@@ -28,6 +28,10 @@ dependencies:
   quill_code:
     path: ../../../quill_code
 
+  # Image viewer & file import
+  flutter_svg: ^2.0.10
+  file_picker: ^8.1.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

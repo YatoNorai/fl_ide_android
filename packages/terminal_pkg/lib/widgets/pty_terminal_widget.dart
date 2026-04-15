@@ -62,7 +62,7 @@ class PtyTerminalWidget extends StatelessWidget {
       child: TerminalView(
         session.terminal,
         theme: _themeFor(cs),
-        autofocus: true,
+        autofocus: false,
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
         // deleteDetection: keeps a dummy character in the hidden text field so
         // Android soft keyboards can detect and send backspace events correctly.

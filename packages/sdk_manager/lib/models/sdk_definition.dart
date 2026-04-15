@@ -10,6 +10,11 @@ class SdkDefinition {
   final String installScript;
   final String buildCommand;
 
+  /// Shell commands run automatically when [installScript] exits with a
+  /// non-zero status (via `trap … ERR`).  Should forcefully undo everything
+  /// the install script may have created so the user can retry cleanly.
+  final String cleanupScript;
+
   /// Project-level config (new project cmd, entry file, sync, etc.)
   final SdkConfig sdkConfig;
 
@@ -23,6 +28,7 @@ class SdkDefinition {
     required this.installScript,
     required this.buildCommand,
     required this.sdkConfig,
+    this.cleanupScript = '',
     this.dapConfig = DapConfig.empty,
   });
 
@@ -41,13 +47,24 @@ class SdkDefinition {
       type: SdkType.flutter,
       verifyBinary: 'flutter',
       verifyCmd: 'flutter --version',
+      cleanupScript: r'''
+rm -rf "$PREFIX/opt/flutter" 2>/dev/null
+rm -f "$PREFIX/bin/flutter" 2>/dev/null
+rm -f flutter_linux_arm64.tar.xz 2>/dev/null
+pkg uninstall -y curl git unzip 2>/dev/null || true
+''',
       installScript: '''
 pkg update -y && pkg install -y curl git unzip
 curl -LO https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_arm64.tar.xz
-tar xf flutter_linux_arm64.tar.xz -C \$PREFIX
+mkdir -p \$PREFIX/opt
+tar xf flutter_linux_arm64.tar.xz -C \$PREFIX/opt
 rm flutter_linux_arm64.tar.xz
-echo 'export PATH="\$PATH:\$PREFIX/flutter/bin"' >> ~/.bashrc
-flutter config --android-sdk \$ANDROID_HOME
+# Symlink into \$PREFIX/bin so it is on PATH for the IDE process
+ln -sf \$PREFIX/opt/flutter/bin/flutter \$PREFIX/bin/flutter
+# Make flutter available in the current terminal session
+export PATH="\$PREFIX/opt/flutter/bin:\$PATH"
+echo 'export PATH="\$PATH:\$PREFIX/opt/flutter/bin"' >> ~/.bashrc
+flutter config --android-sdk \${ANDROID_HOME:-\$PREFIX/opt/android-sdk}
 flutter doctor
 ''',
       buildCommand: 'flutter build apk --debug',
@@ -89,15 +106,40 @@ flutter doctor
       type: SdkType.androidSdk,
       verifyBinary: 'sdkmanager',
       verifyCmd: 'sdkmanager --version',
+      cleanupScript: r'''
+rm -rf "$ANDROID_HOME/cmdline-tools" "$ANDROID_HOME/platform-tools" \
+       "$ANDROID_HOME/platforms" "$ANDROID_HOME/build-tools" 2>/dev/null
+rm -rf "$PREFIX/opt/java-language-server" 2>/dev/null
+rm -f "$PREFIX/bin/sdkmanager" "$PREFIX/bin/adb" 2>/dev/null
+rm -f commandlinetools-linux-*.zip java-language-server.tar.gz 2>/dev/null
+pkg uninstall -y openjdk-17 wget unzip 2>/dev/null || true
+''',
       installScript: '''
 pkg update -y && pkg install -y openjdk-17 wget unzip
-mkdir -p \$ANDROID_HOME/cmdline-tools
+# Use fallback if ANDROID_HOME is not set in this shell session
+export ANDROID_HOME="\${ANDROID_HOME:-\$PREFIX/opt/android-sdk}"
+mkdir -p "\$ANDROID_HOME/cmdline-tools"
 wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
-unzip -q commandlinetools-linux-*.zip -d \$ANDROID_HOME/cmdline-tools
-mv \$ANDROID_HOME/cmdline-tools/cmdline-tools \$ANDROID_HOME/cmdline-tools/latest
+unzip -q commandlinetools-linux-*.zip -d "\$ANDROID_HOME/cmdline-tools"
+mv "\$ANDROID_HOME/cmdline-tools/cmdline-tools" "\$ANDROID_HOME/cmdline-tools/latest"
 rm commandlinetools-linux-*.zip
+# Add tools to PATH for this session
+export PATH="\$ANDROID_HOME/cmdline-tools/latest/bin:\$PATH"
 yes | sdkmanager --licenses
 sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+# Symlink into \$PREFIX/bin so the IDE process can find them
+ln -sf "\$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "\$PREFIX/bin/sdkmanager"
+ln -sf "\$ANDROID_HOME/platform-tools/adb" "\$PREFIX/bin/adb" 2>/dev/null || true
+echo 'export PATH="\$PATH:\$ANDROID_HOME/cmdline-tools/latest/bin:\$ANDROID_HOME/platform-tools"' >> ~/.bashrc
+# ── java-language-server (Java/Kotlin LSP) ─────────────────────────────────
+# Lightweight single-jar LSP by georgewfraser.  Much more reliable on Android
+# than jdtls or kotlin-language-server: no OSGi, starts in under 10 s.
+mkdir -p "\$PREFIX/opt/java-language-server"
+wget -q https://github.com/georgewfraser/java-language-server/releases/latest/download/java-language-server.tar.gz
+tar xzf java-language-server.tar.gz -C "\$PREFIX/opt/java-language-server"
+rm java-language-server.tar.gz
+# Verify the jar landed where the IDE expects it
+ls "\$PREFIX/opt/java-language-server/dist/lang.jar"
 ''',
       buildCommand: './gradlew assembleDebug',
       sdkConfig: SdkConfig(
@@ -112,6 +154,7 @@ sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
       type: SdkType.reactNative,
       verifyBinary: 'node',
       verifyCmd: 'node --version',
+      cleanupScript: 'pkg uninstall -y nodejs-lts 2>/dev/null || true',
       installScript: 'apt-get update -y && apt-get install -y nodejs-lts',
       buildCommand: 'npx expo export',
       sdkConfig: SdkConfig(
@@ -126,6 +169,7 @@ sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
       type: SdkType.nodejs,
       verifyBinary: 'node',
       verifyCmd: 'node --version',
+      cleanupScript: 'pkg uninstall -y nodejs-lts 2>/dev/null || true',
       installScript: 'pkg update -y && pkg install -y nodejs-lts',
       buildCommand: 'npm run build',
       sdkConfig: SdkConfig(
@@ -140,6 +184,7 @@ sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
       type: SdkType.python,
       verifyBinary: 'python3',
       verifyCmd: 'python3 --version',
+      cleanupScript: 'pkg uninstall -y python 2>/dev/null || true',
       installScript: 'pkg update -y && pkg install -y python',
       buildCommand: 'python3 main.py',
       sdkConfig: SdkConfig(
@@ -154,6 +199,7 @@ sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
       type: SdkType.swift,
       verifyBinary: 'swift',
       verifyCmd: 'swift --version',
+      cleanupScript: 'pkg uninstall -y swift 2>/dev/null || true',
       installScript: 'pkg update -y && pkg install -y swift',
       buildCommand: 'swift build',
       sdkConfig: SdkConfig(
@@ -166,6 +212,7 @@ sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
       type: SdkType.go,
       verifyBinary: 'go',
       verifyCmd: 'go version',
+      cleanupScript: 'pkg uninstall -y golang 2>/dev/null || true',
       installScript: 'pkg update -y && pkg install -y golang',
       buildCommand: 'go build -o app .',
       sdkConfig: SdkConfig(

@@ -15,6 +15,7 @@ class _EditorTabBarState extends State<EditorTabBar>
     with TickerProviderStateMixin {
   late TabController _ctrl;
   bool _closeHandled = false;
+  Offset? _lastTapPosition;
 
   @override
   void initState() {
@@ -43,13 +44,15 @@ class _EditorTabBarState extends State<EditorTabBar>
   void _showFileMenu(BuildContext ctx, EditorProvider editor, int globalIndex) {
     final box = context.findRenderObject() as RenderBox?;
     if (box == null) return;
-    final origin = box.localToGlobal(Offset.zero);
-    final size = box.size;
+    final tabBarOrigin = box.localToGlobal(Offset.zero);
+    final tabBarBottom = tabBarOrigin.dy + box.size.height;
+    // Use the tap X position so the menu appears below the tapped tab.
+    // Fall back to tab bar left if no tap was recorded.
+    final tapX = _lastTapPosition?.dx ?? (tabBarOrigin.dx + 8);
     showMenu<String>(
       context: ctx,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      position: RelativeRect.fromLTRB(
-          origin.dx + 8, origin.dy + size.height, origin.dx + size.width, 0),
+      position: RelativeRect.fromLTRB(tapX - 8, tabBarBottom, tapX + 200, 0),
       items: [
         PopupMenuItem(value: 'close', height: 40, child: _MenuItem(icon: Icons.close, label: 'Close')),
         PopupMenuItem(value: 'others', height: 40, child: _MenuItem(icon: Icons.tab_unselected, label: 'Close others')),
@@ -69,13 +72,13 @@ class _EditorTabBarState extends State<EditorTabBar>
   void _showTerminalMenu(BuildContext ctx, TerminalProvider term, String sessionId) {
     final box = context.findRenderObject() as RenderBox?;
     if (box == null) return;
-    final origin = box.localToGlobal(Offset.zero);
-    final size = box.size;
+    final tabBarOrigin = box.localToGlobal(Offset.zero);
+    final tabBarBottom = tabBarOrigin.dy + box.size.height;
+    final tapX = _lastTapPosition?.dx ?? (tabBarOrigin.dx + 8);
     showMenu<String>(
       context: ctx,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      position: RelativeRect.fromLTRB(
-          origin.dx + 8, origin.dy + size.height, origin.dx + size.width, 0),
+      position: RelativeRect.fromLTRB(tapX - 8, tabBarBottom, tapX + 200, 0),
       items: [
         PopupMenuItem(value: 'panel', height: 40, child: _MenuItem(icon: Icons.vertical_align_bottom_rounded, label: 'Move to panel')),
         PopupMenuItem(value: 'close', height: 40, child: _MenuItem(icon: Icons.close, label: 'Close terminal')),
@@ -137,7 +140,9 @@ class _EditorTabBarState extends State<EditorTabBar>
               color: isDragOver
                   ? cs.primaryContainer.withValues(alpha: 0.3)
                   : cs.surface,
-              child: TabBar(
+              child: Listener(
+                onPointerDown: (e) => _lastTapPosition = e.position,
+                child: TabBar(
                 controller: _ctrl,
                 isScrollable: true,
                 tabAlignment: TabAlignment.start,
@@ -230,6 +235,7 @@ class _EditorTabBarState extends State<EditorTabBar>
                   ],
                 ],
               ),
+              ), // Listener
             );
           },
         );

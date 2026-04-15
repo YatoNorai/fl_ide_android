@@ -37,11 +37,27 @@ class SdkManagerProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Install an SDK by running its install script via a PTY session
-  /// Returns the bash command to run (caller passes it to TerminalProvider)
+  /// Returns the shell command to install [type].
+  ///
+  /// The script is wrapped with `set -e` + a `trap … ERR` that automatically
+  /// runs the SDK's [SdkDefinition.cleanupScript] on failure so that any
+  /// partially-installed files are removed before the user retries.
   String installCommand(SdkType type) {
     final def = SdkDefinition.forType(type);
-    return def.installScript;
+    final cleanup = def.cleanupScript.trim();
+    if (cleanup.isEmpty) return def.installScript;
+    return '''
+set -e
+_sdk_install_cleanup() {
+  echo ""
+  echo "❌ Instalação falhou. Removendo arquivos parciais com rm -rf..."
+$cleanup
+  echo "🗑️  Limpeza concluída. Você pode tentar novamente."
+}
+trap _sdk_install_cleanup ERR
+
+${def.installScript}
+''';
   }
 
   void markInstalled(SdkType type, {String? version}) {

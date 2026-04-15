@@ -5,6 +5,7 @@ import 'package:terminal_pkg/terminal_pkg.dart';
 import '../models/sdk_definition.dart';
 import '../providers/sdk_manager_provider.dart';
 
+
 class SdkManagerScreen extends StatelessWidget {
   const SdkManagerScreen({super.key});
 
@@ -169,7 +170,9 @@ class _InstallSheetState extends State<_InstallSheet> {
       final session = await _termProvider.createSession(
         label: 'Installing ${widget.def.type.displayName}',
       );
-      session.writeCommand(widget.def.installScript);
+      // Use the provider's installCommand so the cleanup trap is included.
+      final cmd = SdkManagerProvider().installCommand(widget.def.type);
+      session.writeCommand(cmd);
     });
   }
 

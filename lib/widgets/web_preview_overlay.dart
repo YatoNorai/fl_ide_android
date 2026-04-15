@@ -7,6 +7,82 @@ import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:provider/provider.dart';
 
+// ── Snap coordinator ──────────────────────────────────────────────────────────
+// Shared between the WebPreview bubble and the DAP execution overlay.
+// Prevents the two docked overlays from visually overlapping when both are
+// snapped to the same screen edge.
+
+class SnapCoordinator extends ChangeNotifier {
+  static const int slotWeb = 0;
+  static const int slotDap = 1;
+
+  final Map<int, _SnapSlot> _slots = {};
+
+  void update(int slot,
+      {required bool active,
+      required bool left,
+      required double y,
+      required double h}) {
+    final next = _SnapSlot(active: active, left: left, y: y, h: h);
+    if (_slots[slot] == next) return;
+    _slots[slot] = next;
+    notifyListeners();
+  }
+
+  void clear(int slot) {
+    if (_slots.remove(slot) != null) notifyListeners();
+  }
+
+  /// Returns a Y coordinate for [mySlot] that avoids overlap with the other
+  /// slot when both are docked to the same edge.
+  double resolveY(
+      int mySlot, bool onLeft, double wantY, double ownH, double screenH) {
+    for (final entry in _slots.entries) {
+      if (entry.key == mySlot) continue;
+      final other = entry.value;
+      if (!other.active || other.left != onLeft) continue;
+
+      final otherTop    = other.y;
+      final otherBottom = other.y + other.h;
+      final ownBottom   = wantY + ownH;
+
+      if (wantY < otherBottom && ownBottom > otherTop) {
+        // Overlapping — push self to the side that has more room.
+        if (wantY <= otherTop) {
+          return (otherTop - ownH - 4).clamp(0.0, screenH - ownH);
+        } else {
+          return (otherBottom + 4).clamp(0.0, screenH - ownH);
+        }
+      }
+    }
+    return wantY.clamp(0.0, screenH - ownH);
+  }
+}
+
+class _SnapSlot {
+  final bool active;
+  final bool left;
+  final double y;
+  final double h;
+
+  const _SnapSlot(
+      {required this.active,
+      required this.left,
+      required this.y,
+      required this.h});
+
+  @override
+  bool operator ==(Object other) =>
+      other is _SnapSlot &&
+      other.active == active &&
+      other.left == left &&
+      other.y == y &&
+      other.h == h;
+
+  @override
+  int get hashCode => Object.hash(active, left, y, h);
+}
+
 // ── Network preset ────────────────────────────────────────────────────────────
 
 enum _NetMode {
@@ -64,12 +140,16 @@ class WebPreviewOverlay extends StatefulWidget {
   /// A context that has a Navigator ancestor — needed for showModalBottomSheet
   /// because OverlayEntry builders run above the app's Navigator.
   final BuildContext navigatorContext;
+  /// Optional shared coordinator that prevents this bubble from overlapping
+  /// the DAP execution overlay when both are docked to the same edge.
+  final SnapCoordinator? coordinator;
 
   const WebPreviewOverlay({
     super.key,
     required this.url,
     required this.onClose,
     required this.navigatorContext,
+    this.coordinator,
   });
 
   @override
@@ -85,6 +165,17 @@ class _WebPreviewOverlayState extends State<WebPreviewOverlay> {
   /// Whether the panel is collapsed to a floating bubble.
   bool _minimized = false;
   Offset _bubblePos = const Offset(16, 120);
+
+  /// Edge-snap state for the minimized bubble.
+  bool _bubbleSnapped    = false;
+  bool _bubbleSnapLeft   = true;
+  /// Cumulative drag distance away from the snapped edge (resets on reversal).
+  double _dragAwayAccum  = 0.0;
+  static const double _kBubbleSnapThreshold = 64.0;
+  static const double _kBubbleSize          = 56.0;
+  static const double _kBubbleTabW          = 36.0; // visible width when snapped
+  /// How far the user must drag back into the screen to un-snap.
+  static const double _kUnSnapThreshold     = 28.0;
 
   InAppWebViewController? _ctrl;
   bool _isLoading = true;
@@ -105,7 +196,17 @@ class _WebPreviewOverlayState extends State<WebPreviewOverlay> {
   void initState() {
     super.initState();
     _setupServiceWorker();
+    widget.coordinator?.addListener(_onCoordChanged);
   }
+
+  @override
+  void dispose() {
+    widget.coordinator?.removeListener(_onCoordChanged);
+    widget.coordinator?.clear(SnapCoordinator.slotWeb);
+    super.dispose();
+  }
+
+  void _onCoordChanged() => setState(() {});
 
   Future<void> _setupServiceWorker() async {
     if (defaultTargetPlatform != TargetPlatform.android) return;
@@ -119,7 +220,69 @@ class _WebPreviewOverlayState extends State<WebPreviewOverlay> {
 
   // ── Actions ─────────────────────────────────────────────────────────────────
 
-  void _toggleMinimize() => setState(() => _minimized = !_minimized);
+  void _toggleMinimize() {
+    setState(() {
+      _minimized = !_minimized;
+      _bubbleSnapped = false; // always start un-snapped when (re-)minimizing
+      _dragAwayAccum = 0;
+    });
+    if (!_minimized) widget.coordinator?.clear(SnapCoordinator.slotWeb);
+  }
+
+  // ── Bubble edge-snap helpers ─────────────────────────────────────────────────
+
+  void _onBubblePanUpdate(DragUpdateDetails d) {
+    final size = MediaQuery.of(context).size;
+    if (_bubbleSnapped) {
+      // While snapped: allow Y-axis sliding along the edge.
+      final newY = (_bubblePos.dy + d.delta.dy).clamp(0.0, size.height - _kBubbleSize);
+      setState(() => _bubblePos = Offset(_bubblePos.dx, newY));
+      // Notify coordinator of new desired Y so the other overlay adjusts.
+      widget.coordinator?.update(SnapCoordinator.slotWeb,
+          active: true, left: _bubbleSnapLeft, y: newY, h: _kBubbleSize);
+
+      // Accumulate drag away from the edge.  Reversing direction resets the
+      // counter so only a deliberate continuous drag un-snaps the bubble.
+      final awayDelta = _bubbleSnapLeft ? d.delta.dx : -d.delta.dx;
+      if (awayDelta > 0) {
+        _dragAwayAccum += awayDelta;
+      } else {
+        _dragAwayAccum = 0;
+      }
+      if (_dragAwayAccum >= _kUnSnapThreshold) {
+        setState(() {
+          _bubbleSnapped = false;
+          _dragAwayAccum = 0;
+          _bubblePos = Offset(
+            _bubbleSnapLeft ? _kBubbleTabW + 8 : size.width - _kBubbleSize - 8,
+            _bubblePos.dy,
+          );
+        });
+        widget.coordinator?.clear(SnapCoordinator.slotWeb);
+      }
+    } else {
+      final nx = (_bubblePos.dx + d.delta.dx).clamp(0.0, size.width  - _kBubbleSize);
+      final ny = (_bubblePos.dy + d.delta.dy).clamp(0.0, size.height - _kBubbleSize);
+      setState(() => _bubblePos = Offset(nx, ny));
+    }
+  }
+
+  void _onBubblePanEnd(DragEndDetails d) {
+    if (_bubbleSnapped) return;
+    final size    = MediaQuery.of(context).size;
+    final velX    = d.velocity.pixelsPerSecond.dx;
+    final nearLeft  = _bubblePos.dx < _kBubbleSnapThreshold || velX < -500;
+    final nearRight = _bubblePos.dx + _kBubbleSize > size.width - _kBubbleSnapThreshold || velX > 500;
+    if (nearLeft && !nearRight) {
+      setState(() { _bubbleSnapped = true; _bubbleSnapLeft = true; _dragAwayAccum = 0; });
+      widget.coordinator?.update(SnapCoordinator.slotWeb,
+          active: true, left: true, y: _bubblePos.dy, h: _kBubbleSize);
+    } else if (nearRight) {
+      setState(() { _bubbleSnapped = true; _bubbleSnapLeft = false; _dragAwayAccum = 0; });
+      widget.coordinator?.update(SnapCoordinator.slotWeb,
+          active: true, left: false, y: _bubblePos.dy, h: _kBubbleSize);
+    }
+  }
 
   void _reload() {
     setState(() {
@@ -210,20 +373,90 @@ class _WebPreviewOverlayState extends State<WebPreviewOverlay> {
 
     // ── Minimized bubble ───────────────────────────────────────────────────
     if (_minimized) {
+      // ── Snapped to edge: show a slim tab protruding from the screen edge ──
+      if (_bubbleSnapped) {
+        const tabH    = _kBubbleSize;
+        const tabW    = _kBubbleTabW;
+        final radius  = const Radius.circular(12);
+        final br = _bubbleSnapLeft
+            ? BorderRadius.only(topRight: radius, bottomRight: radius)
+            : BorderRadius.only(topLeft: radius, bottomLeft: radius);
+        final size = MediaQuery.of(context).size;
+        // Use coordinator to avoid overlap with the DAP overlay.
+        final displayY = widget.coordinator?.resolveY(
+              SnapCoordinator.slotWeb, _bubbleSnapLeft,
+              _bubblePos.dy, tabH, size.height) ??
+            _bubblePos.dy.clamp(0.0, size.height - tabH);
+
+        return Positioned(
+          left:  _bubbleSnapLeft ? 0 : null,
+          right: _bubbleSnapLeft ? null : 0,
+          top: displayY,
+          child: GestureDetector(
+            onPanUpdate: _onBubblePanUpdate,
+            onPanEnd:    _onBubblePanEnd,
+            // Tap on the docked tab: un-snap back to free-floating bubble.
+            onTap: () {
+              setState(() {
+                _bubbleSnapped = false;
+                _dragAwayAccum = 0;
+                _bubblePos = Offset(
+                  _bubbleSnapLeft ? tabW + 8 : size.width - _kBubbleSize - 8,
+                  _bubblePos.dy,
+                );
+              });
+              widget.coordinator?.clear(SnapCoordinator.slotWeb);
+            },
+            child: Material(
+              elevation: 8,
+              borderRadius: br,
+              color: cs.primaryContainer,
+              child: Container(
+                width: tabW,
+                height: tabH,
+                decoration: BoxDecoration(
+                  borderRadius: br,
+                  border: Border.all(
+                    color: cs.primary.withValues(alpha: 0.35),
+                    width: 1.5,
+                  ),
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.phone_android_rounded, size: 18, color: cs.primary),
+                    if (_isLoading) ...[
+                      const SizedBox(height: 4),
+                      SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 1.5, color: cs.primary),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      }
+
+      // ── Free-floating bubble ───────────────────────────────────────────────
       return Positioned(
         left: _bubblePos.dx,
         top: _bubblePos.dy,
         child: GestureDetector(
-          onPanUpdate: (d) =>
-              setState(() => _bubblePos += d.delta),
+          onPanUpdate: _onBubblePanUpdate,
+          onPanEnd:    _onBubblePanEnd,
           onTap: _toggleMinimize,
           child: Material(
             elevation: 8,
             color: cs.primaryContainer,
             shape: const CircleBorder(),
             child: SizedBox(
-              width: 56,
-              height: 56,
+              width: _kBubbleSize,
+              height: _kBubbleSize,
               child: Stack(
                 alignment: Alignment.center,
                 children: [

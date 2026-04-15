@@ -12,6 +12,8 @@ import 'package:ssh_pkg/ssh_pkg.dart';
 
 import '../l10n/app_strings.dart';
 import '../main.dart' show AppBootData;
+import '../widgets/settings_page_widgets.dart' show settingsFadeRoute;
+import 'extensions_screen.dart';
 import 'settings_screen.dart';
 import 'standalone_terminal_screen.dart';
 
@@ -278,6 +280,9 @@ class _HomeScreenState extends State<HomeScreen> {
             remoteSdkNames: ssh.isConnected ? ssh.detectedSdks : const [],
             isSshDetecting: ssh.isConnected && ssh.isDetectingSdks,
             remoteIsWindows: ssh.isConnected && ssh.remoteIsWindows,
+            onOpenSdkSettings: () => Navigator.of(context).push(
+              settingsFadeRoute(const ExtensionsSettingsPage(initialTab: 1)),
+            ),
             sshTerminalSetup: ssh.isConnected
                 ? (session) async {
                     final sshSession = await ssh.startShell();

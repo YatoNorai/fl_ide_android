@@ -1,7 +1,9 @@
-import 'package:core/core.dart';
+import 'dart:io';
+
 import 'package:dap_client/dap_client.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:lsp_client/lsp_client.dart';
 import 'package:provider/provider.dart';
 import 'package:quill_code/quill_code.dart';
@@ -19,6 +21,10 @@ class EditorArea extends StatelessWidget {
   final bool showTabBar;
   final bool forBottomPanel;
 
+  /// Called when the user taps the diagnostic count in the status bar.
+  /// Wired by the host screen to open the Problems panel.
+  final VoidCallback? onDiagnosticTap;
+
   const EditorArea({
     super.key,
     this.editorTheme,
@@ -28,6 +34,7 @@ class EditorArea extends StatelessWidget {
     this.fontFamily,
     this.showTabBar = true,
     this.forBottomPanel = false,
+    this.onDiagnosticTap,
   });
 
   @override
@@ -54,6 +61,7 @@ class EditorArea extends StatelessWidget {
                       fontSize: fontSize,
                       fontFamily: fontFamily,
                       forBottomPanel: true,
+                      onDiagnosticTap: onDiagnosticTap,
                     )
                   : _MainContent(
                       file: active,
@@ -62,6 +70,7 @@ class EditorArea extends StatelessWidget {
                       showSymbolBar: showSymbolBar,
                       fontSize: fontSize,
                       fontFamily: fontFamily,
+                      onDiagnosticTap: onDiagnosticTap,
                     ),
             ),
           ],
@@ -80,6 +89,7 @@ class _MainContent extends StatelessWidget {
   final bool showSymbolBar;
   final double? fontSize;
   final String? fontFamily;
+  final VoidCallback? onDiagnosticTap;
 
   const _MainContent({
     required this.file,
@@ -88,6 +98,7 @@ class _MainContent extends StatelessWidget {
     this.showSymbolBar = true,
     this.fontSize,
     this.fontFamily,
+    this.onDiagnosticTap,
   });
 
   @override
@@ -110,6 +121,7 @@ class _MainContent extends StatelessWidget {
           fontSize: fontSize,
           fontFamily: fontFamily,
           forBottomPanel: false,
+          onDiagnosticTap: onDiagnosticTap,
         );
       },
     );
@@ -124,6 +136,7 @@ class _EditorContent extends StatelessWidget {
   final double? fontSize;
   final String? fontFamily;
   final bool forBottomPanel;
+  final VoidCallback? onDiagnosticTap;
 
   const _EditorContent({
     required this.file,
@@ -133,12 +146,14 @@ class _EditorContent extends StatelessWidget {
     this.showSymbolBar = true,
     this.fontSize,
     this.fontFamily,
+    this.onDiagnosticTap,
   });
 
   @override
   Widget build(BuildContext context) {
     final active = file;
     if (active == null) return const _WelcomePane();
+    if (active.isImage)  return _ImageViewer(file: active);
     return _ActiveEditor(
       file: active,
       editorTheme: editorTheme,
@@ -147,6 +162,7 @@ class _EditorContent extends StatelessWidget {
       fontSize: fontSize,
       fontFamily: fontFamily,
       forBottomPanel: forBottomPanel,
+      onDiagnosticTap: onDiagnosticTap,
     );
   }
 }
@@ -160,6 +176,7 @@ class _ActiveEditor extends StatefulWidget {
   final double? fontSize;
   final String? fontFamily;
   final bool forBottomPanel;
+  final VoidCallback? onDiagnosticTap;
 
   const _ActiveEditor({
     required this.file,
@@ -169,6 +186,7 @@ class _ActiveEditor extends StatefulWidget {
     this.fontSize,
     this.fontFamily,
     this.forBottomPanel = false,
+    this.onDiagnosticTap,
   });
 
   @override
@@ -225,7 +243,9 @@ class _ActiveEditorState extends State<_ActiveEditor> {
       final old = _ownedLspClient;
       _ownedLspClient = null;
       old?.shutdown();
+      _lspProvider?.notifyFileClosedOnLsp(Uri.file(widget.file.path).toString());
       widget.file.controller?.detachLsp();
+      _lspProvider?.detachClient(); // also clears _activelyOpenUris
       setState(() {});
       return;
     }
@@ -299,12 +319,19 @@ class _ActiveEditorState extends State<_ActiveEditor> {
     }
 
     _ownedLspClient = client;
+    // Wire project-wide diagnostics listener so the Problems panel shows
+    // issues from every file the server analyses, not just the open one.
+    if (mounted) context.read<LspProvider>().attachClient(client);
     final langId = cfg.languageId;
+    final fileUri = Uri.file(file.path).toString();
     await file.controller?.attachLsp(
       client,
-      uri:        Uri.file(file.path).toString(),
+      uri:        fileUri,
       languageId: langId,
     );
+    // Register this URI as actively open so LspProvider knows empty diagnostic
+    // pushes for it mean "genuinely clean" (not just a didClose side-effect).
+    if (mounted) context.read<LspProvider>().notifyFileOpenedOnLsp(fileUri);
     if (mounted) setState(() {});
   }
 
@@ -320,14 +347,21 @@ class _ActiveEditorState extends State<_ActiveEditor> {
       // a second process. Send didClose for the old URI, didOpen for the new.
       final client = _ownedLspClient;
       if (client != null && _cachedLspConfig != null) {
-        final langId = _cachedLspConfig!.languageId;
-        final newUri = Uri.file(widget.file.path).toString();
-        old.file.controller?.detachLsp();
+        final langId  = _cachedLspConfig!.languageId;
+        final oldUri  = Uri.file(old.file.path).toString();
+        final newUri  = Uri.file(widget.file.path).toString();
+        // Tab switch — do NOT send didClose.  The server keeps the file open
+        // and continues pushing diagnostics for it, so the project-wide
+        // Problems panel retains all files' issues regardless of which tab
+        // is currently active.
+        if (mounted) context.read<LspProvider>().notifyFileClosedOnLsp(oldUri);
+        old.file.controller?.detachLsp(sendClose: false);
         widget.file.controller?.attachLsp(
           client,
           uri:        newUri,
           languageId: langId,
         );
+        if (mounted) context.read<LspProvider>().notifyFileOpenedOnLsp(newUri);
       }
     }
   }
@@ -427,17 +461,34 @@ class _ActiveEditorState extends State<_ActiveEditor> {
               // scrolling repaints stay within this boundary and don't bubble
               // up to parent widgets (file tree, status bar, terminal, etc.).
               child: RepaintBoundary(
-                child: QuillCodeEditor(
-                  controller: ctrl,
-                  onChanged: (_) => context.read<EditorProvider>().markDirty(),
-                  lspClient: _ownedLspClient,
-                  fileUri: Uri.file(widget.file.path).toString(),
-                  theme: effectiveTheme,
-                  showSymbolBar: widget.showSymbolBar,
+                child: Consumer<LspProvider>(
+                  builder: (context, lsp, _) {
+                    // Compute project-wide totals from LspProvider so the
+                    // status-bar indicator never disappears on file switch.
+                    int pErrors = 0, pWarnings = 0, pInfos = 0;
+                    for (final diags in lsp.projectDiagnostics.values) {
+                      for (final d in diags) {
+                        if (d.severity == DiagnosticSeverity.error)        pErrors++;
+                        else if (d.severity == DiagnosticSeverity.warning) pWarnings++;
+                        else                                               pInfos++;
+                      }
+                    }
+                    return QuillCodeEditor(
+                      controller: ctrl,
+                      onChanged: (_) => context.read<EditorProvider>().markDirty(),
+                      lspClient: _ownedLspClient,
+                      fileUri: Uri.file(widget.file.path).toString(),
+                      theme: effectiveTheme,
+                      showSymbolBar: widget.showSymbolBar,
+                      onDiagnosticTap: widget.onDiagnosticTap,
+                      projectErrors:   pErrors   > 0 ? pErrors   : null,
+                      projectWarnings: pWarnings > 0 ? pWarnings : null,
+                      projectInfos:    pInfos    > 0 ? pInfos    : null,
+                    );
+                  },
                 ),
               ),
             ),
-            _DiagnosticsBar(controller: ctrl),
           ],
         ),
       ),
@@ -445,56 +496,54 @@ class _ActiveEditorState extends State<_ActiveEditor> {
   }
 }
 
-class _DiagnosticsBar extends StatelessWidget {
-  final QuillCodeController controller;
 
-  const _DiagnosticsBar({required this.controller});
+// ── Image viewer tab ─────────────────────────────────────────────────────────
+
+class _ImageViewer extends StatelessWidget {
+  final OpenFile file;
+  const _ImageViewer({required this.file});
 
   @override
   Widget build(BuildContext context) {
     final cs  = Theme.of(context).colorScheme;
-    final ide = Theme.of(context).extension<IdeColors>() ?? IdeColors.light;
-    return ListenableBuilder(
-      listenable: controller,
-      builder: (context, _) {
-        final all = controller.diagnostics.all;
-        if (all.isEmpty) return const SizedBox.shrink();
+    final ext = file.extension.toLowerCase();
+    final f   = File(file.path);
 
-        final errors   = all.where((d) => d.severity == DiagnosticSeverity.error).length;
-        final warnings = all.where((d) => d.severity == DiagnosticSeverity.warning).length;
-        final infos    = all.where((d) => d.severity == DiagnosticSeverity.info).length;
-
-        return Container(
-          height: 24,
-          color: Theme.of(context).scaffoldBackgroundColor,
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Row(
-            children: [
-              if (errors > 0) ...[
-                Icon(Icons.error_outline, size: 14, color: cs.error),
-                const SizedBox(width: 3),
-                Text('$errors', style: TextStyle(color: cs.error, fontSize: 11, fontWeight: FontWeight.w600)),
-                const SizedBox(width: 10),
-              ],
-              if (warnings > 0) ...[
-                Icon(Icons.warning_amber_outlined, size: 14, color: ide.warning),
-                const SizedBox(width: 3),
-                Text('$warnings', style: TextStyle(color: ide.warning, fontSize: 11, fontWeight: FontWeight.w600)),
-                const SizedBox(width: 10),
-              ],
-              if (infos > 0) ...[
-                Icon(Icons.info_outline, size: 14, color: cs.primary),
-                const SizedBox(width: 3),
-                Text('$infos', style: TextStyle(color: cs.primary, fontSize: 11)),
-              ],
-            ],
-          ),
+    Widget image;
+    if (ext == 'svg') {
+      image = SvgPicture.file(f, fit: BoxFit.contain);
+    } else {
+      image = Image.file(f, fit: BoxFit.contain, errorBuilder: (_, __, ___) {
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.broken_image_outlined,
+                size: 48, color: cs.onSurfaceVariant),
+            const SizedBox(height: 8),
+            Text('Não foi possível carregar a imagem',
+                style: TextStyle(color: cs.onSurfaceVariant, fontSize: 13)),
+          ],
         );
-      },
+      });
+    }
+
+    return ColoredBox(
+      color: cs.surface,
+      child: Center(
+        child: InteractiveViewer(
+          minScale: 0.1,
+          maxScale: 10,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: image,
+          ),
+        ),
+      ),
     );
   }
 }
 
+// ── Welcome pane ─────────────────────────────────────────────────────────────
 
 class _WelcomePane extends StatelessWidget {
   const _WelcomePane();

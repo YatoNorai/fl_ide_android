@@ -8,13 +8,19 @@ import 'package:quill_code/quill_code.dart';
 /// time the LSP pushes a diagnostics notification. The callback is called once
 /// and cleared so it doesn't accumulate closures.
 class LspAwareController extends QuillCodeController {
+  /// Fires once the first time the LSP pushes a diagnostics notification.
   VoidCallback? onDiagnosticsReceived;
 
+  /// Fires on every [setDiagnostics] call — used to keep the persistent cache
+  /// in [EditorProvider] up to date even after a file is closed.
+  void Function(List<DiagnosticRegion> regions)? onDiagnosticsChanged;
+
   LspAwareController({required super.text, super.language});
-  
+
   @override
   void setDiagnostics(List<DiagnosticRegion> regions) {
     super.setDiagnostics(regions);
+    onDiagnosticsChanged?.call(regions);
     final cb = onDiagnosticsReceived;
     if (cb != null) {
       onDiagnosticsReceived = null; // fire once
@@ -41,6 +47,13 @@ class OpenFile {
     final dot = name.lastIndexOf('.');
     return dot == -1 ? '' : name.substring(dot + 1);
   }
+
+  static const _imageExts = {
+    'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg',
+  };
+
+  /// True when this file should be shown as an image preview (no text editor).
+  bool get isImage => _imageExts.contains(extension.toLowerCase());
 }
 
 class EditorProvider extends ChangeNotifier {
@@ -50,6 +63,23 @@ class EditorProvider extends ChangeNotifier {
   int _lastBottomIdx = -1;
   FileNode? _rootNode;
   int _treeVersion = 0;
+
+  /// Persistent cache of diagnostics keyed by file path.
+  /// Updated whenever [setDiagnostics] is called on any open controller, so
+  /// diagnostics are retained even after the file tab is closed.
+  final Map<String, List<DiagnosticRegion>> _diagnosticsCache = {};
+
+  Map<String, List<DiagnosticRegion>> get diagnosticsCache =>
+      Map.unmodifiable(_diagnosticsCache);
+
+  void _updateDiagnosticsCache(String filePath, List<DiagnosticRegion> regions) {
+    if (regions.isEmpty) {
+      _diagnosticsCache.remove(filePath);
+    } else {
+      _diagnosticsCache[filePath] = List.unmodifiable(regions);
+    }
+    notifyListeners();
+  }
   /// Path of the most recently saved file. Updated on every saveActiveFile call.
   String? lastSavedPath;
   /// Set when the project lives on a remote machine; used for tree expand/refresh.
@@ -116,10 +146,44 @@ class EditorProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> openFile(String filePath) async {
+  Future<void> openFile(String filePath, {bool bringToFront = false}) async {
     final existing = _openFiles.indexWhere((f) => f.path == filePath);
     if (existing != -1) {
+      // If bringToFront is requested and the file is in the top panel,
+      // move it to the first position among top-panel files.
+      if (bringToFront && !_openFiles[existing].inBottomPanel) {
+        final file = _openFiles[existing];
+        final firstTopIdx = _openFiles.indexWhere((f) => !f.inBottomPanel);
+        if (existing != firstTopIdx && firstTopIdx >= 0) {
+          _openFiles.removeAt(existing);
+          _openFiles.insert(firstTopIdx, file);
+          _activeIndex = firstTopIdx;
+          _lastTopIdx = firstTopIdx;
+          notifyListeners();
+          return;
+        }
+      }
       _activeIndex = existing;
+      // Also update the per-panel tracking index so EditorArea (which drives
+      // its display from topActiveFile / bottomActiveFile, not _activeIndex)
+      // actually switches to this file.
+      if (_openFiles[existing].inBottomPanel) {
+        _lastBottomIdx = existing;
+      } else {
+        _lastTopIdx = existing;
+      }
+      notifyListeners();
+      return;
+    }
+
+    final name = filePath.split('/').last.split('\\').last;
+    final openFile = OpenFile(path: filePath, name: name);
+
+    // Image files: no text controller needed — editor_area shows a viewer.
+    if (openFile.isImage) {
+      _openFiles.add(openFile);
+      _activeIndex = _openFiles.length - 1;
+      _lastTopIdx  = _activeIndex;
       notifyListeners();
       return;
     }
@@ -141,13 +205,18 @@ class EditorProvider extends ChangeNotifier {
       }
     }
 
-    final name = filePath.split('/').last.split('\\').last;
-    final openFile = OpenFile(path: filePath, name: name);
-
-    openFile.controller = LspAwareController(
+    final ctrl = LspAwareController(
       text: content,
       language: _detectLanguage(openFile.extension),
     );
+    ctrl.onDiagnosticsChanged =
+        (regions) => _updateDiagnosticsCache(filePath, regions);
+    // Restore any cached diagnostics so the gutter shows immediately on reopen.
+    final cached = _diagnosticsCache[filePath];
+    if (cached != null && cached.isNotEmpty) {
+      ctrl.setDiagnostics(cached);
+    }
+    openFile.controller = ctrl;
 
     _openFiles.add(openFile);
     _activeIndex = _openFiles.length - 1;
@@ -254,6 +323,8 @@ class EditorProvider extends ChangeNotifier {
 
   void closeFile(int index) {
     if (index < 0 || index >= _openFiles.length) return;
+    // Send didClose so the LSP server frees its per-document state.
+    _openFiles[index].controller?.detachLsp();
     _openFiles.removeAt(index);
     if (_activeIndex >= _openFiles.length) {
       _activeIndex = _openFiles.isEmpty ? -1 : _openFiles.length - 1;
@@ -266,6 +337,9 @@ class EditorProvider extends ChangeNotifier {
   void closeOthers(int index) {
     if (index < 0 || index >= _openFiles.length) return;
     final keep = _openFiles[index];
+    for (final f in _openFiles) {
+      if (f != keep) f.controller?.detachLsp();
+    }
     _openFiles.clear();
     _openFiles.add(keep);
     _activeIndex = 0;
@@ -273,6 +347,9 @@ class EditorProvider extends ChangeNotifier {
   }
 
   void closeAll() {
+    for (final f in _openFiles) {
+      f.controller?.detachLsp();
+    }
     _openFiles.clear();
     _activeIndex = -1;
     notifyListeners();

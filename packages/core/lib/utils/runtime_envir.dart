@@ -42,16 +42,19 @@ class RuntimeEnvir {
     return ''; // not found — callers should skip JAVA_HOME in this case
   }
 
-  // Eclipse JDT Language Server (Java LSP)
-  static String get jdtlsHome   => '$usrPath/opt/jdtls';
-  /// Launcher wrapper created by the Android SDK extension install step.
-  static String get jdtlsBin    => '$usrPath/bin/jdtls';
-  /// Per-user workspace storage required by jdtls (-data flag).
-  static String get jdtlsDataPath => '$homePath/.jdtls-data';
+  // java-language-server (georgewfraser) — single-jar Java/Android LSP.
+  // Installed to $PREFIX/opt/java-language-server/dist/lang.jar by the
+  // Android SDK extension.  Much lighter than jdtls/kotlin-language-server
+  // on Android: no OSGi, no multi-second JVM warm-up.
+  static String get javaLsHome => '$usrPath/opt/java-language-server';
+  static String get javaLsJar  => '$javaLsHome/dist/lang.jar';
 
-  // Kotlin Language Server
-  static String get kotlinLsHome => '$usrPath/opt/kotlin-language-server/server';
-  static String get kotlinLsBin  => '$usrPath/bin/kotlin-language-server';
+  // Kept for forward-compatibility; no longer used for LSP launch.
+  static String get jdtlsHome     => '$usrPath/opt/jdtls';
+  static String get jdtlsBin      => '$usrPath/bin/jdtls';
+  static String get jdtlsDataPath => '$homePath/.jdtls-data';
+  static String get kotlinLsHome  => '$usrPath/opt/kotlin-language-server/server';
+  static String get kotlinLsBin   => '$usrPath/bin/kotlin-language-server';
 
   // Go
   /// GOPATH root — where `go install` places binaries (go/bin/).

@@ -1243,7 +1243,7 @@ include(":app")''';
           : '';
       return """
 plugins {
-    id 'com.android.application' version '8.7.3' apply false$kt$compose
+    id 'com.android.application' version '8.3.2' apply false$kt$compose
 }""";
     }
     final kt = isKotlin
@@ -1255,7 +1255,7 @@ plugins {
         : '';
     return '''
 plugins {
-    id("com.android.application") version "8.7.3" apply false$kt$compose
+    id("com.android.application") version "8.3.2" apply false$kt$compose
 }''';
   }
 
@@ -1494,7 +1494,7 @@ class $className : ComponentActivity() {
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize(),
-                        color = MaterialTheme.colorScheme.background) {
+                        color = MaterialTheme.colorScheme.surface) {
                     Greeting("Android")
                 }
             }
