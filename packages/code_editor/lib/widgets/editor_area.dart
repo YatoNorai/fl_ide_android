@@ -1,9 +1,7 @@
-import 'dart:io';
-
+import 'package:core/core.dart';
 import 'package:dap_client/dap_client.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:lsp_client/lsp_client.dart';
 import 'package:provider/provider.dart';
 import 'package:quill_code/quill_code.dart';
@@ -153,7 +151,6 @@ class _EditorContent extends StatelessWidget {
   Widget build(BuildContext context) {
     final active = file;
     if (active == null) return const _WelcomePane();
-    if (active.isImage)  return _ImageViewer(file: active);
     return _ActiveEditor(
       file: active,
       editorTheme: editorTheme,
@@ -461,31 +458,16 @@ class _ActiveEditorState extends State<_ActiveEditor> {
               // scrolling repaints stay within this boundary and don't bubble
               // up to parent widgets (file tree, status bar, terminal, etc.).
               child: RepaintBoundary(
-                child: Consumer<LspProvider>(
-                  builder: (context, lsp, _) {
-                    // Compute project-wide totals from LspProvider so the
-                    // status-bar indicator never disappears on file switch.
-                    int pErrors = 0, pWarnings = 0, pInfos = 0;
-                    for (final diags in lsp.projectDiagnostics.values) {
-                      for (final d in diags) {
-                        if (d.severity == DiagnosticSeverity.error)        pErrors++;
-                        else if (d.severity == DiagnosticSeverity.warning) pWarnings++;
-                        else                                               pInfos++;
-                      }
-                    }
-                    return QuillCodeEditor(
-                      controller: ctrl,
-                      onChanged: (_) => context.read<EditorProvider>().markDirty(),
-                      lspClient: _ownedLspClient,
-                      fileUri: Uri.file(widget.file.path).toString(),
-                      theme: effectiveTheme,
-                      showSymbolBar: widget.showSymbolBar,
-                      onDiagnosticTap: widget.onDiagnosticTap,
-                      projectErrors:   pErrors   > 0 ? pErrors   : null,
-                      projectWarnings: pWarnings > 0 ? pWarnings : null,
-                      projectInfos:    pInfos    > 0 ? pInfos    : null,
-                    );
-                  },
+                child: QuillCodeEditor(
+                  controller: ctrl,
+                  onChanged: (_) => context.read<EditorProvider>().markDirty(),
+                  lspClient: _ownedLspClient,
+                  fileUri: Uri.file(widget.file.path).toString(),
+                  theme: effectiveTheme,
+                  showSymbolBar: widget.showSymbolBar,
+                  // Diagnostic counts now live inside the status bar (part of
+                  // QuillCodeEditor) and are tappable to open the Problems panel.
+                  onDiagnosticTap: widget.onDiagnosticTap,
                 ),
               ),
             ),
@@ -496,54 +478,6 @@ class _ActiveEditorState extends State<_ActiveEditor> {
   }
 }
 
-
-// ── Image viewer tab ─────────────────────────────────────────────────────────
-
-class _ImageViewer extends StatelessWidget {
-  final OpenFile file;
-  const _ImageViewer({required this.file});
-
-  @override
-  Widget build(BuildContext context) {
-    final cs  = Theme.of(context).colorScheme;
-    final ext = file.extension.toLowerCase();
-    final f   = File(file.path);
-
-    Widget image;
-    if (ext == 'svg') {
-      image = SvgPicture.file(f, fit: BoxFit.contain);
-    } else {
-      image = Image.file(f, fit: BoxFit.contain, errorBuilder: (_, __, ___) {
-        return Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.broken_image_outlined,
-                size: 48, color: cs.onSurfaceVariant),
-            const SizedBox(height: 8),
-            Text('Não foi possível carregar a imagem',
-                style: TextStyle(color: cs.onSurfaceVariant, fontSize: 13)),
-          ],
-        );
-      });
-    }
-
-    return ColoredBox(
-      color: cs.surface,
-      child: Center(
-        child: InteractiveViewer(
-          minScale: 0.1,
-          maxScale: 10,
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: image,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ── Welcome pane ─────────────────────────────────────────────────────────────
 
 class _WelcomePane extends StatelessWidget {
   const _WelcomePane();
