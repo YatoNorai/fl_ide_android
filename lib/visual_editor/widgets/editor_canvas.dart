@@ -4,32 +4,43 @@ import 'package:provider/provider.dart';
 import '../models/flutter_widget_catalog.dart';
 import '../models/widget_node.dart';
 import '../providers/visual_editor_provider.dart';
-import '../utils/widget_renderer.dart';
-import 'widget_properties_sheet.dart';
+import 'interactive_widget_renderer.dart';
 
-// ── Device frame definitions ──────────────────────────────────────────────────
+// ── Frame logical sizes ───────────────────────────────────────────────────────
 
-const _kPhone = Size(390, 844);
-const _kTablet = Size(820, 1180);
+Size _frameSize(PreviewMode mode) {
+  switch (mode) {
+    case PreviewMode.phone:
+      return const Size(390, 844);
+    case PreviewMode.tablet:
+      return const Size(820, 1180);
+    case PreviewMode.rectangle:
+      return const Size(360, 640);
+  }
+}
 
 // ── Main canvas ───────────────────────────────────────────────────────────────
 
-class EditorCanvas extends StatelessWidget {
-  const EditorCanvas({super.key});
+/// The main interactive canvas for the visual editor.
+/// Shows a phone/tablet device frame with real interactive widgets inside.
+/// Requires [VisualEditorProvider] in scope.
+class VisualEditorCanvas extends StatelessWidget {
+  const VisualEditorCanvas({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
     final provider = context.watch<VisualEditorProvider>();
+    final cs = Theme.of(context).colorScheme;
 
     return DragTarget<FlutterWidgetDef>(
       onAcceptWithDetails: (details) {
         final def = details.data;
-        final node = WidgetNode(
-          type: def.name,
-          properties: Map<String, dynamic>.from(def.defaultProperties),
+        provider.addWidget(
+          WidgetNode(
+            type: def.name,
+            properties: Map<String, dynamic>.from(def.defaultProperties),
+          ),
         );
-        provider.addWidget(node);
       },
       builder: (context, candidates, rejected) {
         final hovering = candidates.isNotEmpty;
@@ -39,13 +50,15 @@ class EditorCanvas extends StatelessWidget {
             color: cs.surfaceContainerLowest,
             child: Stack(
               children: [
-                // Dot grid background
+                // Dot-grid background
                 CustomPaint(
-                  painter: _DotGridPainter(cs.outlineVariant.withValues(alpha: 0.4)),
+                  painter: _DotGridPainter(
+                    cs.outlineVariant.withValues(alpha: 0.4),
+                  ),
                   child: const SizedBox.expand(),
                 ),
 
-                // Hover highlight for empty drop
+                // Hover highlight when dragging onto empty canvas
                 if (hovering && !provider.hasRoot)
                   Center(
                     child: Container(
@@ -67,16 +80,15 @@ class EditorCanvas extends StatelessWidget {
                           const SizedBox(height: 6),
                           Text(
                             'Drop here',
-                            style: TextStyle(color: cs.primary, fontWeight: FontWeight.w600),
+                            style: TextStyle(
+                              color: cs.primary,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ],
                       ),
                     ),
                   ),
-
-                // Widget preview frame
-                if (provider.hasRoot)
-                  Center(child: _PreviewFrame(provider: provider)),
 
                 // Empty state hint
                 if (!provider.hasRoot && !hovering)
@@ -84,16 +96,33 @@ class EditorCanvas extends StatelessWidget {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.widgets_outlined,
-                            size: 48, color: cs.outlineVariant),
+                        Icon(
+                          Icons.widgets_outlined,
+                          size: 48,
+                          color: cs.outlineVariant,
+                        ),
                         const SizedBox(height: 12),
                         Text(
-                          'Drag a widget here\nor tap one from the palette',
+                          'Drag a widget here or tap from the palette',
                           textAlign: TextAlign.center,
                           style: TextStyle(
-                              color: cs.onSurfaceVariant, fontSize: 14),
+                            color: cs.onSurfaceVariant,
+                            fontSize: 14,
+                          ),
                         ),
                       ],
+                    ),
+                  ),
+
+                // Device frame with live preview
+                if (provider.hasRoot)
+                  Center(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(24),
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: _DeviceFrame(provider: provider),
+                      ),
                     ),
                   ),
               ],
@@ -105,24 +134,21 @@ class EditorCanvas extends StatelessWidget {
   }
 }
 
-// ── Preview frame (phone / tablet / rectangle) ────────────────────────────────
+// ── Device frame ──────────────────────────────────────────────────────────────
 
-class _PreviewFrame extends StatelessWidget {
+class _DeviceFrame extends StatelessWidget {
   final VisualEditorProvider provider;
 
-  const _PreviewFrame({required this.provider});
+  const _DeviceFrame({required this.provider});
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final mode = provider.previewMode;
 
-    // Always use real rendering
-    Widget canvas = _RealWidgetCanvas(root: provider.root!);
-
     if (mode == PreviewMode.rectangle) {
       return Container(
-        constraints: const BoxConstraints(maxWidth: 380, maxHeight: 640),
+        constraints: const BoxConstraints(maxWidth: 360, maxHeight: 640),
         decoration: BoxDecoration(
           color: cs.surfaceContainer,
           borderRadius: BorderRadius.circular(12),
@@ -137,29 +163,32 @@ class _PreviewFrame extends StatelessWidget {
         ),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(11),
-          child: canvas,
+          child: _InteractiveCanvas(
+            root: provider.root!,
+            mode: mode,
+          ),
         ),
       );
     }
 
-    final logical =
-        mode == PreviewMode.tablet ? _kTablet : _kPhone;
-    const scale = 0.55;
+    final logical = _frameSize(mode);
+    final scale = mode == PreviewMode.tablet ? 0.45 : 0.52;
     final w = logical.width * scale;
     final h = logical.height * scale;
     final r = mode == PreviewMode.tablet ? 20.0 : 44.0;
+    final rScaled = r * scale;
 
     return SizedBox(
       width: w + 28,
       height: h + 48,
       child: Stack(
         children: [
-          // Device shell
+          // Device shell outline
           Positioned.fill(
             child: CustomPaint(
               painter: _DeviceShellPainter(
                 color: cs.outline.withValues(alpha: 0.6),
-                radius: r * scale,
+                radius: rScaled,
               ),
             ),
           ),
@@ -172,7 +201,18 @@ class _PreviewFrame extends StatelessWidget {
               child: SizedBox(
                 width: w,
                 height: h,
-                child: canvas,
+                child: Transform.scale(
+                  scale: scale,
+                  alignment: Alignment.topLeft,
+                  child: SizedBox(
+                    width: logical.width,
+                    height: logical.height,
+                    child: _InteractiveCanvas(
+                      root: provider.root!,
+                      mode: mode,
+                    ),
+                  ),
+                ),
               ),
             ),
           ),
@@ -182,350 +222,189 @@ class _PreviewFrame extends StatelessWidget {
   }
 }
 
-// ── Real widget renderer (preview mode) ───────────────────────────────────────
+// ── Interactive canvas ────────────────────────────────────────────────────────
 
-class _RealWidgetCanvas extends StatelessWidget {
+class _InteractiveCanvas extends StatelessWidget {
   final WidgetNode root;
+  final PreviewMode mode;
 
-  const _RealWidgetCanvas({required this.root});
+  const _InteractiveCanvas({required this.root, required this.mode});
 
   @override
   Widget build(BuildContext context) {
-    try {
-      return WidgetRenderer.render(root, isRoot: true);
-    } catch (_) {
-      return const Center(
-        child: Text('Preview error', style: TextStyle(color: Colors.red)),
+    return MediaQuery(
+      data: MediaQueryData(size: _frameSize(mode)),
+      child: Material(
+        color: Theme.of(context).colorScheme.surface,
+        child: renderInteractive(root, context),
+      ),
+    );
+  }
+}
+
+// ── Widget tree panel ─────────────────────────────────────────────────────────
+
+/// A scrollable tree view of the widget hierarchy.
+/// Shows indented nodes with the widget type name and icon.
+/// Nodes are tappable to select them and switch to the Properties tab.
+class WidgetTreePanel extends StatelessWidget {
+  const WidgetTreePanel({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = context.watch<VisualEditorProvider>();
+
+    if (!provider.hasRoot) {
+      return Center(
+        child: Text(
+          'No widgets yet',
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+            fontSize: 14,
+          ),
+        ),
       );
     }
-  }
-}
 
-// ── Wireframe renderer (tree mode) ────────────────────────────────────────────
-
-class _WidgetTreeCanvas extends StatelessWidget {
-  final WidgetNode root;
-
-  const _WidgetTreeCanvas({required this.root});
-
-  @override
-  Widget build(BuildContext context) {
     return SingleChildScrollView(
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: _NodeBox(node: root, depth: 0),
-      ),
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: _TreeNode(node: provider.root!, depth: 0),
     );
   }
 }
 
-class _NodeBox extends StatelessWidget {
+// ── Tree node ─────────────────────────────────────────────────────────────────
+
+class _TreeNode extends StatefulWidget {
   final WidgetNode node;
   final int depth;
 
-  const _NodeBox({required this.node, required this.depth});
+  const _TreeNode({required this.node, required this.depth});
 
   @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final provider = context.watch<VisualEditorProvider>();
-    final def = defForType(node.type);
-    final color = def?.color ?? cs.primary;
-    final isSelected = provider.selectedId == node.id;
-
-    return DragTarget<FlutterWidgetDef>(
-      onAcceptWithDetails: (details) {
-        if (!node.canHaveChildren) return;
-        final newNode = WidgetNode(
-          type: details.data.name,
-          properties:
-              Map<String, dynamic>.from(details.data.defaultProperties),
-        );
-        provider.addWidget(newNode, parentId: node.id);
-      },
-      builder: (ctx, cands, _) {
-        final dropHover = cands.isNotEmpty && node.canHaveChildren;
-
-        return LongPressDraggable<WidgetNode>(
-          data: node,
-          feedback: Material(
-            color: Colors.transparent,
-            child: Opacity(
-              opacity: 0.75,
-              child: _NodeLabel(node: node, color: color, selected: false),
-            ),
-          ),
-          childWhenDragging: Opacity(opacity: 0.3, child: _buildBox(cs, color, isSelected, dropHover, provider, context)),
-          onDragCompleted: () {},
-          child: DragTarget<WidgetNode>(
-            onAcceptWithDetails: (details) {
-              final dragged = details.data;
-              if (dragged.id == node.id) return;
-              provider.moveWidget(dragged.id, node.id);
-            },
-            builder: (ctx2, nodeCands, _) => _buildBox(
-                cs, color, isSelected, dropHover || nodeCands.isNotEmpty, provider, context),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildBox(ColorScheme cs, Color color, bool selected, bool hover,
-      VisualEditorProvider provider, BuildContext context) {
-    return GestureDetector(
-      onTap: () {
-        provider.select(node.id);
-        showWidgetPropertiesSheet(
-          context: context,
-          node: node,
-          provider: provider,
-        );
-      },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 120),
-        margin: EdgeInsets.all(depth == 0 ? 0 : 4),
-        decoration: BoxDecoration(
-          color: hover
-              ? color.withValues(alpha: 0.18)
-              : color.withValues(alpha: selected ? 0.15 : 0.06),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: selected
-                ? color
-                : hover
-                    ? color.withValues(alpha: 0.7)
-                    : color.withValues(alpha: 0.35),
-            width: selected ? 2 : 1,
-          ),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _NodeLabel(node: node, color: color, selected: selected),
-            if (node.canHaveMultipleChildren)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                child: node.children.isEmpty
-                    ? _EmptyChildHint(color: color)
-                    : Wrap(
-                        children: node.children
-                            .map((c) =>
-                                _NodeBox(node: c, depth: depth + 1))
-                            .toList(),
-                      ),
-              )
-            else if (node.canHaveChildren)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                child: node.children.isEmpty
-                    ? _EmptyChildHint(color: color)
-                    : _NodeBox(node: node.children.first, depth: depth + 1),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
+  State<_TreeNode> createState() => _TreeNodeState();
 }
 
-// workaround — we use a stateful wrapper so we have context
-class _NodeBoxWrapper extends StatelessWidget {
-  final WidgetNode node;
-  final int depth;
+class _TreeNodeState extends State<_TreeNode> {
+  bool _expanded = true;
 
-  const _NodeBoxWrapper({required this.node, required this.depth});
-
-  @override
-  Widget build(BuildContext context) => _NodeBoxWithContext(node: node, depth: depth);
-}
-
-class _NodeBoxWithContext extends StatelessWidget {
-  final WidgetNode node;
-  final int depth;
-
-  const _NodeBoxWithContext({required this.node, required this.depth});
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final provider = context.watch<VisualEditorProvider>();
-    final def = defForType(node.type);
-    final color = def?.color ?? cs.primary;
-    final isSelected = provider.selectedId == node.id;
-
-    return DragTarget<FlutterWidgetDef>(
-      onAcceptWithDetails: (details) {
-        if (!node.canHaveChildren) return;
-        final newNode = WidgetNode(
-          type: details.data.name,
-          properties: Map<String, dynamic>.from(details.data.defaultProperties),
-        );
-        provider.addWidget(newNode, parentId: node.id);
-      },
-      builder: (ctx, cands, _) {
-        final dropHover = cands.isNotEmpty && node.canHaveChildren;
-
-        return LongPressDraggable<WidgetNode>(
-          data: node,
-          feedback: Material(
-            color: Colors.transparent,
-            child: Opacity(
-              opacity: 0.75,
-              child: _NodeLabel(node: node, color: color, selected: false),
-            ),
-          ),
-          childWhenDragging: Opacity(
-            opacity: 0.3,
-            child: _box(cs, color, isSelected, dropHover, provider, context),
-          ),
-          child: DragTarget<WidgetNode>(
-            onAcceptWithDetails: (d) {
-              if (d.data.id != node.id) provider.moveWidget(d.data.id, node.id);
-            },
-            builder: (ctx2, nodeCands, _) => _box(
-                cs, color, isSelected,
-                dropHover || nodeCands.isNotEmpty, provider, context),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _box(ColorScheme cs, Color color, bool selected, bool hover,
-      VisualEditorProvider provider, BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: () {
-        provider.select(node.id);
-        showWidgetPropertiesSheet(context: context, node: node, provider: provider);
-      },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 120),
-        margin: EdgeInsets.all(depth == 0 ? 0 : 4),
-        constraints: const BoxConstraints(minWidth: 60, minHeight: 36),
-        decoration: BoxDecoration(
-          color: hover
-              ? color.withValues(alpha: 0.18)
-              : color.withValues(alpha: selected ? 0.14 : 0.06),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: selected
-                ? color
-                : hover
-                    ? color.withValues(alpha: 0.7)
-                    : color.withValues(alpha: 0.32),
-            width: selected ? 2.0 : 1.0,
-          ),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _NodeLabel(node: node, color: color, selected: selected),
-            if (node.canHaveMultipleChildren)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                child: node.children.isEmpty
-                    ? _EmptyChildHint(color: color)
-                    : Wrap(
-                        spacing: 0,
-                        runSpacing: 0,
-                        children: node.children
-                            .map((c) => _NodeBoxWrapper(node: c, depth: depth + 1))
-                            .toList(),
-                      ),
-              )
-            else if (node.canHaveChildren)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                child: node.children.isEmpty
-                    ? _EmptyChildHint(color: color)
-                    : _NodeBoxWrapper(node: node.children.first, depth: depth + 1),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _NodeLabel extends StatelessWidget {
-  final WidgetNode node;
-  final Color color;
-  final bool selected;
-
-  const _NodeLabel({
-    required this.node,
-    required this.color,
-    required this.selected,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final def = defForType(node.type);
-    String label = node.type;
-    // Show most relevant property as hint
+  String _propSummary(WidgetNode node) {
     final p = node.properties;
-    if (p.containsKey('text')) label += ' · "${p['text']}"';
-    else if (p.containsKey('label')) label += ' · "${p['label']}"';
-    else if (p.containsKey('title')) label += ' · "${p['title']}"';
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 6, 8, 4),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (def != null)
-            Padding(
-              padding: const EdgeInsets.only(right: 5),
-              child: Icon(def.icon, size: 12, color: color),
-            ),
-          Flexible(
-            child: Text(
-              label,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: color,
-                fontFamily: 'monospace',
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
-      ),
-    );
+    if (p.containsKey('text') && p['text'] != null) return ' · "${p['text']}"';
+    if (p.containsKey('label') && p['label'] != null) return ' · "${p['label']}"';
+    if (p.containsKey('title') && p['title'] != null) return ' · "${p['title']}"';
+    return '';
   }
-}
-
-class _EmptyChildHint extends StatelessWidget {
-  final Color color;
-
-  const _EmptyChildHint({required this.color});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: 28,
-      padding: const EdgeInsets.symmetric(horizontal: 10),
-      decoration: BoxDecoration(
-        border: Border.all(
-            color: color.withValues(alpha: 0.3), style: BorderStyle.solid),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Center(
-        child: Text(
-          'drop child here',
-          style: TextStyle(
-            fontSize: 9,
-            color: color.withValues(alpha: 0.5),
-            fontStyle: FontStyle.italic,
+    final provider = context.watch<VisualEditorProvider>();
+    final cs = Theme.of(context).colorScheme;
+    final def = defForType(widget.node.type);
+    final color = def?.color ?? cs.primary;
+    final isSelected = provider.selectedId == widget.node.id;
+    final hasChildren =
+        widget.node.canHaveChildren && widget.node.children.isNotEmpty;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // ── Row ───────────────────────────────────────────────────────────────
+        GestureDetector(
+          onTap: () {
+            provider.select(widget.node.id);
+            provider.setActiveTab(2); // switch to Properties
+          },
+          onLongPress: () {
+            provider.removeWidget(widget.node.id);
+          },
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+            padding: EdgeInsets.only(
+              left: 8.0 + widget.depth * 16.0,
+              right: 8,
+              top: 6,
+              bottom: 6,
+            ),
+            decoration: BoxDecoration(
+              color: isSelected
+                  ? cs.primaryContainer
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                // Expand / collapse toggle
+                if (hasChildren)
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => setState(() => _expanded = !_expanded),
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 4),
+                      child: AnimatedRotation(
+                        turns: _expanded ? 0.25 : 0.0,
+                        duration: const Duration(milliseconds: 150),
+                        child: Icon(
+                          Icons.chevron_right_rounded,
+                          size: 16,
+                          color: color.withValues(alpha: 0.8),
+                        ),
+                      ),
+                    ),
+                  )
+                else
+                  // Indent spacer so leaf nodes align with parent labels
+                  const SizedBox(width: 20),
+
+                // Widget type icon
+                if (def != null)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: Icon(def.icon, size: 14, color: color),
+                  ),
+
+                // Type name + prop summary
+                Expanded(
+                  child: Text(
+                    '${widget.node.type}${_propSummary(widget.node)}',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: isSelected
+                          ? FontWeight.w700
+                          : FontWeight.w500,
+                      color: isSelected ? cs.onPrimaryContainer : color,
+                      fontFamily: 'monospace',
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+
+                // Delete button
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => provider.removeWidget(widget.node.id),
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 6),
+                    child: Icon(
+                      Icons.close_rounded,
+                      size: 14,
+                      color: cs.onSurfaceVariant.withValues(alpha: 0.5),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
-      ),
+
+        // ── Children (when expanded) ──────────────────────────────────────────
+        if (hasChildren && _expanded)
+          ...widget.node.children.map(
+            (child) => _TreeNode(node: child, depth: widget.depth + 1),
+          ),
+      ],
     );
   }
 }
@@ -566,10 +445,12 @@ class _DeviceShellPainter extends CustomPainter {
       ..color = color
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2.5;
-    final rect =
-        Rect.fromLTWH(0, 0, size.width, size.height);
-    canvas.drawRRect(RRect.fromRectAndRadius(rect, Radius.circular(radius)), paint);
-    // Home indicator
+    final rect = Rect.fromLTWH(0, 0, size.width, size.height);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(rect, Radius.circular(radius)),
+      paint,
+    );
+    // Home indicator bar
     final indW = size.width * 0.35;
     final y = size.height - 6;
     canvas.drawLine(
@@ -585,100 +466,4 @@ class _DeviceShellPainter extends CustomPainter {
   @override
   bool shouldRepaint(_DeviceShellPainter old) =>
       old.color != color || old.radius != radius;
-}
-
-// ── Public canvas entry point (uses wrapper with context) ─────────────────────
-
-class CanvasWithContext extends StatelessWidget {
-  final VisualEditorProvider provider;
-
-  const CanvasWithContext({super.key, required this.provider});
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-
-    return DragTarget<FlutterWidgetDef>(
-      onAcceptWithDetails: (details) {
-        final def = details.data;
-        final node = WidgetNode(
-          type: def.name,
-          properties: Map<String, dynamic>.from(def.defaultProperties),
-        );
-        provider.addWidget(node);
-      },
-      builder: (ctx, candidates, _) {
-        final hovering = candidates.isNotEmpty;
-        return GestureDetector(
-          onTap: () => provider.deselect(),
-          child: Container(
-            color: cs.surfaceContainerLowest,
-            child: Stack(
-              children: [
-                CustomPaint(
-                  painter: _DotGridPainter(cs.outlineVariant.withValues(alpha: 0.35)),
-                  child: const SizedBox.expand(),
-                ),
-                if (hovering && !provider.hasRoot)
-                  Center(
-                    child: Container(
-                      width: 200,
-                      height: 120,
-                      decoration: BoxDecoration(
-                        color: cs.primary.withValues(alpha: 0.08),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: cs.primary, width: 2),
-                      ),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.add_rounded, color: cs.primary, size: 32),
-                          const SizedBox(height: 6),
-                          Text('Drop here',
-                              style: TextStyle(
-                                  color: cs.primary,
-                                  fontWeight: FontWeight.w600)),
-                        ],
-                      ),
-                    ),
-                  ),
-                if (provider.hasRoot)
-                  Center(
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.all(24),
-                      child: SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: _PreviewFrame(provider: provider),
-                      ),
-                    ),
-                  ),
-                if (!provider.hasRoot && !hovering)
-                  Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.widgets_outlined,
-                            size: 48, color: cs.outlineVariant),
-                        const SizedBox(height: 12),
-                        Text(
-                          'Arraste um widget aqui\nou toque na paleta',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                              color: cs.onSurfaceVariant, fontSize: 14),
-                        ),
-                      ],
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-// Replace _PreviewFrame to use the context-aware wrapper
-extension on _PreviewFrame {
-  // This is handled above — _NodeBoxWrapper → _NodeBoxWithContext
 }

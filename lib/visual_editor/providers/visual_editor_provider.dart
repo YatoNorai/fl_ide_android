@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/widget_node.dart';
+import '../utils/dart_widget_parser.dart';
 
 enum PreviewMode { rectangle, phone, tablet }
 
@@ -11,6 +12,62 @@ class VisualEditorProvider extends ChangeNotifier {
 
   void setPreviewMode(PreviewMode m) {
     _previewMode = m;
+    notifyListeners();
+  }
+
+  // ── Undo / redo ───────────────────────────────────────────────────────────
+  final List<WidgetNode?> _undoStack = [];
+  final List<WidgetNode?> _redoStack = [];
+  static const int _maxUndoSteps = 30;
+
+  bool get canUndo => _undoStack.isNotEmpty;
+  bool get canRedo => _redoStack.isNotEmpty;
+
+  /// Call BEFORE any mutation (addWidget, removeWidget, updateProperty, moveWidget).
+  void _pushUndo() {
+    _undoStack.add(_root?.deepCopy());
+    if (_undoStack.length > _maxUndoSteps) _undoStack.removeAt(0);
+    _redoStack.clear();
+  }
+
+  void undo() {
+    if (_undoStack.isEmpty) return;
+    _redoStack.add(_root?.deepCopy());
+    _root = _undoStack.removeLast();
+    _selected = null;
+    notifyListeners();
+  }
+
+  void redo() {
+    if (_redoStack.isEmpty) return;
+    _undoStack.add(_root?.deepCopy());
+    _root = _redoStack.removeLast();
+    _selected = null;
+    notifyListeners();
+  }
+
+  // ── Drag state ────────────────────────────────────────────────────────────
+  String? _draggingId;
+  String? get draggingId => _draggingId;
+
+  void startDrag(String id) {
+    _draggingId = id;
+    notifyListeners();
+  }
+
+  void endDrag() {
+    _draggingId = null;
+    notifyListeners();
+  }
+
+  // ── Active tab index (0=palette, 1=tree, 2=properties) ───────────────────
+  int _activeTabIndex = 0;
+
+  int get activeTabIndex => _activeTabIndex;
+
+  void setActiveTab(int index) {
+    if (_activeTabIndex == index) return;
+    _activeTabIndex = index;
     notifyListeners();
   }
 
@@ -52,6 +109,7 @@ class VisualEditorProvider extends ChangeNotifier {
   /// If [parentId] is null and there's no root, [child] becomes root.
   /// If [parentId] is null and root exists, tries to add to selected node or root.
   void addWidget(WidgetNode child, {String? parentId}) {
+    _pushUndo();
     if (_root == null) {
       _root = child;
       _selected = child.id;
@@ -78,6 +136,7 @@ class VisualEditorProvider extends ChangeNotifier {
   // ── Remove widget ─────────────────────────────────────────────────────────
   void removeWidget(String nodeId) {
     if (_root == null) return;
+    _pushUndo();
     if (_root!.id == nodeId) {
       _root = null;
       _selected = null;
@@ -96,6 +155,7 @@ class VisualEditorProvider extends ChangeNotifier {
   void updateProperty(String nodeId, String key, dynamic value) {
     final node = _root?.findById(nodeId);
     if (node == null) return;
+    _pushUndo();
     if (value == null || (value is String && value.isEmpty)) {
       node.properties.remove(key);
     } else {
@@ -107,6 +167,7 @@ class VisualEditorProvider extends ChangeNotifier {
   // ── Move widget ───────────────────────────────────────────────────────────
   void moveWidget(String nodeId, String newParentId, {int? index}) {
     if (_root == null) return;
+    _pushUndo();
     final node = _root!.findById(nodeId);
     if (node == null || node.id == _root!.id) return;
 
@@ -127,6 +188,19 @@ class VisualEditorProvider extends ChangeNotifier {
   }
 
   // ── Code generation ───────────────────────────────────────────────────────
+
+  /// Generate the full Dart source by replacing the return expression in
+  /// the build() method of [originalSource] with the current widget tree.
+  /// Returns null if [originalSource] is empty or generation fails.
+  String? generateSource(String originalSource) {
+    if (_root == null || originalSource.isEmpty) return null;
+    final code = _root!.toCode(2);
+    if (code.isEmpty) return null;
+    final parser = DartWidgetParser();
+    final result = parser.replaceReturnInBuild(originalSource, '\n    $code\n  ');
+    return result == originalSource ? null : result;
+  }
+
   String generateCode() {
     if (_root == null) return '';
     return _root!.toCode(2);

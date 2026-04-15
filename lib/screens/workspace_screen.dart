@@ -342,23 +342,23 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
             };
           }
 
-          // Fallback: JVM-based LSPs may never send diagnostics for clean
-          // files, so the loading spinner would never clear.  Mark ready
-          // slightly after the server's initialize timeout so a successful
-          // init on a zero-error file still dismisses the spinner.
-          final isJvmLsp = const {'java', 'kt', 'kotlin', 'xml'}
-              .contains(lspExt.toLowerCase());
-          if (isJvmLsp) {
-            final fallbackSecs =
-                const {'java', 'kt', 'kotlin'}.contains(lspExt.toLowerCase())
-                    ? 130   // 10 s buffer over the 120 s initialize timeout
-                    : 35;  // 5 s buffer over the 30 s XML timeout
-            Future.delayed(Duration(seconds: fallbackSecs), () {
-              if (!mounted) return;
-              context.read<LspProvider>().markReady();
-              setState(() => _initPhase = _InitPhase.ready);
-            });
-          }
+          // Fallback: if the LSP initialises but the server never sends a
+          // publishDiagnostics notification (e.g. completely clean project,
+          // or a JVM server whose first analysis takes longer than the
+          // diagReceived callback fires), mark ready slightly after the
+          // server's initialize timeout so the spinner always clears.
+          // The per-language values mirror initializeTimeoutSeconds + 5 s.
+          final fallbackSecs = switch (lspExt.toLowerCase()) {
+            'kt' || 'kotlin' => 125,  // 120 s init timeout + 5 s
+            'java'           => 65,   // 60 s init timeout + 5 s
+            'xml'            => 35,   // 30 s init timeout + 5 s
+            _                => 10,   // native servers (dart, go, py…) + 5 s
+          };
+          Future.delayed(Duration(seconds: fallbackSecs), () {
+            if (!mounted) return;
+            context.read<LspProvider>().markReady();
+            setState(() => _initPhase = _InitPhase.ready);
+          });
         } else {
           setState(() => _initPhase = _InitPhase.ready);
         }
@@ -1452,6 +1452,21 @@ class _WorkspaceAppBarState extends State<_WorkspaceAppBar> {
             tooltip: 'Search',
             constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
           ),
+        // ── Design / Visual Editor (shown for .dart files) ────────
+        Consumer<EditorProvider>(
+          builder: (context, editor, _) {
+            final file = editor.activeFile;
+            if (file == null || file.extension != 'dart') {
+              return const SizedBox.shrink();
+            }
+            return IconButton(
+              icon: Icon(Icons.brush_outlined, color: cs.primary, size: 21),
+              onPressed: () => openVisualEditor(context),
+              tooltip: 'Editor Visual',
+              constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+            );
+          },
+        ),
         // ── AI chat ───────────────────────────────────────────────
         IconButton(
           icon: Icon(Icons.auto_awesome_rounded, color: cs.onSurface, size: 21),
@@ -2121,7 +2136,7 @@ class _BottomSheetPanelState extends State<_BottomSheetPanel>
     with TickerProviderStateMixin {
   static const double _kPeek = 60.0;
   static const double _kMid = 400.0;
-  static const double _kPeekBarH = 64.0;
+  static const double _kPeekBarH = 60.0;
   static const int _kToolCount = 7; // TERMINAL PROBLEMS VARIABLES CALL-STACK DEBUG-CONSOLE OUTPUT LOGCAT
 
   double _height = _kPeek;

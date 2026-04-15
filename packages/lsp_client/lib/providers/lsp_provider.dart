@@ -84,13 +84,17 @@ class LspProvider extends ChangeNotifier {
 
     // JVM-based servers need more time to spin up.
     // Native servers (gopls, dart, pylsp) respond in < 2 s so the default is fine.
-    final isJvm = const {'kt', 'kotlin', 'java', 'xml'}.contains(extension.toLowerCase());
+    final ext = extension.toLowerCase();
 
-    // java-language-server (replacing jdtls/kotlin-ls) starts in 5–15 s because
-    // it has no OSGi layer.  LemMinX needs ~30 s.  Native servers 5 s.
-    final timeoutSecs = const {'kt', 'kotlin', 'java'}.contains(extension.toLowerCase())
-        ? 60
-        : isJvm ? 30 : 5;
+    // kotlin-language-server on Termux/Android: ~30–60 s cold start (JVM + Kotlin
+    // compiler analysis).  java-language-server: ~10–15 s (no OSGi).
+    // LemMinX: ~20–30 s.  Native servers: 5 s.
+    final timeoutSecs = switch (ext) {
+      'kt' || 'kotlin' => 120, // kotlin-ls: JVM cold-start + Kotlin compiler init on Android
+      'java'           => 60,  // java-language-server
+      'xml'            => 30,  // LemMinX
+      _                => 5,
+    };
 
     _lspConfig = QuillLspStdioConfig(
       executable: cmd.first,
@@ -149,6 +153,14 @@ class LspProvider extends ChangeNotifier {
       // else: empty push triggered by didClose (tab switch / file close).
       // Preserve the last known diagnostics so the Problems panel still
       // shows issues for files that are not currently open in the editor.
+
+      // Any publishDiagnostics notification (including empty "clean file"
+      // pushes) means the server has finished its initial analysis and is
+      // fully functional.  Mark ready here so the loading indicator clears
+      // without having to wait for the workspace_screen.dart fallback timer.
+      // This is especially important for slow JVM servers (kotlin-ls) where
+      // the first diagnostic push can arrive long after initialization.
+      markReady();
     });
     // Fire-and-forget: open all project files so the server pushes diagnostics
     // for every file, giving us a real project-wide Problems view.
@@ -291,6 +303,7 @@ class LspProvider extends ChangeNotifier {
         return 'pylsp';
       case 'kt':
       case 'kotlin':
+        return 'kotlin-language-server';
       case 'java':
         return 'java -jar ${RuntimeEnvir.javaLsJar}';
       case 'go':
@@ -394,16 +407,19 @@ class LspProvider extends ChangeNotifier {
         if (File(bash2).existsSync()) return [bash2, pylsp];
         return null;
 
-      // ── Kotlin / Java (java-language-server by georgewfraser) ───────────────
-      // Replaces the heavyweight jdtls + kotlin-language-server combo.
-      // java-language-server is a single self-contained jar (no OSGi, no
-      // multi-second warm-up) that analyses .java files and indexes the
-      // Android SDK / project classpath via javac APIs.
-      // For .kt files it provides Java class/method completion from the project
-      // context — full Kotlin syntax analysis is not available, but it is far
-      // more reliable on Android/Termux than kotlin-language-server was.
+      // ── Kotlin (kotlin-language-server, fallback: java-language-server) ──────
+      // kotlin-language-server is a shell script installed at
+      //   $PREFIX/opt/kotlin-language-server/server/bin/kotlin-language-server
+      // (and optionally symlinked to $PREFIX/bin/kotlin-language-server).
+      // We run it via bash because Termux shell scripts need either a login
+      // shell or LD_PRELOAD=libtermux-exec.so to exec /usr/bin/env correctly.
+      // Falls back to java-language-server if kotlin-ls is not installed.
       case 'kt':
       case 'kotlin':
+        return _kotlinLsCommand() ?? _javaLsCommand();
+
+      // ── Java (java-language-server by georgewfraser) ─────────────────────────
+      // Single self-contained jar, no OSGi, starts in ~10 s on Android.
       case 'java':
         return _javaLsCommand();
 
@@ -458,8 +474,9 @@ class LspProvider extends ChangeNotifier {
             'Install the Android SDK extension and run its install steps.';
       case 'kt':
       case 'kotlin':
-        return 'Java/Kotlin LSP (java-language-server) not found.\n'
-            'Install the Android SDK extension and run its install steps.';
+        return 'Kotlin LSP (kotlin-language-server) not found.\n'
+            'Install via: pkg install kotlin-language-server\n'
+            'or reinstall the Android SDK extension.';
       case 'go':
         return 'Go LSP (gopls) not found.\n'
             'Run: go install golang.org/x/tools/gopls@latest';
@@ -472,6 +489,57 @@ class LspProvider extends ChangeNotifier {
       default:
         return 'LSP server not installed for .$ext files.';
     }
+  }
+
+  /// Launches kotlin-language-server by invoking the JVM directly.
+  ///
+  /// The Gradle-generated startup script contains
+  ///   DEFAULT_JVM_OPTS='"-Xmx2g" "-Xss8m" "-XX:+UseG1GC"'
+  /// which appears on the command line AFTER any JAVA_TOOL_OPTIONS we set.
+  /// The JVM honours the LAST -Xmx, so the script's -Xmx2g always wins —
+  /// requesting 2 GB on Android → JVM fails to start → LSP never initialises.
+  ///
+  /// Fix: bypass the script entirely and run `java -classpath <all JARs>
+  /// org.javacs.kt.MainKt` directly, passing our own -Xmx up front.
+  ///
+  /// Returns null when the JVM or the server JARs are not found; the caller
+  /// then falls back to [_javaLsCommand].
+  List<String>? _kotlinLsCommand() {
+    final java = RuntimeEnvir.javaPath;
+    if (!File(java).existsSync()) {
+      debugPrint('[LspProvider] java not found at $java — cannot launch kotlin-ls');
+      return null;
+    }
+
+    // kotlin-language-server ships all its JARs under server/lib/.
+    final libDir = Directory('${RuntimeEnvir.kotlinLsHome}/lib');
+    if (!libDir.existsSync()) {
+      debugPrint('[LspProvider] kotlin-ls lib dir not found at ${libDir.path}');
+      return null;
+    }
+
+    final jars = libDir
+        .listSync()
+        .whereType<File>()
+        .where((f) => f.path.endsWith('.jar'))
+        .map((f) => f.path)
+        .toList();
+
+    if (jars.isEmpty) {
+      debugPrint('[LspProvider] no JARs found in ${libDir.path}');
+      return null;
+    }
+
+    final classpath = jars.join(':');
+    debugPrint('[LspProvider] kotlin-language-server: direct JVM with ${jars.length} JARs');
+    return [
+      java,
+      '-Xmx384m', '-Xms64m',
+      '-Xss4m',
+      '-Dfile.encoding=UTF-8',
+      '-classpath', classpath,
+      'org.javacs.kt.MainKt',
+    ];
   }
 
   /// Launches java-language-server (georgewfraser/java-language-server).
@@ -514,13 +582,20 @@ class LspProvider extends ChangeNotifier {
   Map<String, String> _envForExtension(String ext) {
     final base = RuntimeEnvir.baseEnv;
     switch (ext.toLowerCase()) {
-      // java-language-server is used for both Java and Kotlin files.
-      // JAVA_HOME lets the JVM locate itself when launched without a login
-      // shell.  JAVA_TOOL_OPTIONS caps heap to 256 MB — java-language-server
-      // is much leaner than jdtls/kotlin-ls but still needs ~128 MB on a
-      // real Android project.
+      // kotlin-language-server is launched directly via `java -classpath …` so
+      // JVM flags (-Xmx etc.) are passed on the command line, not via
+      // JAVA_TOOL_OPTIONS. JAVA_HOME is still needed so the runtime can locate
+      // its standard libraries.
       case 'kt':
       case 'kotlin':
+        final ktJHome = RuntimeEnvir.javaHome;
+        final ktEnv = <String, String>{...base};
+        if (ktJHome.isNotEmpty) ktEnv['JAVA_HOME'] = ktJHome;
+        // Do NOT set JAVA_TOOL_OPTIONS — flags are passed directly in the
+        // command, so the env var is redundant and could conflict.
+        return ktEnv;
+
+      // java-language-server — lighter, ~128 MB is sufficient.
       case 'java':
         final jHome = RuntimeEnvir.javaHome;
         final env = <String, String>{...base};
