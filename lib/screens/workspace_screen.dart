@@ -2238,7 +2238,12 @@ class _BottomSheetPanelState extends State<_BottomSheetPanel>
   }
 
   /// Called externally (e.g. from drawer rail) to expand to mid stage.
-  void expandToMid() => _snapTo(_kMid);
+  /// Never collapses the sheet when it is already at or above mid — so
+  /// repeated calls from the debug console listener don't push the sheet
+  /// down when the user has manually pulled it to full height.
+  void expandToMid() {
+    if (_height < _kMid) _snapTo(_kMid);
+  }
 
   List<double> get _snapPoints => [_kPeek, _kMid, widget.availableHeight];
 

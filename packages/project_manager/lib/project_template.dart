@@ -132,9 +132,15 @@ class ProjectTemplate {
     // ── Flutter ───────────────────────────────────────────────────────────────
     if (sdk == SdkType.flutter && !remoteIsWindows) {
       // --empty flag for minimal template
-      final flutterCmd = flutterTemplate == FlutterTemplate.emptyApp
+      var flutterCmd = flutterTemplate == FlutterTemplate.emptyApp
           ? cmd.replaceFirst('flutter create ', 'flutter create --empty ')
           : cmd;
+      // --no-pub: skip `flutter pub get` during scaffold so the project is
+      // created in seconds instead of minutes.  The workspace sync step
+      // (triggered automatically when the project opens) runs pub get
+      // in the background OUTPUT terminal.
+      flutterCmd =
+          flutterCmd.replaceFirst('flutter create ', 'flutter create --no-pub ');
       final flutterBase = 'cd "$parentDir" && $flutterCmd';
       final patch = _flutterTemplatePatch(projectPath, projectName, flutterTemplate);
       return '$flutterBase && ${_flutterAndroidFixes(projectPath, useGroovy: useGroovy)} && $patch';
@@ -153,9 +159,13 @@ class ProjectTemplate {
 
     // ── React Native ──────────────────────────────────────────────────────────
     if (sdk == SdkType.reactNative && !remoteIsWindows) {
-      final rnCmd = rnTemplate == ReactNativeTemplate.tabs
+      var rnCmd = rnTemplate == ReactNativeTemplate.tabs
           ? '$cmd --template tabs'
           : cmd;
+      // --no-install: skip npm/yarn install during scaffold so the project
+      // directory is ready in seconds.  The workspace sync step runs
+      // `npm install` in the background OUTPUT terminal when the project opens.
+      if (!rnCmd.contains('--no-install')) rnCmd = '$rnCmd --no-install';
       final baseCmd =
           'cd "$parentDir" && rm -rf "$projectName" 2>/dev/null; $rnCmd';
       final patch = _rnTemplatePatch(projectPath, rnTemplate);

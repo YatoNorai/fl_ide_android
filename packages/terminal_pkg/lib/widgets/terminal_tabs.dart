@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../models/terminal_session.dart';
 import '../providers/terminal_provider.dart';
 import 'pty_terminal_widget.dart';
+import 'xterm_bottom_bar.dart';
 
 /// Terminal body: shows session chips above the active session's xterm widget.
 /// Each chip is [LongPressDraggable<TerminalSession>] — drag it onto the main
@@ -100,6 +101,10 @@ class _TerminalTabsState extends State<TerminalTabs> {
               sshSetup: widget.sshSetup,
             ),
             Expanded(child: PtyTerminalWidget(session: activeSession)),
+            MiniTerminalKeyBar(
+              key: ValueKey(activeSession.id),
+              session: activeSession,
+            ),
           ],
         );
       },

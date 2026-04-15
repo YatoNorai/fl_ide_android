@@ -110,6 +110,7 @@ flutter doctor
 rm -rf "$ANDROID_HOME/cmdline-tools" "$ANDROID_HOME/platform-tools" \
        "$ANDROID_HOME/platforms" "$ANDROID_HOME/build-tools" 2>/dev/null
 rm -rf "$PREFIX/opt/java-language-server" 2>/dev/null
+rm -rf "$PREFIX/opt/lemminx" 2>/dev/null
 rm -f "$PREFIX/bin/sdkmanager" "$PREFIX/bin/adb" 2>/dev/null
 rm -f commandlinetools-linux-*.zip java-language-server.tar.gz 2>/dev/null
 pkg uninstall -y openjdk-17 wget unzip 2>/dev/null || true
@@ -140,6 +141,12 @@ tar xzf java-language-server.tar.gz -C "\$PREFIX/opt/java-language-server"
 rm java-language-server.tar.gz
 # Verify the jar landed where the IDE expects it
 ls "\$PREFIX/opt/java-language-server/dist/lang.jar"
+# ── Eclipse LemMinX — XML Language Server ─────────────────────────────────
+# Standalone uber-jar used by the IDE for .xml / AndroidManifest LSP support.
+mkdir -p "\$PREFIX/opt/lemminx"
+wget -q -O "\$PREFIX/opt/lemminx/lemminx.jar" \
+  https://github.com/eclipse/lemminx/releases/download/0.29.0/org.eclipse.lemminx-0.29.0-uber.jar
+ls "\$PREFIX/opt/lemminx/lemminx.jar"
 ''',
       buildCommand: './gradlew assembleDebug',
       sdkConfig: SdkConfig(
