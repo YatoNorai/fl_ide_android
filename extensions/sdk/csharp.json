@@ -20,12 +20,12 @@
   "install_steps": [
     {
       "type": "shell",
-      "command": "pkg update -y 2>&1 && pkg install -y curl proot 2>&1",
+      "command": "pkg update -y 2>&1 && pkg install -y curl 2>&1",
       "description": "Instalando dependências"
     },
     {
       "type": "shell",
-      "command": "DOTNET_VERSION=$(curl -s https://api.github.com/repos/termux-user-repository/dotnet-packages/releases/latest | grep '\"tag_name\"' | sed 's/.*\"tag_name\": \"//;s/\".*//' 2>/dev/null) && echo \"Versão .NET disponível: $DOTNET_VERSION\" && curl -L \"https://github.com/termux-user-repository/dotnet-packages/releases/latest/download/dotnet-sdk-arm64.tar.gz\" -o /tmp/dotnet.tar.gz 2>&1 && mkdir -p $HOME/.dotnet && tar -xzf /tmp/dotnet.tar.gz -C $HOME/.dotnet 2>&1 && rm /tmp/dotnet.tar.gz && echo 'OK: .NET SDK extraído'",
+      "command": "echo \"Baixando .NET SDK ARM64...\" && curl -L \"https://github.com/termux-user-repository/dotnet-packages/releases/latest/download/dotnet-sdk-arm64.tar.gz\" -o $TMPDIR/dotnet.tar.gz 2>&1 && mkdir -p $HOME/.dotnet && tar -xzf $TMPDIR/dotnet.tar.gz -C $HOME/.dotnet 2>&1 && rm $TMPDIR/dotnet.tar.gz && echo 'OK: .NET SDK extraído'",
       "description": "Baixando e instalando .NET SDK ARM64"
     },
     {

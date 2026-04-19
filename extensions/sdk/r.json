@@ -20,7 +20,7 @@
   "install_steps": [
     {
       "type": "shell",
-      "command": "pkg update -y 2>&1 && pkg install -y r-base 2>&1",
+      "command": "pkg update -y 2>&1 && pkg install -y r 2>&1",
       "description": "Instalando R via pkg"
     },
     {
@@ -42,7 +42,7 @@
   "config_steps": [
     {
       "type": "shell",
-      "command": "Rscript -e \"installed.packages()[,'Package']\" 2>&1 | grep languageserver && echo 'languageserver OK' || echo 'AVISO: languageserver não instalado'",
+      "command": "Rscript -e \"cat(paste(installed.packages()[,'Package'], collapse='\\n'))\" 2>&1 | grep -i languageserver && echo 'languageserver OK' || echo 'AVISO: languageserver não instalado'",
       "description": "Verificando languageserver"
     }
   ],
@@ -55,7 +55,7 @@
     },
     {
       "type": "shell",
-      "command": "pkg remove -y r-base 2>&1 || true",
+      "command": "pkg remove -y r 2>&1 || true",
       "description": "Removendo R"
     }
   ],

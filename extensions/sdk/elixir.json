@@ -35,7 +35,7 @@
     },
     {
       "type": "shell",
-      "command": "ELS_VERSION=$(curl -s https://api.github.com/repos/elixir-lsp/elixir-ls/releases/latest | grep '\"tag_name\"' | sed 's/.*\"tag_name\": \"//;s/\".*//' 2>/dev/null) && echo \"Versão ElixirLS: $ELS_VERSION\" && mkdir -p $HOME/.elixir-ls && curl -L \"https://github.com/elixir-lsp/elixir-ls/releases/download/$ELS_VERSION/elixir-ls-v${ELS_VERSION#v}.zip\" -o /tmp/elixirls.zip 2>&1 && unzip -o /tmp/elixirls.zip -d $HOME/.elixir-ls 2>&1 && chmod +x $HOME/.elixir-ls/language_server.sh && rm /tmp/elixirls.zip && echo 'OK: ElixirLS instalado'",
+      "command": "ELS_VERSION=$(curl -s https://api.github.com/repos/elixir-lsp/elixir-ls/releases/latest | grep '\"tag_name\"' | sed 's/.*\"tag_name\": \"//;s/\".*//' 2>/dev/null) && echo \"Versão ElixirLS: $ELS_VERSION\" && mkdir -p $HOME/.elixir-ls && curl -L \"https://github.com/elixir-lsp/elixir-ls/releases/download/$ELS_VERSION/elixir-ls-v${ELS_VERSION#v}.zip\" -o $TMPDIR/elixirls.zip 2>&1 && unzip -o $TMPDIR/elixirls.zip -d $HOME/.elixir-ls 2>&1 && chmod +x $HOME/.elixir-ls/language_server.sh && rm $TMPDIR/elixirls.zip && echo 'OK: ElixirLS instalado'",
       "description": "Baixando e instalando ElixirLS"
     },
     {

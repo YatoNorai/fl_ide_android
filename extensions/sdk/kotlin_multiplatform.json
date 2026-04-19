@@ -35,7 +35,7 @@
     },
     {
       "type": "shell",
-      "command": "KLS_VERSION=$(curl -s https://api.github.com/repos/fwcd/kotlin-language-server/releases/latest | grep '\"tag_name\"' | sed 's/.*\"tag_name\": \"//;s/\".*//' 2>/dev/null) && echo \"Versão mais recente: $KLS_VERSION\" && mkdir -p $PREFIX/opt/kotlin-language-server && curl -L \"https://github.com/fwcd/kotlin-language-server/releases/download/$KLS_VERSION/server.zip\" -o /tmp/kls.zip 2>&1 && unzip -o /tmp/kls.zip -d $PREFIX/opt/kotlin-language-server 2>&1 && rm /tmp/kls.zip && echo 'OK: kotlin-language-server instalado'",
+      "command": "KLS_VERSION=$(curl -s https://api.github.com/repos/fwcd/kotlin-language-server/releases/latest | grep '\"tag_name\"' | sed 's/.*\"tag_name\": \"//;s/\".*//' 2>/dev/null) && echo \"Versão mais recente: $KLS_VERSION\" && mkdir -p $PREFIX/opt/kotlin-language-server && curl -L \"https://github.com/fwcd/kotlin-language-server/releases/download/$KLS_VERSION/server.zip\" -o $TMPDIR/kls.zip 2>&1 && unzip -o $TMPDIR/kls.zip -d $PREFIX/opt/kotlin-language-server 2>&1 && rm $TMPDIR/kls.zip && echo 'OK: kotlin-language-server instalado'",
       "description": "Baixando e instalando kotlin-language-server"
     },
     {

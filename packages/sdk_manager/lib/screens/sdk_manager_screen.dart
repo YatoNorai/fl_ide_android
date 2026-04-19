@@ -38,11 +38,9 @@ class SdkManagerScreen extends StatelessWidget {
         ],
       ),
       body: Consumer<SdkManagerProvider>(
-        builder: (context, sdk, _) => ListView.separated(
+        builder: (context, sdk, _) => ListView.builder(
           padding: const EdgeInsets.symmetric(vertical: 8),
           itemCount: SdkDefinition.all.length,
-          separatorBuilder: (_, __) => Divider(
-              color: cs.outline.withValues(alpha: 0.12), height: 1, indent: 16),
           itemBuilder: (context, i) {
             final def = SdkDefinition.all[i];
             return _SdkTile(def: def, sdk: sdk);
@@ -66,75 +64,123 @@ class _SdkTile extends StatelessWidget {
     final loading = sdk.isLoading(def.type);
     final version = sdk.version(def.type);
 
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      leading: Container(
-        width: 44,
-        height: 44,
-        decoration: BoxDecoration(
-          color: cs.surfaceContainerHighest.withValues(alpha: 0.6),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Center(
-          child: Text(def.type.icon, style: const TextStyle(fontSize: 24)),
-        ),
-      ),
-      title: Text(def.type.displayName,
-          style: TextStyle(
-              color: cs.onSurface,
-              fontSize: 15,
-              fontWeight: FontWeight.w600)),
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(def.type.description,
-              style: TextStyle(
-                  color: cs.onSurface.withValues(alpha: 0.55),
-                  fontSize: 13)),
-          if (installed && version != null) ...[
-            const SizedBox(height: 2),
-            Text('v$version',
-                style: TextStyle(
-                    color: cs.primary,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500)),
-          ],
-        ],
-      ),
-      trailing: loading
-          ? SizedBox(
-              width: 22,
-              height: 22,
-              child: CircularProgressIndicator(
-                  strokeWidth: 2.5, color: cs.primary),
-            )
-          : installed
-              ? Row(
-                  mainAxisSize: MainAxisSize.min,
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => _openInstall(context, def),
+        child: Ink(
+          decoration: BoxDecoration(
+            color: cs.surfaceContainerLow,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: installed
+                  ? cs.primary.withValues(alpha: 0.25)
+                  : cs.outline.withValues(alpha: 0.12),
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // ── Header row: icon + name + status indicator ──
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    Icon(Icons.check_circle_rounded,
-                        color: cs.primary, size: 20),
-                    const SizedBox(width: 8),
-                    TextButton(
-                      onPressed: () => _openInstall(context, def),
-                      child: Text('Update',
-                          style: TextStyle(
-                              color: cs.primary, fontSize: 12)),
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: cs.surfaceContainerHighest.withValues(alpha: 0.7),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Center(
+                        child: Text(def.type.icon,
+                            style: const TextStyle(fontSize: 22)),
+                      ),
                     ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(def.type.displayName,
+                              style: TextStyle(
+                                  color: cs.onSurface,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600)),
+                          if (installed && version != null)
+                            Text('v$version',
+                                style: TextStyle(
+                                    color: cs.primary,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500)),
+                        ],
+                      ),
+                    ),
+                    if (loading)
+                      SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2.5, color: cs.primary),
+                      )
+                    else if (installed)
+                      Icon(Icons.check_circle_rounded,
+                          color: cs.primary, size: 20),
                   ],
-                )
-              : FilledButton(
-                  style: FilledButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 8),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    textStyle: const TextStyle(
-                        fontSize: 13, fontWeight: FontWeight.w600),
-                  ),
-                  onPressed: () => _openInstall(context, def),
-                  child: const Text('Install'),
                 ),
+                // ── Description ──
+                const SizedBox(height: 8),
+                Text(def.type.description,
+                    style: TextStyle(
+                        color: cs.onSurface.withValues(alpha: 0.6),
+                        fontSize: 13,
+                        height: 1.4)),
+                // ── Action buttons row ──
+                const SizedBox(height: 10),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    if (installed) ...[
+                      OutlinedButton.icon(
+                        onPressed: () => _openInstall(context, def),
+                        icon: const Icon(Icons.update_rounded, size: 16),
+                        label: const Text('Update'),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 6),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          textStyle: const TextStyle(
+                              fontSize: 13, fontWeight: FontWeight.w500),
+                        ),
+                      ),
+                    ] else ...[
+                      FilledButton.icon(
+                        onPressed: loading
+                            ? null
+                            : () => _openInstall(context, def),
+                        icon: const Icon(Icons.download_rounded, size: 16),
+                        label: const Text('Install'),
+                        style: FilledButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 6),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          textStyle: const TextStyle(
+                              fontSize: 13, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 

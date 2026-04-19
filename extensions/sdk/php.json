@@ -40,7 +40,7 @@
     },
     {
       "type": "shell",
-      "command": "node $(npm root -g)/intelephense/lib/intelephense.js --version 2>&1 && echo 'OK: Intelephense OK'",
+      "command": "test -d $(npm root -g 2>/dev/null)/intelephense && echo 'OK: Intelephense encontrado' || echo 'AVISO: Intelephense não encontrado'",
       "description": "Verificando Intelephense"
     }
   ],

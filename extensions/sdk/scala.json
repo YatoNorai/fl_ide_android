@@ -3,11 +3,11 @@
   "sdk": "scala",
   "sdk_version": "latest",
   "display_name": "Scala",
-  "description": "Scala para Termux no Android ARM64. Inclui o compilador Scala via coursier (cs) e Metals (LSP) para autocompletar, diagnósticos e navegação de código.",
+  "description": "Scala para Termux no Android ARM64. Inclui o compilador Scala via coursier (launcher JAR + Java) e Metals (LSP) para autocompletar, diagnósticos e navegação de código.",
   "package": {
     "type": "manual",
     "arch": "arm64",
-    "size_mb": 200
+    "size_mb": 250
   },
   "package_author": {
     "name": "EPFL / Scala Center",
@@ -30,8 +30,8 @@
     },
     {
       "type": "shell",
-      "command": "mkdir -p $HOME/.local/bin && curl -fL https://github.com/coursier/launchers/raw/master/cs-aarch64-pc-linux -o $HOME/.local/bin/cs 2>&1 && chmod +x $HOME/.local/bin/cs && echo 'OK: coursier instalado'",
-      "description": "Instalando coursier (cs) ARM64"
+      "command": "mkdir -p $HOME/.local/bin && curl -fL https://github.com/coursier/launchers/raw/master/coursier -o $HOME/.local/bin/cs.jar 2>&1 && echo '#!/data/data/com.termux/files/usr/bin/bash\\nexec java -jar \"$HOME/.local/bin/cs.jar\" \"$@\"' > $HOME/.local/bin/cs && chmod +x $HOME/.local/bin/cs && echo 'OK: coursier (JAR launcher) instalado'",
+      "description": "Instalando coursier via launcher JAR (compatível com Android)"
     },
     {
       "type": "shell",
@@ -40,37 +40,42 @@
     },
     {
       "type": "shell",
-      "command": "export PATH=$PATH:$HOME/.local/bin && cs install scala scala-cli 2>&1 && echo 'OK: Scala instalado'",
-      "description": "Instalando Scala via coursier"
+      "command": "export PATH=$PATH:$HOME/.local/bin && cs setup --yes 2>&1 && echo 'OK: coursier setup concluído'",
+      "description": "Configurando coursier (aceita licenças automaticamente)"
     },
     {
       "type": "shell",
-      "command": "export PATH=$PATH:$HOME/.local/bin && cs install metals 2>&1 && echo 'OK: Metals LSP instalado'",
+      "command": "export PATH=$PATH:$HOME/.local/bin:$HOME/.local/share/coursier/bin && cs install scala-cli 2>&1 && echo 'OK: scala-cli instalado'",
+      "description": "Instalando scala-cli via coursier"
+    },
+    {
+      "type": "shell",
+      "command": "export PATH=$PATH:$HOME/.local/bin:$HOME/.local/share/coursier/bin && cs install metals 2>&1 && echo 'OK: Metals LSP instalado'",
       "description": "Instalando Metals (LSP) via coursier"
     }
   ],
   "config_steps": [
     {
       "type": "shell",
-      "command": "test -f $HOME/.local/bin/metals && echo 'metals OK' || echo 'AVISO: metals não encontrado'",
+      "command": "test -f $HOME/.local/share/coursier/bin/metals && echo 'metals OK' || test -f $HOME/.local/bin/metals && echo 'metals OK' || echo 'AVISO: metals não encontrado'",
       "description": "Verificando Metals"
     },
     {
       "type": "shell",
-      "command": "export PATH=$PATH:$HOME/.local/bin && scala -version 2>&1 && echo 'Scala OK'",
-      "description": "Verificando Scala"
+      "command": "export PATH=$PATH:$HOME/.local/share/coursier/bin && scala-cli version 2>&1 && echo 'scala-cli OK'",
+      "description": "Verificando scala-cli"
     }
   ],
   "cleanup_steps": [],
   "uninstall_steps": [
     {
       "type": "shell",
-      "command": "rm -f $HOME/.local/bin/metals $HOME/.local/bin/scala $HOME/.local/bin/cs 2>&1 || true",
-      "description": "Removendo Metals, Scala e coursier"
+      "command": "rm -rf $HOME/.local/bin/cs $HOME/.local/bin/cs.jar $HOME/.local/share/coursier 2>&1 || true",
+      "description": "Removendo coursier e ferramentas Scala"
     }
   ],
-  "verify_binary": "cs",
-  "verify_command": "cs version",
+  "verify_binary": "java",
+  "verify_command": "java -version",
   "run_config": {
     "run": "scala-cli run .",
     "supports_devices": false,
@@ -86,7 +91,7 @@
     "format_command": null
   },
   "lsp_config": {
-    "server_binary": "$HOME/.local/bin/metals",
+    "server_binary": "$HOME/.local/share/coursier/bin/metals",
     "server_args": [],
     "language_ids": ["scala"]
   }

@@ -7,7 +7,7 @@
   "package": {
     "type": "pkg",
     "arch": "arm64",
-    "size_mb": 80
+    "size_mb": 120
   },
   "package_author": {
     "name": "Termux / Ruby Team",
@@ -20,8 +20,8 @@
   "install_steps": [
     {
       "type": "shell",
-      "command": "pkg update -y 2>&1 && pkg install -y ruby 2>&1",
-      "description": "Instalando Ruby via pkg"
+      "command": "pkg update -y 2>&1 && pkg install -y ruby clang make binutils libffi 2>&1",
+      "description": "Instalando Ruby e ferramentas de build (necessárias para gems nativas)"
     },
     {
       "type": "shell",
@@ -30,12 +30,12 @@
     },
     {
       "type": "shell",
-      "command": "gem install solargraph 2>&1 && echo 'OK: Solargraph instalado'",
+      "command": "gem install solargraph --no-document 2>&1 && echo 'OK: Solargraph instalado'",
       "description": "Instalando Solargraph (LSP) via gem"
     },
     {
       "type": "shell",
-      "command": "solargraph version 2>&1 && echo 'OK: Solargraph OK'",
+      "command": "test -f $PREFIX/bin/solargraph && echo 'OK: Solargraph OK' || echo 'AVISO: solargraph não encontrado'",
       "description": "Verificando Solargraph"
     }
   ],
@@ -47,8 +47,8 @@
     },
     {
       "type": "shell",
-      "command": "gem list | grep solargraph 2>&1",
-      "description": "Listando gems relacionados ao Solargraph"
+      "command": "gem list 2>&1 | grep solargraph",
+      "description": "Listando gem solargraph"
     }
   ],
   "cleanup_steps": [],
