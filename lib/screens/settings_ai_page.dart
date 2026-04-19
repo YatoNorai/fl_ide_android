@@ -1,5 +1,3 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -323,8 +321,8 @@ class AiSettingsPage extends StatelessWidget {
       builder: (ctx) {
         return StatefulBuilder(builder: (ctx, setState) {
           return RepaintBoundary(
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 8, sigmaY: 10),
+            child: Container(
+              color: Colors.black.withOpacity(0.45),
               child: AlertDialog(
                 title: Text(isNew ? s.newAgentTitle : s.editAgentTitle),
                 content: SingleChildScrollView(

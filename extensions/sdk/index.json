@@ -5,6 +5,20 @@
     "android_sdk.json",
     "react_native.json",
     "go.json",
-    "swift.json"
+    "swift.json",
+    "kotlin_multiplatform.json",
+    "cpp.json",
+    "rust.json",
+    "lua.json",
+    "ruby.json",
+    "php.json",
+    "bash.json",
+    "html_css.json",
+    "csharp.json",
+    "scala.json",
+    "r.json",
+    "zig.json",
+    "haskell.json",
+    "elixir.json"
   ]
 }

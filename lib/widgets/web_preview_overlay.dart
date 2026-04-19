@@ -5,6 +5,7 @@ import 'package:device_preview/device_preview.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'package:liquid_glass_renderer/liquid_glass_renderer.dart';
 import 'package:provider/provider.dart';
 
 // ── Snap coordinator ──────────────────────────────────────────────────────────
@@ -143,6 +144,7 @@ class WebPreviewOverlay extends StatefulWidget {
   /// Optional shared coordinator that prevents this bubble from overlapping
   /// the DAP execution overlay when both are docked to the same edge.
   final SnapCoordinator? coordinator;
+  final bool liquidGlass;
 
   const WebPreviewOverlay({
     super.key,
@@ -150,6 +152,7 @@ class WebPreviewOverlay extends StatefulWidget {
     required this.onClose,
     required this.navigatorContext,
     this.coordinator,
+    this.liquidGlass = false,
   });
 
   @override
@@ -206,7 +209,12 @@ class _WebPreviewOverlayState extends State<WebPreviewOverlay> {
     super.dispose();
   }
 
-  void _onCoordChanged() => setState(() {});
+  // Coordinator changes only affect the snapped-bubble Y position.
+  // The listener is kept solely so the SnapCoordinator can push updates;
+  // rebuilds are now scoped via ListenableBuilder in the snapped-tab branch,
+  // so this callback intentionally does nothing (the coordinator itself is the
+  // listenable passed to ListenableBuilder).
+  void _onCoordChanged() {}
 
   Future<void> _setupServiceWorker() async {
     if (defaultTargetPlatform != TargetPlatform.android) return;
@@ -375,27 +383,94 @@ class _WebPreviewOverlayState extends State<WebPreviewOverlay> {
     if (_minimized) {
       // ── Snapped to edge: show a slim tab protruding from the screen edge ──
       if (_bubbleSnapped) {
-        const tabH    = _kBubbleSize;
-        const tabW    = _kBubbleTabW;
-        final radius  = const Radius.circular(12);
+        const tabH   = _kBubbleSize;
+        const tabW   = _kBubbleTabW;
+        final radius = const Radius.circular(12);
         final br = _bubbleSnapLeft
             ? BorderRadius.only(topRight: radius, bottomRight: radius)
             : BorderRadius.only(topLeft: radius, bottomLeft: radius);
         final size = MediaQuery.of(context).size;
-        // Use coordinator to avoid overlap with the DAP overlay.
-        final displayY = widget.coordinator?.resolveY(
-              SnapCoordinator.slotWeb, _bubbleSnapLeft,
-              _bubblePos.dy, tabH, size.height) ??
-            _bubblePos.dy.clamp(0.0, size.height - tabH);
 
+        // Static content that never changes while snapped — hoisted as `child`
+        // so ListenableBuilder does not recreate it on coordinator updates.
+        final tabContent = Material(
+          elevation: 8,
+          borderRadius: br,
+          color: cs.primaryContainer,
+          child: Container(
+            width: tabW,
+            height: tabH,
+            decoration: BoxDecoration(
+              borderRadius: br,
+              border: Border.all(
+                color: cs.primary.withValues(alpha: 0.35),
+                width: 1.5,
+              ),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.phone_android_rounded, size: 18, color: cs.primary),
+                if (_isLoading) ...[
+                  const SizedBox(height: 4),
+                  SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 1.5, color: cs.primary),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        );
+
+        // ListenableBuilder scopes rebuilds to only the Positioned wrapper,
+        // so coordinator Y changes do NOT rebuild the entire overlay widget.
+        final coordinator = widget.coordinator;
+        if (coordinator != null) {
+          return ListenableBuilder(
+            listenable: coordinator,
+            child: GestureDetector(
+              onPanUpdate: _onBubblePanUpdate,
+              onPanEnd: _onBubblePanEnd,
+              onTap: () {
+                setState(() {
+                  _bubbleSnapped = false;
+                  _dragAwayAccum = 0;
+                  _bubblePos = Offset(
+                    _bubbleSnapLeft ? tabW + 8 : size.width - _kBubbleSize - 8,
+                    _bubblePos.dy,
+                  );
+                });
+                coordinator.clear(SnapCoordinator.slotWeb);
+              },
+              child: tabContent,
+            ),
+            builder: (context, child) {
+              final displayY = coordinator.resolveY(
+                SnapCoordinator.slotWeb, _bubbleSnapLeft,
+                _bubblePos.dy, tabH, size.height,
+              );
+              return Positioned(
+                left:  _bubbleSnapLeft ? 0 : null,
+                right: _bubbleSnapLeft ? null : 0,
+                top:   displayY,
+                child: child!,
+              );
+            },
+          );
+        }
+
+        // Fallback when no coordinator is provided (no overlap resolution needed).
+        final displayY = _bubblePos.dy.clamp(0.0, size.height - tabH);
         return Positioned(
           left:  _bubbleSnapLeft ? 0 : null,
           right: _bubbleSnapLeft ? null : 0,
-          top: displayY,
+          top:   displayY,
           child: GestureDetector(
             onPanUpdate: _onBubblePanUpdate,
-            onPanEnd:    _onBubblePanEnd,
-            // Tap on the docked tab: un-snap back to free-floating bubble.
+            onPanEnd: _onBubblePanEnd,
             onTap: () {
               setState(() {
                 _bubbleSnapped = false;
@@ -405,39 +480,8 @@ class _WebPreviewOverlayState extends State<WebPreviewOverlay> {
                   _bubblePos.dy,
                 );
               });
-              widget.coordinator?.clear(SnapCoordinator.slotWeb);
             },
-            child: Material(
-              elevation: 8,
-              borderRadius: br,
-              color: cs.primaryContainer,
-              child: Container(
-                width: tabW,
-                height: tabH,
-                decoration: BoxDecoration(
-                  borderRadius: br,
-                  border: Border.all(
-                    color: cs.primary.withValues(alpha: 0.35),
-                    width: 1.5,
-                  ),
-                ),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.phone_android_rounded, size: 18, color: cs.primary),
-                    if (_isLoading) ...[
-                      const SizedBox(height: 4),
-                      SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 1.5, color: cs.primary),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ),
+            child: tabContent,
           ),
         );
       }
@@ -478,10 +522,8 @@ class _WebPreviewOverlayState extends State<WebPreviewOverlay> {
     }
 
     // ── Full-screen panel ──────────────────────────────────────────────────
-    return Positioned.fill(
-      child: Material(
-        color: cs.surface,
-        child: SafeArea(
+    final isDark = cs.brightness == Brightness.dark;
+    final panelContent = SafeArea(
           child: Column(
             children: [
               _PageToolbar(
@@ -558,8 +600,29 @@ class _WebPreviewOverlayState extends State<WebPreviewOverlay> {
               ),
             ],
           ),
-        ),
-      ),
+        );
+      
+
+    return Positioned.fill(
+      child: widget.liquidGlass
+          ? LiquidGlass.withOwnLayer(
+              settings: LiquidGlassSettings(
+                glassColor: cs.surface.withValues(alpha: 0.88),
+                blur: 3.0,
+                thickness: 50.0,
+                lightIntensity: isDark ? 0.7 : 1.0,
+                ambientStrength: isDark ? 0.2 : 0.5,
+                lightAngle: math.pi / 4,
+                refractiveIndex: 1.18,
+                saturation: 1.4,
+                chromaticAberration: 0.4,
+              ),
+              shape: LiquidRoundedRectangle(borderRadius: 0),
+              child: GlassGlow(
+                child: Material(type: MaterialType.transparency, child: panelContent),
+              ),
+            )
+          : Material(color: cs.surface, child: panelContent),
     );
   }
 }

@@ -109,53 +109,53 @@ class _ThinkingDots extends StatefulWidget {
 class _ThinkingDotsState extends State<_ThinkingDots>
     with SingleTickerProviderStateMixin {
   late final AnimationController _ctrl;
-  int _step = 0;
-  Timer? _timer;
 
   @override
   void initState() {
     super.initState();
+    // 1350ms = 3 dots × 450ms each; repeat() cycles 0.0→1.0 continuously.
     _ctrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 800))
-      ..repeat(reverse: true);
-    _timer = Timer.periodic(const Duration(milliseconds: 450), (_) {
-      if (mounted) setState(() => _step = (_step + 1) % 4);
-    });
+        vsync: this, duration: const Duration(milliseconds: 1350))
+      ..repeat();
   }
 
   @override
   void dispose() {
     _ctrl.dispose();
-    _timer?.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final cs   = Theme.of(context).colorScheme;
-    final dots = switch (_step) { 0 => '.', 1 => '..', 2 => '...', _ => '..' };
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        AnimatedBuilder(
-          animation: _ctrl,
-          // child is built once and reused every frame — avoids rebuilding
-          // the Row + Icon tree on every animation tick (~60×/sec).
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(Icons.more_horiz_rounded, size: 16, color: cs.primary),
-            const SizedBox(width: 4),
-          ]),
-          builder: (_, child) => Opacity(
-            opacity: 0.4 + _ctrl.value * 0.6,
-            child: child,
-          ),
-        ),
-        Text('Pensando$dots',
-            style: TextStyle(
-                color: cs.onSurfaceVariant,
-                fontSize: 12,
-                fontStyle: FontStyle.italic)),
-      ],
+    final cs = Theme.of(context).colorScheme;
+    return AnimatedBuilder(
+      animation: _ctrl,
+      // child is built once and reused every frame — avoids rebuilding
+      // the Icon subtree on every animation tick (~60×/sec).
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(Icons.more_horiz_rounded, size: 16, color: cs.primary),
+        const SizedBox(width: 4),
+      ]),
+      builder: (_, child) {
+        // Map 0.0-1.0 → 1-3 dots (1 dot at start, 3 at peak, cycles back).
+        final dotCount = (_ctrl.value * 3).ceil().clamp(1, 3);
+        final dots = '.' * dotCount;
+        // Pulse opacity in sync with the same controller value.
+        final opacity = 0.4 + _ctrl.value * 0.6;
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Opacity(opacity: opacity, child: child),
+            Text(
+              'Pensando$dots',
+              style: TextStyle(
+                  color: cs.onSurfaceVariant,
+                  fontSize: 12,
+                  fontStyle: FontStyle.italic),
+            ),
+          ],
+        );
+      },
     );
   }
 }

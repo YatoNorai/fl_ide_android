@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui';
 
 import 'package:core/core.dart' show FileNode, showThemedDialog;
 import 'package:file_picker/file_picker.dart';
@@ -20,12 +21,116 @@ bool _isRemote(BuildContext ctx, String path) {
   }
 }
 
+// ── Blur bottom sheet ─────────────────────────────────────────────────────────
+
+Future<T?> _showBlurredSheet<T>(
+  BuildContext context,
+  WidgetBuilder builder,
+) {
+  return showModalBottomSheet<T>(
+    context: context,
+    backgroundColor: Colors.transparent,
+    barrierColor: Colors.transparent,
+    isScrollControlled: true,
+    builder: (ctx) => Stack(
+      children: [
+        // Detector de toque na área do Blur
+        Positioned.fill(
+          child: GestureDetector(
+            onTap: () => Navigator.pop(ctx), // Fecha o sheet
+            behavior: HitTestBehavior.opaque, // Garante que detecte o toque mesmo sendo "vazio"
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+              child: Container(
+                color: Colors.black.withOpacity(0.1), // Um leve tom para ajudar no contraste
+              ),
+            ),
+          ),
+        ),
+        // Conteúdo do Sheet
+        Align(
+          alignment: Alignment.bottomCenter,
+          child: CustomPaint(
+            painter: _TopRoundedBorderPainter(
+              color: Colors.grey,
+              width: 0.5,
+              radius: 20.0,
+            ),
+            child: Container(
+              // Importante: BoxDecoration e BorderRadius aqui
+              decoration: BoxDecoration(
+                color: Theme.of(ctx).colorScheme.surface,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+              ),
+              child: ClipRRect(
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                child: builder(ctx),
+              ),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+// Classe auxiliar para desenhar a borda seguindo a curva
+class _TopRoundedBorderPainter extends CustomPainter {
+  final Color color;
+  final double width;
+  final double radius;
+
+  _TopRoundedBorderPainter({
+    required this.color, 
+    required this.width, 
+    required this.radius
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = width
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round // Arredonda a ponta inicial e final da linha
+      ..strokeJoin = StrokeJoin.round; // Suaviza a conexão entre reta e curva
+
+    final path = Path();
+    
+    // Começamos um pouco abaixo do início da curva na lateral esquerda
+    // para garantir que a curva seja desenhada por completo.
+    path.moveTo(0, radius); 
+    
+    // Desenha a curva superior esquerda
+    path.arcToPoint(
+      Offset(radius, 0),
+      radius: Radius.circular(radius),
+      clockwise: true,
+    );
+
+    // Linha reta do topo
+    path.lineTo(size.width - radius, 0);
+
+    // Desenha a curva superior direita
+    path.arcToPoint(
+      Offset(size.width, radius),
+      radius: Radius.circular(radius),
+      clockwise: true,
+    );
+
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
 class FileTreePanel extends StatelessWidget {
   final VoidCallback? onFileSelected;
   /// Called when the user taps an APK file — workspace_screen shows the
   /// install dialog using this callback instead of opening the file in editor.
   final void Function(String apkPath)? onApkTap;
-  const FileTreePanel({super.key, this.onFileSelected, this.onApkTap});
+  final bool liquidGlass;
+  const FileTreePanel({super.key, this.onFileSelected, this.onApkTap, this.liquidGlass = false});
 
   @override
   Widget build(BuildContext context) {
@@ -39,7 +144,7 @@ class FileTreePanel extends StatelessWidget {
       (e) => (e.rootNode, e.treeVersion),
     );
     return ColoredBox(
-      color: cs.surface,
+      color: liquidGlass ? Colors.transparent : cs.surface,
       child: rootNode == null
           ? Center(
               child: Text('No project open',
@@ -81,7 +186,7 @@ class _FileTreeNode extends StatelessWidget {
 
 // ── Directory node ────────────────────────────────────────────────────────────
 
-class _DirectoryNode extends StatelessWidget {
+class _DirectoryNode extends StatefulWidget {
   final FileNode node;
   final int depth;
   final VoidCallback? onFileSelected;
@@ -91,47 +196,104 @@ class _DirectoryNode extends StatelessWidget {
        this.onFileSelected, this.onApkTap});
 
   @override
+  State<_DirectoryNode> createState() => _DirectoryNodeState();
+}
+
+class _DirectoryNodeState extends State<_DirectoryNode>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _anim;
+  // Track expanded state separately: node is mutated in-place, so
+  // oldWidget.node.isExpanded == widget.node.isExpanded in didUpdateWidget.
+  late bool _isExpanded;
+  // Whether children should still be in the tree (true while animating collapse).
+  bool _showChildren = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _isExpanded = widget.node.isExpanded;
+    _showChildren = _isExpanded;
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 180),
+      value: _isExpanded ? 1.0 : 0.0,
+    );
+    _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut);
+    _ctrl.addStatusListener(_onStatus);
+  }
+
+  @override
+  void didUpdateWidget(_DirectoryNode old) {
+    super.didUpdateWidget(old);
+    final nowExpanded = widget.node.isExpanded;
+    if (nowExpanded == _isExpanded) return;
+    _isExpanded = nowExpanded;
+    if (nowExpanded) {
+      setState(() => _showChildren = true);
+      _ctrl.forward();
+    } else {
+      _ctrl.reverse();
+    }
+  }
+
+  void _onStatus(AnimationStatus status) {
+    if (status == AnimationStatus.dismissed && mounted) {
+      setState(() => _showChildren = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _ctrl.removeStatusListener(_onStatus);
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _TreeItem(
-          node: node,
-          depth: depth,
-          leading: Icon(
-            node.isExpanded
-                ? Icons.keyboard_arrow_down
-                : Icons.chevron_right,
-            size: 20,
-            color: cs.onSurfaceVariant,
+          node: widget.node,
+          depth: widget.depth,
+          leading: RotationTransition(
+            turns: Tween<double>(begin: 0.0, end: 0.25).animate(_anim),
+            child: Icon(Icons.arrow_right_rounded, size: 20,
+                color: cs.onSurfaceVariant),
           ),
           icon: Icons.folder_rounded,
           iconColor: const Color(0xFF90B4E8),
-          label: node.name,
-          onTap: () => context.read<EditorProvider>().expandNode(node),
-          onLongPress: () => _showDirSheet(context, node),
+          label: widget.node.name,
+          onTap: () => context.read<EditorProvider>().expandNode(widget.node),
+          onLongPress: () => _showDirSheet(context, widget.node),
         ),
-        if (node.isExpanded)
-          ...node.children.map((child) => _FileTreeNode(
-              key: ValueKey(child.path),
-              node: child,
-              depth: depth + 1,
-              onFileSelected: onFileSelected,
-              onApkTap: onApkTap)),
+        if (_showChildren)
+          SizeTransition(
+            sizeFactor: _anim,
+            axisAlignment: -1.0,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: widget.node.children.map((child) => _FileTreeNode(
+                  key: ValueKey(child.path),
+                  node: child,
+                  depth: widget.depth + 1,
+                  onFileSelected: widget.onFileSelected,
+                  onApkTap: widget.onApkTap)).toList(),
+            ),
+          ),
       ],
     );
   }
 
   void _showDirSheet(BuildContext context, FileNode dir) {
     final editor = context.read<EditorProvider>();
-    // Capture parent context before sheet opens so action dialogs can use it.
     final parentCtx = context;
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      builder: (ctx) => _DirActionsSheet(
+    _showBlurredSheet(
+      context,
+      (ctx) => _DirActionsSheet(
         dir: dir,
         parentContext: parentCtx,
         onRefresh: editor.refreshTree,
@@ -187,11 +349,9 @@ class _FileLeaf extends StatelessWidget {
   void _showFileSheet(BuildContext context, FileNode file) {
     final editor = context.read<EditorProvider>();
     final parentCtx = context;
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      builder: (ctx) => _FileActionsSheet(
+    _showBlurredSheet(
+      context,
+      (ctx) => _FileActionsSheet(
         file: file,
         parentContext: parentCtx,
         onRefresh: editor.refreshTree,
@@ -444,38 +604,38 @@ class _FileActionsSheet extends StatelessWidget {
     Navigator.pop(context);
     showThemedDialog(
       context: parentContext,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Delete file?'),
-        content: Text('Delete "${file.name}"? This cannot be undone.'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel')),
-          FilledButton(
-            style: FilledButton.styleFrom(
-                backgroundColor: Theme.of(ctx).colorScheme.error),
-            onPressed: () async {
-              Navigator.pop(ctx);
-              try {
-                onCloseFile();
-                if (_isRemote(parentContext, file.path)) {
-                  await parentContext.read<SshProvider>().deleteFile(file.path);
-                } else {
-                  await File(file.path).delete();
-                }
-                onRefresh();
-              } catch (e) {
-                if (parentContext.mounted) {
-                  ScaffoldMessenger.of(parentContext)
-                      .showSnackBar(SnackBar(content: Text('Error: $e')));
-                }
-              }
-            },
-            child: const Text('Delete'),
-          ),
-        ],
+      title: 'Delete file?',
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+        child: Text('Delete "${file.name}"? This cannot be undone.'),
       ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(parentContext),
+            child: const Text('Cancel')),
+        FilledButton(
+          style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(parentContext).colorScheme.error),
+          onPressed: () async {
+            Navigator.pop(parentContext);
+            try {
+              onCloseFile();
+              if (_isRemote(parentContext, file.path)) {
+                await parentContext.read<SshProvider>().deleteFile(file.path);
+              } else {
+                await File(file.path).delete();
+              }
+              onRefresh();
+            } catch (e) {
+              if (parentContext.mounted) {
+                ScaffoldMessenger.of(parentContext)
+                    .showSnackBar(SnackBar(content: Text('Error: $e')));
+              }
+            }
+          },
+          child: const Text('Delete'),
+        ),
+      ],
     );
   }
 
@@ -484,46 +644,46 @@ class _FileActionsSheet extends StatelessWidget {
     final ctrl = TextEditingController(text: file.name);
     showThemedDialog(
       context: parentContext,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Rename file'),
-        content: TextField(
+      title: 'Rename file',
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+        child: TextField(
           controller: ctrl,
           autofocus: true,
           decoration: const InputDecoration(border: OutlineInputBorder()),
         ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel')),
-          FilledButton(
-            onPressed: () async {
-              final newName = ctrl.text.trim();
-              if (newName.isEmpty) return;
-              Navigator.pop(ctx);
-              final sep = file.path.contains('/') ? '/' : r'\';
-              final parent =
-                  file.path.substring(0, file.path.lastIndexOf(sep));
-              try {
-                if (_isRemote(parentContext, file.path)) {
-                  await parentContext
-                      .read<SshProvider>()
-                      .rename(file.path, '$parent/$newName');
-                } else {
-                  await File(file.path).rename('$parent/$newName');
-                }
-                onRefresh();
-              } catch (e) {
-                if (parentContext.mounted) {
-                  ScaffoldMessenger.of(parentContext)
-                      .showSnackBar(SnackBar(content: Text('Error: $e')));
-                }
-              }
-            },
-            child: const Text('Rename'),
-          ),
-        ],
       ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(parentContext),
+            child: const Text('Cancel')),
+        FilledButton(
+          onPressed: () async {
+            final newName = ctrl.text.trim();
+            if (newName.isEmpty) return;
+            Navigator.pop(parentContext);
+            final sep = file.path.contains('/') ? '/' : r'\';
+            final parent =
+                file.path.substring(0, file.path.lastIndexOf(sep));
+            try {
+              if (_isRemote(parentContext, file.path)) {
+                await parentContext
+                    .read<SshProvider>()
+                    .rename(file.path, '$parent/$newName');
+              } else {
+                await File(file.path).rename('$parent/$newName');
+              }
+              onRefresh();
+            } catch (e) {
+              if (parentContext.mounted) {
+                ScaffoldMessenger.of(parentContext)
+                    .showSnackBar(SnackBar(content: Text('Error: $e')));
+              }
+            }
+          },
+          child: const Text('Rename'),
+        ),
+      ],
     );
   }
 }
@@ -664,43 +824,42 @@ class _DirActionsSheet extends StatelessWidget {
     Navigator.pop(context);
     showThemedDialog(
       context: parentContext,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Delete folder?'),
-        content: Text(
-            'Delete "${dir.name}" and all its contents? This cannot be undone.'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel')),
-          FilledButton(
-            style: FilledButton.styleFrom(
-                backgroundColor: Theme.of(ctx).colorScheme.error),
-            onPressed: () async {
-              Navigator.pop(ctx);
-              try {
-                onCloseUnder(dir.path);
-                if (_isRemote(parentContext, dir.path)) {
-                  final ssh = parentContext.read<SshProvider>();
-                  final cmd = ssh.remoteIsWindows
-                      ? 'cmd /c rmdir /s /q "${dir.path}"'
-                      : 'rm -rf "${dir.path}"';
-                  await ssh.execute(cmd);
-                } else {
-                  await Directory(dir.path).delete(recursive: true);
-                }
-                onRefresh();
-              } catch (e) {
-                if (parentContext.mounted) {
-                  ScaffoldMessenger.of(parentContext)
-                      .showSnackBar(SnackBar(content: Text('Error: $e')));
-                }
-              }
-            },
-            child: const Text('Delete'),
-          ),
-        ],
+      title: 'Delete folder?',
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+        child: Text('Delete "${dir.name}" and all its contents? This cannot be undone.'),
       ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(parentContext),
+            child: const Text('Cancel')),
+        FilledButton(
+          style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(parentContext).colorScheme.error),
+          onPressed: () async {
+            Navigator.pop(parentContext);
+            try {
+              onCloseUnder(dir.path);
+              if (_isRemote(parentContext, dir.path)) {
+                final ssh = parentContext.read<SshProvider>();
+                final cmd = ssh.remoteIsWindows
+                    ? 'cmd /c rmdir /s /q "${dir.path}"'
+                    : 'rm -rf "${dir.path}"';
+                await ssh.execute(cmd);
+              } else {
+                await Directory(dir.path).delete(recursive: true);
+              }
+              onRefresh();
+            } catch (e) {
+              if (parentContext.mounted) {
+                ScaffoldMessenger.of(parentContext)
+                    .showSnackBar(SnackBar(content: Text('Error: $e')));
+              }
+            }
+          },
+          child: const Text('Delete'),
+        ),
+      ],
     );
   }
 
@@ -709,10 +868,10 @@ class _DirActionsSheet extends StatelessWidget {
     final ctrl = TextEditingController();
     showThemedDialog(
       context: parentContext,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(isFile ? 'New file' : 'New folder'),
-        content: TextField(
+      title: isFile ? 'New file' : 'New folder',
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+        child: TextField(
           controller: ctrl,
           autofocus: true,
           decoration: InputDecoration(
@@ -720,48 +879,48 @@ class _DirActionsSheet extends StatelessWidget {
             border: const OutlineInputBorder(),
           ),
         ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel')),
-          FilledButton(
-            onPressed: () async {
-              final name = ctrl.text.trim();
-              if (name.isEmpty) return;
-              Navigator.pop(ctx);
-              final newPath = '${dir.path}/$name';
-              try {
-                if (_isRemote(parentContext, dir.path)) {
-                  final ssh = parentContext.read<SshProvider>();
-                  if (isFile) {
-                    await ssh.writeFile(newPath, '');
-                    onRefresh();
-                    await onOpenFile(newPath);
-                  } else {
-                    await ssh.createDirectory(newPath);
-                    onRefresh();
-                  }
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(parentContext),
+            child: const Text('Cancel')),
+        FilledButton(
+          onPressed: () async {
+            final name = ctrl.text.trim();
+            if (name.isEmpty) return;
+            Navigator.pop(parentContext);
+            final newPath = '${dir.path}/$name';
+            try {
+              if (_isRemote(parentContext, dir.path)) {
+                final ssh = parentContext.read<SshProvider>();
+                if (isFile) {
+                  await ssh.writeFile(newPath, '');
+                  onRefresh();
+                  await onOpenFile(newPath);
                 } else {
-                  if (isFile) {
-                    await File(newPath).create(recursive: true);
-                    onRefresh();
-                    await onOpenFile(newPath);
-                  } else {
-                    await Directory(newPath).create(recursive: true);
-                    onRefresh();
-                  }
+                  await ssh.createDirectory(newPath);
+                  onRefresh();
                 }
-              } catch (e) {
-                if (parentContext.mounted) {
-                  ScaffoldMessenger.of(parentContext)
-                      .showSnackBar(SnackBar(content: Text('Error: $e')));
+              } else {
+                if (isFile) {
+                  await File(newPath).create(recursive: true);
+                  onRefresh();
+                  await onOpenFile(newPath);
+                } else {
+                  await Directory(newPath).create(recursive: true);
+                  onRefresh();
                 }
               }
-            },
-            child: const Text('Create'),
-          ),
-        ],
-      ),
+            } catch (e) {
+              if (parentContext.mounted) {
+                ScaffoldMessenger.of(parentContext)
+                    .showSnackBar(SnackBar(content: Text('Error: $e')));
+              }
+            }
+          },
+          child: const Text('Create'),
+        ),
+      ],
     );
   }
 
@@ -770,46 +929,46 @@ class _DirActionsSheet extends StatelessWidget {
     final ctrl = TextEditingController(text: dir.name);
     showThemedDialog(
       context: parentContext,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Rename folder'),
-        content: TextField(
+      title: 'Rename folder',
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+        child: TextField(
           controller: ctrl,
           autofocus: true,
           decoration: const InputDecoration(border: OutlineInputBorder()),
         ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel')),
-          FilledButton(
-            onPressed: () async {
-              final newName = ctrl.text.trim();
-              if (newName.isEmpty) return;
-              Navigator.pop(ctx);
-              final sep = dir.path.contains('/') ? '/' : r'\';
-              final parent =
-                  dir.path.substring(0, dir.path.lastIndexOf(sep));
-              try {
-                if (_isRemote(parentContext, dir.path)) {
-                  await parentContext
-                      .read<SshProvider>()
-                      .rename(dir.path, '$parent/$newName');
-                } else {
-                  await Directory(dir.path).rename('$parent/$newName');
-                }
-                onRefresh();
-              } catch (e) {
-                if (parentContext.mounted) {
-                  ScaffoldMessenger.of(parentContext)
-                      .showSnackBar(SnackBar(content: Text('Error: $e')));
-                }
-              }
-            },
-            child: const Text('Rename'),
-          ),
-        ],
       ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(parentContext),
+            child: const Text('Cancel')),
+        FilledButton(
+          onPressed: () async {
+            final newName = ctrl.text.trim();
+            if (newName.isEmpty) return;
+            Navigator.pop(parentContext);
+            final sep = dir.path.contains('/') ? '/' : r'\';
+            final parent =
+                dir.path.substring(0, dir.path.lastIndexOf(sep));
+            try {
+              if (_isRemote(parentContext, dir.path)) {
+                await parentContext
+                    .read<SshProvider>()
+                    .rename(dir.path, '$parent/$newName');
+              } else {
+                await Directory(dir.path).rename('$parent/$newName');
+              }
+              onRefresh();
+            } catch (e) {
+              if (parentContext.mounted) {
+                ScaffoldMessenger.of(parentContext)
+                    .showSnackBar(SnackBar(content: Text('Error: $e')));
+              }
+            }
+          },
+          child: const Text('Rename'),
+        ),
+      ],
     );
   }
 }

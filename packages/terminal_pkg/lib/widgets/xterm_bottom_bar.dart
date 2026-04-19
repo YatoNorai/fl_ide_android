@@ -52,7 +52,9 @@ class _XtermBottomBarState extends State<XtermBottomBar>
         vsync: this, duration: const Duration(milliseconds: 180));
     _height = Tween<double>(begin: _expandedHeight, end: _collapsedHeight)
         .animate(CurvedAnimation(parent: _animCtrl, curve: Curves.easeInOut));
-    _height.addListener(() => setState(() {}));
+    // Removido: _height.addListener(() => setState(() {}))
+    // O AnimatedBuilder no build() escuta a animação e reconstrói
+    // apenas o SizedBox de altura, sem rebuildar o widget inteiro.
     _installInterceptor(widget.terminal);
   }
 
@@ -145,95 +147,111 @@ class _XtermBottomBarState extends State<XtermBottomBar>
 
   // ── Build ──────────────────────────────────────────────────────────────
 
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-
-    return Container(
-      height: _height.value,
-      decoration: BoxDecoration(
-        color: colors.surfaceContainerHighest.withValues(alpha: 0.6),
-        border: Border(
-          top: BorderSide(color: colors.outline.withValues(alpha: 0.15)),
-        ),
-      ),
-      child: SingleChildScrollView(
-        physics: const NeverScrollableScrollPhysics(),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // ── Drag handle / collapse toggle ──────────────────────────
-            GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: _toggle,
-              child: SizedBox(
-                height: 20,
-                child: Center(
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 180),
-                    width: _collapsed ? 32 : 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: colors.onSurface.withValues(alpha: 0.25),
-                      borderRadius: BorderRadius.circular(2),
-                    ),
+  /// Constrói o conteúdo estático (teclas + handle) que não muda por frame.
+  /// Passado como `child` do AnimatedBuilder, é instanciado uma única vez
+  /// e reutilizado durante toda a animação de expand/collapse.
+  Widget _buildContent(ColorScheme colors) {
+    return SingleChildScrollView(
+      physics: const NeverScrollableScrollPhysics(),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // ── Drag handle / collapse toggle ────────────────────────────
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _toggle,
+            child: SizedBox(
+              height: 20,
+              child: Center(
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  width: _collapsed ? 32 : 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: colors.onSurface.withValues(alpha: 0.25),
+                    borderRadius: BorderRadius.circular(2),
                   ),
                 ),
               ),
             ),
+          ),
 
-            // ── Row 1 ──────────────────────────────────────────────────
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: Row(
-                children: [
-                  _Key('ESC',  () => _sendKey(TerminalKey.escape)),
-                  _Key('TAB',  () => _sendKey(TerminalKey.tab)),
-                  // CTRL — sticky: latches on first tap, releases after next key
-                  _Key('CTRL',
-                    () => setState(() {
-                      _ctrlActive = !_ctrlActive;
-                      if (_ctrlActive) _altActive = false;
-                    }),
-                    active: _ctrlActive,
-                  ),
-                  // ALT — sticky
-                  _Key('ALT',
-                    () => setState(() {
-                      _altActive = !_altActive;
-                      if (_altActive) _ctrlActive = false;
-                    }),
-                    active: _altActive,
-                  ),
-                  _Key('HOME', () => _sendKey(TerminalKey.home)),
-                  _Key('↑',    () => _sendKey(TerminalKey.arrowUp)),
-                  _Key('PGUP', () => _sendKey(TerminalKey.pageUp)),
-                ],
-              ),
+          // ── Row 1 ────────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Row(
+              children: [
+                _Key('ESC',  () => _sendKey(TerminalKey.escape)),
+                _Key('TAB',  () => _sendKey(TerminalKey.tab)),
+                // CTRL — sticky: latches on first tap, releases after next key
+                _Key('CTRL',
+                  () => setState(() {
+                    _ctrlActive = !_ctrlActive;
+                    if (_ctrlActive) _altActive = false;
+                  }),
+                  active: _ctrlActive,
+                ),
+                // ALT — sticky
+                _Key('ALT',
+                  () => setState(() {
+                    _altActive = !_altActive;
+                    if (_altActive) _ctrlActive = false;
+                  }),
+                  active: _altActive,
+                ),
+                _Key('HOME', () => _sendKey(TerminalKey.home)),
+                _Key('↑',    () => _sendKey(TerminalKey.arrowUp)),
+                _Key('PGUP', () => _sendKey(TerminalKey.pageUp)),
+              ],
             ),
+          ),
 
-            // ── Row 2 ──────────────────────────────────────────────────
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: Row(
-                children: [
-                  _Key('INS',  () => _sendKey(TerminalKey.insert)),
-                  _Key('END',  () => _sendKey(TerminalKey.end)),
-                  // SHFT — sticky
-                  _Key('SHFT',
-                    () => setState(() => _shiftActive = !_shiftActive),
-                    active: _shiftActive,
-                  ),
-                  _Key('PGDN', () => _sendKey(TerminalKey.pageDown)),
-                  _Key('←',    () => _sendKey(TerminalKey.arrowLeft)),
-                  _Key('↓',    () => _sendKey(TerminalKey.arrowDown)),
-                  _Key('→',    () => _sendKey(TerminalKey.arrowRight)),
-                ],
-              ),
+          // ── Row 2 ────────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Row(
+              children: [
+                _Key('INS',  () => _sendKey(TerminalKey.insert)),
+                _Key('END',  () => _sendKey(TerminalKey.end)),
+                // SHFT — sticky
+                _Key('SHFT',
+                  () => setState(() => _shiftActive = !_shiftActive),
+                  active: _shiftActive,
+                ),
+                _Key('PGDN', () => _sendKey(TerminalKey.pageDown)),
+                _Key('←',    () => _sendKey(TerminalKey.arrowLeft)),
+                _Key('↓',    () => _sendKey(TerminalKey.arrowDown)),
+                _Key('→',    () => _sendKey(TerminalKey.arrowRight)),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+
+    // AnimatedBuilder escuta apenas _height. O parâmetro `child` é construído
+    // uma única vez fora do builder e repassado pronto — evita rebuildar as
+    // linhas de teclas (Row + _Key widgets) a cada frame da animação (60 fps).
+    return AnimatedBuilder(
+      animation: _height,
+      builder: (context, child) {
+        return Container(
+          height: _height.value,
+          decoration: BoxDecoration(
+            color: colors.surfaceContainerHighest.withValues(alpha: 0.6),
+            border: Border(
+              top: BorderSide(color: colors.outline.withValues(alpha: 0.15)),
+            ),
+          ),
+          child: child,
+        );
+      },
+      child: _buildContent(colors),
     );
   }
 }
@@ -248,9 +266,11 @@ class MiniTerminalKeyBar extends StatefulWidget {
   const MiniTerminalKeyBar({
     super.key,
     required this.session,
+    this.liquidGlass = false,
   });
 
   final TerminalSession session;
+  final bool liquidGlass;
 
   @override
   State<MiniTerminalKeyBar> createState() => _MiniTerminalKeyBarState();
@@ -342,9 +362,9 @@ class _MiniTerminalKeyBarState extends State<MiniTerminalKeyBar> {
     return Container(
       height: 34,
       decoration: BoxDecoration(
-        color: cs.surfaceContainerHighest.withValues(alpha: 0.55),
+        color: widget.liquidGlass ? Colors.transparent : cs.surfaceContainerHighest.withValues(alpha: 0.55),
         border: Border(
-          top: BorderSide(color: cs.outline.withValues(alpha: 0.13)),
+          top: BorderSide(color: widget.liquidGlass ? Colors.transparent : cs.outline.withValues(alpha: 0.13)),
         ),
       ),
       child: Padding(

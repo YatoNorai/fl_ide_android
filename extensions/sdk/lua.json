@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "sdk": "lua",
+  "sdk_version": "latest",
+  "display_name": "Lua",
+  "description": "Lua para Termux no Android ARM64. Inclui o interpretador Lua via pkg e lua-language-server (LSP) para autocompletar e diagnósticos.",
+  "package": {
+    "type": "pkg",
+    "arch": "arm64",
+    "size_mb": 40
+  },
+  "package_author": {
+    "name": "Termux / Lua Team",
+    "github": "https://github.com/termux/termux-packages"
+  },
+  "json_author": {
+    "name": "Yato",
+    "date": "2026-04-19"
+  },
+  "install_steps": [
+    {
+      "type": "shell",
+      "command": "pkg update -y 2>&1 && pkg install -y lua54 2>&1 || pkg install -y lua53 2>&1 || pkg install -y lua 2>&1",
+      "description": "Instalando Lua via pkg (tenta lua54, lua53, lua)"
+    },
+    {
+      "type": "shell",
+      "command": "lua -v 2>&1 || lua5.4 -v 2>&1 || lua5.3 -v 2>&1",
+      "description": "Verificando instalação do Lua"
+    },
+    {
+      "type": "shell",
+      "command": "pkg install -y lua-language-server 2>&1 && echo 'OK: lua-language-server instalado' || echo 'AVISO: lua-language-server não disponível via pkg, tentando compilação'",
+      "description": "Instalando lua-language-server (LSP)"
+    },
+    {
+      "type": "shell",
+      "command": "lua-language-server --version 2>&1 && echo 'OK' || echo 'AVISO: lua-language-server não encontrado'",
+      "description": "Verificando lua-language-server"
+    }
+  ],
+  "config_steps": [
+    {
+      "type": "shell",
+      "command": "test -f $PREFIX/bin/lua-language-server && echo 'lua-language-server OK' || echo 'AVISO: LSP não disponível'",
+      "description": "Verificando lua-language-server"
+    }
+  ],
+  "cleanup_steps": [],
+  "uninstall_steps": [
+    {
+      "type": "shell",
+      "command": "pkg remove -y lua54 lua53 lua lua-language-server 2>&1 || true",
+      "description": "Removendo Lua e lua-language-server"
+    }
+  ],
+  "verify_binary": "lua",
+  "verify_command": "lua -v",
+  "run_config": {
+    "run": "lua main.lua",
+    "supports_devices": false,
+    "build_debug": null,
+    "build_release": null
+  },
+  "sdk_config": {
+    "new_project_cmd": "mkdir -p $name && cd $name && printf '-- Hello, World!\\nprint(\"Hello, World!\")\\n' > main.lua",
+    "default_entry_file": "main.lua",
+    "file_extensions": ["lua"],
+    "sync_command": null,
+    "sync_trigger_file": null,
+    "format_command": null
+  },
+  "lsp_config": {
+    "server_binary": "$PREFIX/bin/lua-language-server",
+    "server_args": [],
+    "language_ids": ["lua"]
+  }
+}

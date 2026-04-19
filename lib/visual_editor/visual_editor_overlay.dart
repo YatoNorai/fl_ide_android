@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:code_editor/code_editor.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -7,7 +9,7 @@ import 'models/flutter_widget_catalog.dart';
 import 'models/widget_node.dart';
 import 'providers/visual_editor_provider.dart';
 import 'utils/dart_widget_parser.dart';
-import 'widgets/interactive_widget_renderer.dart';
+import 'widgets/rfw_renderer.dart';
 import 'widgets/widget_properties_sheet.dart';
 
 // ── Entry point ───────────────────────────────────────────────────────────────
@@ -21,15 +23,28 @@ void openVisualEditor(BuildContext context) {
   String? parseError;
 
   final ep = context.read<EditorProvider>();
-  final file = ep.activeFile;
+  // topActiveFile is the last-focused file in the main (top) editor panel.
+  // activeFile could point to a bottom-panel tab (LSP output, etc.), so we
+  // prefer topActiveFile to always get the file the user is actually editing.
+  final file = ep.topActiveFile ?? ep.activeFile;
 
   if (file == null) {
     parseError = 'Nenhum arquivo aberto no editor.';
   } else if (file.extension != 'dart') {
     parseError = 'O arquivo aberto não é um .dart.';
   } else {
-    originalSource = file.controller?.content.fullText ?? '';
     sourcePath = file.path;
+    // Prefer the live controller text (unsaved edits are included).
+    // Fall back to disk content when the controller is not yet attached.
+    final controllerText = file.controller?.content.fullText ?? '';
+    if (controllerText.isNotEmpty) {
+      originalSource = controllerText;
+    } else if (sourcePath != null) {
+      try {
+        originalSource = File(sourcePath).readAsStringSync();
+      } catch (_) {}
+    }
+
     if (originalSource.isEmpty) {
       parseError = 'Arquivo vazio.';
     } else {
@@ -646,6 +661,21 @@ class _PalettePanelState extends State<_PalettePanel> {
           ),
         ),
 
+        // Drag hint
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+          child: Row(
+            children: [
+              Icon(Icons.touch_app_rounded, size: 12, color: cs.onSurfaceVariant.withValues(alpha: 0.5)),
+              const SizedBox(width: 4),
+              Text(
+                'Toque para adicionar · Segure para arrastar',
+                style: TextStyle(fontSize: 10, color: cs.onSurfaceVariant.withValues(alpha: 0.5)),
+              ),
+            ],
+          ),
+        ),
+
         // Category chips
         if (_search.isEmpty)
           SizedBox(
@@ -737,58 +767,77 @@ class _PaletteTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+
+    final tileBody = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.4),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          Icon(def.icon, size: 18, color: def.color),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              def.name,
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: cs.onSurface),
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+            decoration: BoxDecoration(
+              color: def.color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              def.category,
+              style: TextStyle(fontSize: 10, fontWeight: FontWeight.w500, color: def.color),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    final dragFeedback = Material(
+      color: Colors.transparent,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: def.color.withValues(alpha: 0.92),
+          borderRadius: BorderRadius.circular(10),
+          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.25), blurRadius: 12, offset: const Offset(0, 4))],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(def.icon, size: 16, color: Colors.white),
+            const SizedBox(width: 8),
+            Text(def.name, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white, fontFamily: 'monospace')),
+          ],
+        ),
+      ),
+    );
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 5),
-      child: InkWell(
-        onTap: () {
-          provider.addWidget(
-            WidgetNode(
-              type: def.name,
-              properties: Map<String, dynamic>.from(def.defaultProperties),
-            ),
-          );
-        },
-        borderRadius: BorderRadius.circular(10),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            color: cs.surfaceContainerHighest.withValues(alpha: 0.4),
-            borderRadius: BorderRadius.circular(10),
-            border:
-                Border.all(color: cs.outlineVariant.withValues(alpha: 0.3)),
-          ),
-          child: Row(
-            children: [
-              Icon(def.icon, size: 18, color: def.color),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  def.name,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: cs.onSurface,
-                  ),
-                ),
+      child: LongPressDraggable<FlutterWidgetDef>(
+        data: def,
+        feedback: dragFeedback,
+        childWhenDragging: Opacity(opacity: 0.35, child: tileBody),
+        delay: const Duration(milliseconds: 200),
+        child: InkWell(
+          onTap: () {
+            provider.addWidget(
+              WidgetNode(
+                type: def.name,
+                properties: Map<String, dynamic>.from(def.defaultProperties),
               ),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                decoration: BoxDecoration(
-                  color: def.color.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  def.category,
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w500,
-                    color: def.color,
-                  ),
-                ),
-              ),
-            ],
-          ),
+            );
+          },
+          borderRadius: BorderRadius.circular(10),
+          child: tileBody,
         ),
       ),
     );
@@ -1707,28 +1756,14 @@ class _FramedNode extends StatelessWidget {
   }
 
   Widget _safeRender(WidgetNode n, BuildContext context) {
-    try {
-      return MediaQuery(
-        data: const MediaQueryData(
-            size: Size(390, 844), devicePixelRatio: 1.0),
-        child: Material(
-          type: MaterialType.canvas,
-          color: Colors.white,
-          child: renderInteractive(n, context),
-        ),
-      );
-    } catch (e) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(8),
-          child: Text(
-            'Erro de render:\n$e',
-            style: const TextStyle(color: Colors.red, fontSize: 10),
-            textAlign: TextAlign.center,
-          ),
-        ),
-      );
-    }
+    return MediaQuery(
+      data: const MediaQueryData(size: Size(390, 844), devicePixelRatio: 1.0),
+      child: Material(
+        type: MaterialType.canvas,
+        color: Colors.white,
+        child: RfwRenderer(root: n),
+      ),
+    );
   }
 }
 

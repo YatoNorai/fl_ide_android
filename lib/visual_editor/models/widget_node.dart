@@ -28,15 +28,26 @@ class WidgetNode {
   _Policy get _policy {
     const multi = {
       'Row', 'Column', 'Stack', 'Wrap', 'ListView', 'GridView',
-      'CustomScrollView',
+      'CustomScrollView', 'ReorderableListView', 'ExpansionTile',
+      'ExpansionPanelList',
     };
     const single = {
       'Container', 'Padding', 'Center', 'Align', 'Expanded', 'Flexible',
-      'SizedBox', 'Card', 'ClipRRect', 'ClipOval', 'Opacity',
-      'AnimatedContainer', 'ConstrainedBox', 'AspectRatio', 'FittedBox',
-      'Scaffold', 'SafeArea', 'SingleChildScrollView', 'InkWell',
-      'GestureDetector', 'Hero', 'Material', 'DecoratedBox', 'LimitedBox',
-      'OverflowBox', 'Tooltip',
+      'SizedBox', 'Card', 'ClipRRect', 'ClipOval', 'ClipPath', 'Opacity',
+      'AnimatedContainer', 'AnimatedOpacity', 'AnimatedPadding',
+      'AnimatedAlign', 'AnimatedScale', 'AnimatedRotation', 'AnimatedSwitcher',
+      'AnimatedCrossFade', 'AnimatedBuilder', 'TweenAnimationBuilder',
+      'ConstrainedBox', 'AspectRatio', 'FittedBox', 'FractionallySizedBox',
+      'LimitedBox', 'OverflowBox', 'RotatedBox', 'Transform',
+      'Scaffold', 'SafeArea', 'SingleChildScrollView', 'RefreshIndicator',
+      'InkWell', 'InkResponse', 'Ink', 'GestureDetector', 'Hero',
+      'Material', 'PhysicalModel', 'DecoratedBox', 'ColoredBox',
+      'Tooltip', 'Positioned', 'InteractiveViewer', 'Dismissible',
+      'DefaultTextStyle', 'Theme', 'Builder', 'LayoutBuilder',
+      'FutureBuilder', 'StreamBuilder', 'ValueListenableBuilder',
+      'NotificationListener', 'RepaintBoundary', 'Drawer',
+      'Form', 'DefaultTabController', 'MediaQuery', 'Directionality',
+      'PageView',
     };
     if (multi.contains(type)) return _Policy.multi;
     if (single.contains(type)) return _Policy.single;
@@ -351,9 +362,385 @@ class WidgetNode {
             '${p1}],\n'
             '${p})';
 
-      case 'Spacer':
+      case 'AnimatedContainer': {
+        final lines = <String>[];
+        lines.add('${p1}duration: const Duration(milliseconds: 300),');
+        if (hasProp('width')) lines.add('${p1}width: ${prop('width')},');
+        if (hasProp('height')) lines.add('${p1}height: ${prop('height')},');
+        if (hasProp('color')) lines.add('${p1}color: ${prop('color')},');
+        if (children.isNotEmpty) lines.add('${p1}child: ${children.first.toCode(indent + 1).trimLeft()},');
+        return '${p}AnimatedContainer(\n${lines.join('\n')}\n${p})';
+      }
+
+      case 'ConstrainedBox': {
+        final minW = prop('minWidth', '0.0');
+        final maxW = prop('maxWidth', 'double.infinity');
+        final minH = prop('minHeight', '0.0');
+        final maxH = prop('maxHeight', 'double.infinity');
+        return '${p}ConstrainedBox(\n'
+            '${p1}constraints: const BoxConstraints(\n'
+            '${p2}minWidth: $minW, maxWidth: $maxW,\n'
+            '${p2}minHeight: $minH, maxHeight: $maxH,\n'
+            '${p1}),\n'
+            '${p1}child: ${childCode()},\n'
+            '${p})';
+      }
+
+      case 'AspectRatio':
+        return '${p}AspectRatio(\n'
+            '${p1}aspectRatio: ${prop('aspectRatio', '1.0')},\n'
+            '${p1}child: ${childCode()},\n'
+            '${p})';
+
+      case 'FittedBox':
+        return '${p}FittedBox(\n'
+            '${p1}fit: ${prop('fit', 'BoxFit.contain')},\n'
+            '${p1}child: ${childCode()},\n'
+            '${p})';
+
+      case 'DecoratedBox': {
+        final color = hasProp('color') ? '${p2}color: ${prop('color')},' : '';
+        final br = hasProp('borderRadius') ? '\n${p2}borderRadius: BorderRadius.circular(${prop('borderRadius')}),' : '';
+        return '${p}DecoratedBox(\n'
+            '${p1}decoration: BoxDecoration($color$br\n${p1}),\n'
+            '${p1}child: ${childCode()},\n'
+            '${p})';
+      }
+
+      case 'Positioned': {
+        final l = hasProp('left') ? '${p1}left: ${prop('left')},\n' : '';
+        final t = hasProp('top') ? '${p1}top: ${prop('top')},\n' : '';
+        final r = hasProp('right') ? '${p1}right: ${prop('right')},\n' : '';
+        final b = hasProp('bottom') ? '${p1}bottom: ${prop('bottom')},\n' : '';
+        return '${p}Positioned(\n$l$t$r$b${p1}child: ${childCode()},\n${p})';
+      }
+
+      case 'NavigationBar':
+        return '${p}NavigationBar(\n'
+            '${p1}selectedIndex: 0,\n'
+            '${p1}onDestinationSelected: (i) {},\n'
+            '${p1}destinations: const [\n'
+            '${p2}NavigationDestination(icon: Icon(Icons.home_outlined), label: \'Home\'),\n'
+            '${p2}NavigationDestination(icon: Icon(Icons.settings_outlined), label: \'Settings\'),\n'
+            '${p1}],\n'
+            '${p})';
+
+      case 'Spacer': {
         final flex = prop('flex', '1');
         return flex == '1' ? '${p}const Spacer()' : '${p}Spacer(flex: $flex)';
+      }
+
+      case 'ColoredBox':
+        return '${p}ColoredBox(\n'
+            '${p1}color: ${prop('color', 'Colors.grey')},\n'
+            '${p1}child: ${childCode()},\n'
+            '${p})';
+
+      case 'FractionallySizedBox': {
+        final wf = hasProp('widthFactor') ? '${p1}widthFactor: ${prop('widthFactor')},\n' : '';
+        final hf = hasProp('heightFactor') ? '${p1}heightFactor: ${prop('heightFactor')},\n' : '';
+        return '${p}FractionallySizedBox(\n$wf$hf${p1}child: ${childCode()},\n${p})';
+      }
+
+      case 'LimitedBox':
+        return '${p}LimitedBox(\n'
+            '${p1}maxWidth: ${prop('maxWidth', 'double.infinity')},\n'
+            '${p1}maxHeight: ${prop('maxHeight', 'double.infinity')},\n'
+            '${p1}child: ${childCode()},\n'
+            '${p})';
+
+      case 'OverflowBox': {
+        final mw = hasProp('maxWidth') ? '${p1}maxWidth: ${prop('maxWidth')},\n' : '';
+        final mh = hasProp('maxHeight') ? '${p1}maxHeight: ${prop('maxHeight')},\n' : '';
+        return '${p}OverflowBox(\n$mw$mh${p1}child: ${childCode()},\n${p})';
+      }
+
+      case 'RotatedBox':
+        return '${p}RotatedBox(\n'
+            '${p1}quarterTurns: ${prop('quarterTurns', '0')},\n'
+            '${p1}child: ${childCode()},\n'
+            '${p})';
+
+      case 'Transform':
+        return '${p}Transform.scale(\n'
+            '${p1}scale: ${prop('scale', '1.0')},\n'
+            '${p1}child: ${childCode()},\n'
+            '${p})';
+
+      case 'ClipPath':
+        return '${p}ClipRect(\n${p1}child: ${childCode()},\n${p})';
+
+      case 'PhysicalModel':
+        return '${p}PhysicalModel(\n'
+            '${p1}color: ${prop('color', 'Colors.white')},\n'
+            '${p1}elevation: ${prop('elevation', '4.0')},\n'
+            '${p1}child: ${childCode()},\n'
+            '${p})';
+
+      case 'DefaultTextStyle': {
+        final args = <String>[];
+        if (hasProp('fontSize')) args.add('fontSize: ${prop('fontSize')}');
+        if (hasProp('fontWeight')) args.add('fontWeight: ${prop('fontWeight')}');
+        if (hasProp('color')) args.add('color: ${prop('color')}');
+        final style = args.isEmpty ? 'DefaultTextStyle.of(context).style' : 'TextStyle(${args.join(', ')})';
+        return '${p}DefaultTextStyle(\n'
+            '${p1}style: $style,\n'
+            '${p1}child: ${childCode()},\n'
+            '${p})';
+      }
+
+      case 'Theme':
+        return '${p}Theme(\n'
+            '${p1}data: Theme.of(context),\n'
+            '${p1}child: ${childCode()},\n'
+            '${p})';
+
+      case 'Builder':
+        return '${p}Builder(\n'
+            '${p1}builder: (context) => ${childCode()},\n'
+            '${p})';
+
+      case 'LayoutBuilder':
+        return '${p}LayoutBuilder(\n'
+            '${p1}builder: (context, constraints) => ${childCode()},\n'
+            '${p})';
+
+      case 'FutureBuilder':
+        return '${p}FutureBuilder(\n'
+            '${p1}future: null,\n'
+            '${p1}builder: (context, snapshot) => ${childCode()},\n'
+            '${p})';
+
+      case 'StreamBuilder':
+        return '${p}StreamBuilder(\n'
+            '${p1}stream: null,\n'
+            '${p1}builder: (context, snapshot) => ${childCode()},\n'
+            '${p})';
+
+      case 'AnimatedOpacity':
+        return '${p}AnimatedOpacity(\n'
+            '${p1}opacity: ${prop('opacity', '1.0')},\n'
+            '${p1}duration: const Duration(milliseconds: 300),\n'
+            '${p1}child: ${childCode()},\n'
+            '${p})';
+
+      case 'AnimatedPadding':
+        return '${p}AnimatedPadding(\n'
+            '${p1}padding: const EdgeInsets.all(${prop('padding', '8.0')}),\n'
+            '${p1}duration: const Duration(milliseconds: 300),\n'
+            '${p1}child: ${childCode()},\n'
+            '${p})';
+
+      case 'AnimatedAlign':
+        return '${p}AnimatedAlign(\n'
+            '${p1}alignment: ${prop('alignment', 'Alignment.center')},\n'
+            '${p1}duration: const Duration(milliseconds: 300),\n'
+            '${p1}child: ${childCode()},\n'
+            '${p})';
+
+      case 'AnimatedScale':
+        return '${p}AnimatedScale(\n'
+            '${p1}scale: ${prop('scale', '1.0')},\n'
+            '${p1}duration: const Duration(milliseconds: 300),\n'
+            '${p1}child: ${childCode()},\n'
+            '${p})';
+
+      case 'AnimatedSwitcher':
+        return '${p}AnimatedSwitcher(\n'
+            '${p1}duration: const Duration(milliseconds: 300),\n'
+            '${p1}child: ${childCode()},\n'
+            '${p})';
+
+      case 'GridView': {
+        final items = childrenCode();
+        final cc = prop('crossAxisCount', '2');
+        return '${p}GridView.count(\n'
+            '${p1}crossAxisCount: $cc,\n'
+            '${p1}children: [\n'
+            '${items.isEmpty ? '' : '$items,\n'}'
+            '${p1}],\n'
+            '${p})';
+      }
+
+      case 'ReorderableListView': {
+        final items = childrenCode();
+        return '${p}ReorderableListView(\n'
+            '${p1}onReorder: (oldIndex, newIndex) {},\n'
+            '${p1}children: [\n'
+            '${items.isEmpty ? '' : '$items,\n'}'
+            '${p1}],\n'
+            '${p})';
+      }
+
+      case 'ExpansionTile': {
+        final title = prop('title', 'Expansion Tile');
+        final items = childrenCode();
+        return "${p}ExpansionTile(\n"
+            "${p1}title: const Text('$title'),\n"
+            "${p1}children: [\n"
+            '${items.isEmpty ? '' : '$items,\n'}'
+            "${p1}],\n"
+            "${p})";
+      }
+
+      case 'Drawer':
+        return '${p}Drawer(\n${p1}child: ${childCode()},\n${p})';
+
+      case 'DrawerHeader': {
+        final title = prop('title', 'Drawer Header');
+        final clr = hasProp('color') ? '\n${p2}color: ${prop('color')},' : '';
+        return "${p}DrawerHeader(\n"
+            "${p1}decoration: BoxDecoration($clr\n${p1}),\n"
+            "${p1}child: const Text('$title', style: TextStyle(color: Colors.white)),\n"
+            "${p})";
+      }
+
+      case 'NavigationRail':
+        return '${p}NavigationRail(\n'
+            '${p1}selectedIndex: 0,\n'
+            '${p1}onDestinationSelected: (i) {},\n'
+            '${p1}destinations: const [\n'
+            '${p2}NavigationRailDestination(icon: Icon(Icons.home_outlined), label: Text(\'Home\')),\n'
+            '${p2}NavigationRailDestination(icon: Icon(Icons.settings_outlined), label: Text(\'Settings\')),\n'
+            '${p1}],\n'
+            '${p})';
+
+      case 'TabBar':
+        return '${p}TabBar(\n'
+            '${p1}tabs: const [Tab(text: \'Tab 1\'), Tab(text: \'Tab 2\')],\n'
+            '${p})';
+
+      case 'DefaultTabController': {
+        final len = prop('length', '2');
+        return '${p}DefaultTabController(\n'
+            '${p1}length: $len,\n'
+            '${p1}child: ${childCode()},\n'
+            '${p})';
+      }
+
+      case 'PageView': {
+        final items = childrenCode();
+        return '${p}PageView(\n'
+            '${p1}children: [\n'
+            '${items.isEmpty ? '' : '$items,\n'}'
+            '${p1}],\n'
+            '${p})';
+      }
+
+      case 'RefreshIndicator':
+        return '${p}RefreshIndicator(\n'
+            '${p1}onRefresh: () async {},\n'
+            '${p1}child: ${childCode()},\n'
+            '${p})';
+
+      case 'InteractiveViewer':
+        return '${p}InteractiveViewer(\n${p1}child: ${childCode()},\n${p})';
+
+      case 'Dismissible':
+        return '${p}Dismissible(\n'
+            "${p1}key: const ValueKey('item'),\n"
+            '${p1}child: ${childCode()},\n'
+            '${p})';
+
+      case 'SelectableText':
+        return "${p}SelectableText('${prop('text', 'SelectableText')}')";
+
+      case 'RichText':
+        return "${p}RichText(\n${p1}text: TextSpan(text: '${prop('text', 'RichText')}'),\n${p})";
+
+      case 'TextFormField': {
+        final hint = hasProp('hintText') ? "\n${p2}hintText: '${prop('hintText')}'," : '';
+        final label = hasProp('labelText') ? "\n${p2}labelText: '${prop('labelText')}'," : '';
+        return '${p}TextFormField(\n'
+            '${p1}decoration: const InputDecoration($hint$label\n${p1}),\n'
+            '${p})';
+      }
+
+      case 'Form':
+        return '${p}Form(\n'
+            '${p1}key: _formKey,\n'
+            '${p1}child: ${childCode()},\n'
+            '${p})';
+
+      case 'DropdownButton':
+        return '${p}DropdownButton<String>(\n'
+            '${p1}value: null,\n'
+            '${p1}onChanged: (v) {},\n'
+            '${p1}items: const [],\n'
+            '${p})';
+
+      case 'DropdownMenu':
+        return '${p}DropdownMenu<String>(\n'
+            "${p1}hintText: '${prop('hintText', 'Select...')}',\n"
+            '${p1}dropdownMenuEntries: const [],\n'
+            '${p})';
+
+      case 'PopupMenuButton':
+        return '${p}PopupMenuButton<String>(\n'
+            '${p1}onSelected: (v) {},\n'
+            '${p1}itemBuilder: (context) => [],\n'
+            '${p})';
+
+      case 'ToggleButtons':
+        return '${p}ToggleButtons(\n'
+            '${p1}isSelected: const [false, false, false],\n'
+            '${p1}onPressed: (i) {},\n'
+            '${p1}children: const [\n'
+            "${p2}Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Text('A')),\n"
+            "${p2}Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Text('B')),\n"
+            "${p2}Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Text('C')),\n"
+            '${p1}],\n'
+            '${p})';
+
+      case 'SegmentedButton':
+        return '${p}SegmentedButton<String>(\n'
+            '${p1}selected: const {\'a\'},\n'
+            '${p1}onSelectionChanged: (v) {},\n'
+            '${p1}segments: const [\n'
+            "${p2}ButtonSegment(value: 'a', label: Text('Option A')),\n"
+            "${p2}ButtonSegment(value: 'b', label: Text('Option B')),\n"
+            '${p1}],\n'
+            '${p})';
+
+      case 'RadioListTile':
+        return "${p}RadioListTile<int>(\n"
+            "${p1}title: const Text('${prop('title', 'Option')}'),\n"
+            "${p1}value: 0,\n"
+            "${p1}groupValue: 0,\n"
+            "${p1}onChanged: (v) {},\n"
+            "${p})";
+
+      case 'CheckboxListTile':
+        return "${p}CheckboxListTile(\n"
+            "${p1}title: const Text('${prop('title', 'Check me')}'),\n"
+            "${p1}value: false,\n"
+            "${p1}onChanged: (v) {},\n"
+            "${p})";
+
+      case 'SwitchListTile':
+        return "${p}SwitchListTile(\n"
+            "${p1}title: const Text('${prop('title', 'Toggle')}'),\n"
+            "${p1}value: false,\n"
+            "${p1}onChanged: (v) {},\n"
+            "${p})";
+
+      case 'RangeSlider':
+        return '${p}RangeSlider(\n'
+            '${p1}values: const RangeValues(0.2, 0.8),\n'
+            '${p1}onChanged: (v) {},\n'
+            '${p})';
+
+      case 'InputChip':
+        return "${p}InputChip(\n${p1}label: const Text('${prop('label', 'Chip')}'),\n${p1}onDeleted: () {},\n${p})";
+
+      case 'FilterChip':
+        return "${p}FilterChip(\n${p1}label: const Text('${prop('label', 'Filter')}'),\n${p1}selected: false,\n${p1}onSelected: (v) {},\n${p})";
+
+      case 'ActionChip':
+        return "${p}ActionChip(\n${p1}label: const Text('${prop('label', 'Action')}'),\n${p1}onPressed: () {},\n${p})";
+
+      case 'SearchBar':
+        return "${p}SearchBar(\n${p1}leading: const Icon(Icons.search),\n${p1}hintText: '${prop('hintText', 'Search...')}',\n${p})";
 
       default:
         return '${p}const $type()';

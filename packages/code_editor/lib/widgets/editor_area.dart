@@ -1,8 +1,12 @@
+import 'dart:io';
+
 import 'package:core/core.dart';
 import 'package:dap_client/dap_client.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:lsp_client/lsp_client.dart';
+import 'package:progress_indicator_m3e/progress_indicator_m3e.dart';
 import 'package:provider/provider.dart';
 import 'package:quill_code/quill_code.dart';
 import 'package:terminal_pkg/terminal_pkg.dart';
@@ -12,6 +16,8 @@ import 'editor_tab_bar.dart';
 
 class EditorArea extends StatelessWidget {
   final EditorTheme? editorTheme;
+  /// Called each build to configure editor props. [fileExtension] is the
+  /// extension of the currently active file (e.g. 'dart', 'ts'), or null.
   final void Function(EditorProps props)? configureProps;
   final bool showSymbolBar;
   final double? fontSize;
@@ -23,6 +29,14 @@ class EditorArea extends StatelessWidget {
   /// Wired by the host screen to open the Problems panel.
   final VoidCallback? onDiagnosticTap;
 
+  /// Called when the editor's vertical scroll direction changes.
+  /// `true` = scrolling down, `false` = scrolling up.
+  final ValueChanged<bool>? onScrollDirectionChanged;
+
+  /// When provided, the EditorTabBar slides up (hides) as the value goes
+  /// from 0.0 → 1.0 (immersive mode) and slides back down on reverse.
+  final Animation<double>? immersiveAnim;
+
   const EditorArea({
     super.key,
     this.editorTheme,
@@ -33,6 +47,8 @@ class EditorArea extends StatelessWidget {
     this.showTabBar = true,
     this.forBottomPanel = false,
     this.onDiagnosticTap,
+    this.onScrollDirectionChanged,
+    this.immersiveAnim,
   });
 
   @override
@@ -43,12 +59,40 @@ class EditorArea extends StatelessWidget {
             ? editor.bottomActiveFile
             : editor.topActiveFile;
 
+        // Build tab bar widget (may be animated or static)
+        Widget? tabBarWidget;
+        if (showTabBar) {
+          const tabBar = Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              EditorTabBar(),
+              Divider(height: 1, thickness: 1),
+            ],
+          );
+
+          if (immersiveAnim != null) {
+            tabBarWidget = AnimatedBuilder(
+              animation: immersiveAnim!,
+              builder: (context, child) {
+                final t = immersiveAnim!.value;
+                return ClipRect(
+                  child: Align(
+                    alignment: Alignment.topCenter,
+                    heightFactor: (1.0 - t).clamp(0.0, 1.0),
+                    child: child,
+                  ),
+                );
+              },
+              child: tabBar,
+            );
+          } else {
+            tabBarWidget = tabBar;
+          }
+        }
+
         return Column(
           children: [
-            if (showTabBar) ...[
-              const EditorTabBar(),
-              const Divider(height: 1, thickness: 1),
-            ],
+            if (tabBarWidget != null) tabBarWidget,
             Expanded(
               child: forBottomPanel
                   ? _EditorContent(
@@ -69,6 +113,7 @@ class EditorArea extends StatelessWidget {
                       fontSize: fontSize,
                       fontFamily: fontFamily,
                       onDiagnosticTap: onDiagnosticTap,
+                      onScrollDirectionChanged: onScrollDirectionChanged,
                     ),
             ),
           ],
@@ -88,6 +133,7 @@ class _MainContent extends StatelessWidget {
   final double? fontSize;
   final String? fontFamily;
   final VoidCallback? onDiagnosticTap;
+  final ValueChanged<bool>? onScrollDirectionChanged;
 
   const _MainContent({
     required this.file,
@@ -97,6 +143,7 @@ class _MainContent extends StatelessWidget {
     this.fontSize,
     this.fontFamily,
     this.onDiagnosticTap,
+    this.onScrollDirectionChanged,
   });
 
   @override
@@ -120,6 +167,7 @@ class _MainContent extends StatelessWidget {
           fontFamily: fontFamily,
           forBottomPanel: false,
           onDiagnosticTap: onDiagnosticTap,
+          onScrollDirectionChanged: onScrollDirectionChanged,
         );
       },
     );
@@ -135,6 +183,7 @@ class _EditorContent extends StatelessWidget {
   final String? fontFamily;
   final bool forBottomPanel;
   final VoidCallback? onDiagnosticTap;
+  final ValueChanged<bool>? onScrollDirectionChanged;
 
   const _EditorContent({
     required this.file,
@@ -145,6 +194,7 @@ class _EditorContent extends StatelessWidget {
     this.fontSize,
     this.fontFamily,
     this.onDiagnosticTap,
+    this.onScrollDirectionChanged,
   });
 
   @override
@@ -160,10 +210,10 @@ class _EditorContent extends StatelessWidget {
       fontFamily: fontFamily,
       forBottomPanel: forBottomPanel,
       onDiagnosticTap: onDiagnosticTap,
+      onScrollDirectionChanged: onScrollDirectionChanged,
     );
   }
 }
-
 
 class _ActiveEditor extends StatefulWidget {
   final OpenFile file;
@@ -174,6 +224,7 @@ class _ActiveEditor extends StatefulWidget {
   final String? fontFamily;
   final bool forBottomPanel;
   final VoidCallback? onDiagnosticTap;
+  final ValueChanged<bool>? onScrollDirectionChanged;
 
   const _ActiveEditor({
     required this.file,
@@ -184,6 +235,7 @@ class _ActiveEditor extends StatefulWidget {
     this.fontFamily,
     this.forBottomPanel = false,
     this.onDiagnosticTap,
+    this.onScrollDirectionChanged,
   });
 
   @override
@@ -261,6 +313,8 @@ class _ActiveEditorState extends State<_ActiveEditor> {
           languageId:               cfg.languageId,
           environment:              cfg.environment,
           initializeTimeoutSeconds: cfg.initializeTimeoutSeconds,
+          initializationOptions:    cfg.initializationOptions,
+          startupDelayMs:           cfg.startupDelayMs,
           // Wire onError so crashes and timeouts surface in the UI.
           // JVM-based servers (jdtls, kotlin-ls, LemMinX) always write
           // harmless lines to stderr during startup (JAVA_TOOL_OPTIONS
@@ -428,7 +482,8 @@ class _ActiveEditorState extends State<_ActiveEditor> {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     if (widget.file.controller == null) {
-      return Center(child: CircularProgressIndicator(color: cs.primary));
+      if (widget.file.isImage) return _ImageViewer(file: widget.file);
+      return Center(child: CircularProgressIndicatorM3E());
     }
 
     final ctrl = widget.file.controller!;
@@ -461,6 +516,7 @@ class _ActiveEditorState extends State<_ActiveEditor> {
                 child: QuillCodeEditor(
                   controller: ctrl,
                   onChanged: (_) => context.read<EditorProvider>().markDirty(),
+                  onSave: () => context.read<EditorProvider>().saveActiveFile(),
                   lspClient: _ownedLspClient,
                   fileUri: Uri.file(widget.file.path).toString(),
                   theme: effectiveTheme,
@@ -468,6 +524,7 @@ class _ActiveEditorState extends State<_ActiveEditor> {
                   // Diagnostic counts now live inside the status bar (part of
                   // QuillCodeEditor) and are tappable to open the Problems panel.
                   onDiagnosticTap: widget.onDiagnosticTap,
+                  onScrollDirectionChanged: widget.onScrollDirectionChanged,
                 ),
               ),
             ),
@@ -527,6 +584,78 @@ class _WelcomePane extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ── Image viewer ─────────────────────────────────────────────────────────────
+
+class _ImageViewer extends StatelessWidget {
+  final OpenFile file;
+  const _ImageViewer({required this.file});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final ext = file.extension.toLowerCase();
+
+    Widget image;
+    if (ext == 'svg') {
+      image = SvgPicture.file(
+        File(file.path),
+        placeholderBuilder: (_) => Center(
+          child: CircularProgressIndicatorM3E(),
+        ),
+        fit: BoxFit.contain,
+      );
+    } else {
+      image = Image.file(
+        File(file.path),
+        fit: BoxFit.contain,
+        frameBuilder: (context, child, frame, _) {
+          if (frame == null) {
+            return Center(child: CircularProgressIndicatorM3E());
+          }
+          return child;
+        },
+        errorBuilder: (context, error, _) => Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.broken_image_outlined, size: 48, color: cs.onSurfaceVariant),
+              const SizedBox(height: 8),
+              Text('Cannot load image', style: TextStyle(color: cs.onSurfaceVariant)),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      color: cs.surfaceContainerLow,
+      child: Stack(
+        children: [
+          Center(child: image),
+          Positioned(
+            bottom: 12,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: cs.surfaceContainerHighest.withValues(alpha: 0.85),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  file.name,
+                  style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

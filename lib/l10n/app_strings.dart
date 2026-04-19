@@ -96,6 +96,16 @@ class AppStrings {
   String get secCodeStructure  => _t('secCodeStructure');
   String get secHighlight      => _t('secHighlight');
   String get secAdvanced       => _t('secAdvanced');
+  String get secPerLanguage    => _t('secPerLanguage');
+
+  // ── Per-language settings ─────────────────────────────────────────────────
+  String get langOrganizeImports    => _t('langOrganizeImports');
+  String get langOrganizeImportsSub => _t('langOrganizeImportsSub');
+  String get langFixAll             => _t('langFixAll');
+  String get langFixAllSub          => _t('langFixAllSub');
+  String get langTabSize            => _t('langTabSize');
+  String get langInsertSpaces       => _t('langInsertSpaces');
+  String get langInsertSpacesSub    => _t('langInsertSpacesSub');
 
   // ── Settings: Editor – tiles ──────────────────────────────────────────────
   String get fontFamily            => _t('fontFamily');
@@ -116,8 +126,14 @@ class AppStrings {
   String get autoClosePairsSub     => _t('autoClosePairsSub');
   String get autoCompletion        => _t('autoCompletion');
   String get autoCompletionSub     => _t('autoCompletionSub');
-  String get formatOnSave          => _t('formatOnSave');
-  String get formatOnSaveSub       => _t('formatOnSaveSub');
+  String get formatOnSave              => _t('formatOnSave');
+  String get formatOnSaveSub           => _t('formatOnSaveSub');
+  String get organizeImportsOnSave     => _t('organizeImportsOnSave');
+  String get organizeImportsOnSaveSub  => _t('organizeImportsOnSaveSub');
+  String get organizeImportsOnSaveInfo => _t('organizeImportsOnSaveInfo');
+  String get fixAllOnSave              => _t('fixAllOnSave');
+  String get fixAllOnSaveSub           => _t('fixAllOnSaveSub');
+  String get fixAllOnSaveInfo          => _t('fixAllOnSaveInfo');
   String get stickyScroll          => _t('stickyScroll');
   String get stickyScrollSub       => _t('stickyScrollSub');
   String get tabSize               => _t('tabSize');
@@ -146,6 +162,9 @@ class AppStrings {
   String get editorStatusBarInfo       => _t('editorStatusBarInfo');
   String get readOnly              => _t('readOnly');
   String get readOnlySub           => _t('readOnlySub');
+  String get immersiveScroll       => _t('immersiveScroll');
+  String get immersiveScrollSub    => _t('immersiveScrollSub');
+  String get immersiveScrollInfo   => _t('immersiveScrollInfo');
 
   // ── Settings: Terminal/FileExplorer ───────────────────────────────────────
   String get showHiddenFiles    => _t('showHiddenFiles');
@@ -422,6 +441,14 @@ class AppStrings {
       'secCodeStructure': 'Estrutura de Código',
       'secHighlight': 'Destaque',
       'secAdvanced': 'Avançado',
+      'secPerLanguage': 'Por Linguagem',
+      'langOrganizeImports': 'Organizar imports',
+      'langOrganizeImportsSub': 'Organizar imports automaticamente ao salvar',
+      'langFixAll': 'Corrigir tudo ao salvar',
+      'langFixAllSub': 'Aplicar todas as correções de código ao salvar',
+      'langTabSize': 'Tamanho do tab',
+      'langInsertSpaces': 'Usar espaços',
+      'langInsertSpacesSub': 'Inserir espaços em vez de tabulações',
       // Editor tiles
       'fontFamily': 'Família de fonte',
       'fontSize': 'Tamanho da fonte',
@@ -442,7 +469,13 @@ class AppStrings {
       'autoCompletion': 'Autocompletar',
       'autoCompletionSub': 'Sugestões de código durante a digitação',
       'formatOnSave': 'Formatar ao salvar',
-      'formatOnSaveSub': 'Aplicar DartFormatter ao salvar',
+      'formatOnSaveSub': 'Aplicar formatador de código ao salvar',
+      'organizeImportsOnSave': 'Organizar imports ao salvar',
+      'organizeImportsOnSaveSub': 'Reorganizar e remover imports não utilizados ao salvar',
+      'organizeImportsOnSaveInfo': 'Solicita ao servidor LSP para reorganizar os imports do arquivo ao salvar. Requer LSP ativo.',
+      'fixAllOnSave': 'Corrigir tudo ao salvar',
+      'fixAllOnSaveSub': 'Aplicar todas as correções automáticas ao salvar',
+      'fixAllOnSaveInfo': 'Executa todas as quick-fixes disponíveis via LSP ao salvar. Requer LSP ativo.',
       'stickyScroll': 'Rolagem aderente',
       'stickyScrollSub': 'Manter o escopo atual visível no topo',
       'tabSize': 'Tamanho do tab',
@@ -471,6 +504,9 @@ class AppStrings {
       'editorStatusBarInfo': 'Exibe a barra inferior do editor que mostra a linha atual, coluna e total de linhas do arquivo.',
       'readOnly': 'Somente leitura',
       'readOnlySub': 'Desativar toda edição no editor',
+      'immersiveScroll': 'Modo imersivo',
+      'immersiveScrollSub': 'Oculta a barra e recolhe o painel ao rolar',
+      'immersiveScrollInfo': 'Ao rolar para baixo no editor, a barra superior se esconde atrás da AppBar e o painel inferior se recolhe em uma pílula flutuante na parte inferior. Role para cima para restaurar.',
       // Terminal / File Explorer
       'showHiddenFiles': 'Mostrar arquivos ocultos',
       'showHiddenFilesSub': 'Exibir arquivos começando com .',
@@ -700,6 +736,14 @@ class AppStrings {
       'secCodeStructure': 'Code Structure',
       'secHighlight': 'Highlight',
       'secAdvanced': 'Advanced',
+      'secPerLanguage': 'Per Language',
+      'langOrganizeImports': 'Organize imports',
+      'langOrganizeImportsSub': 'Automatically organize imports on save',
+      'langFixAll': 'Fix all on save',
+      'langFixAllSub': 'Apply all code fixes on save',
+      'langTabSize': 'Tab size',
+      'langInsertSpaces': 'Use spaces',
+      'langInsertSpacesSub': 'Insert spaces instead of tabs',
       // Editor tiles
       'fontFamily': 'Font Family',
       'fontSize': 'Font Size',
@@ -720,7 +764,13 @@ class AppStrings {
       'autoCompletion': 'Auto-Completion',
       'autoCompletionSub': 'Code suggestion popup while typing',
       'formatOnSave': 'Format on Save',
-      'formatOnSaveSub': 'Apply DartFormatter on Save',
+      'formatOnSaveSub': 'Apply code formatter on save',
+      'organizeImportsOnSave': 'Organize Imports on Save',
+      'organizeImportsOnSaveSub': 'Reorganize and remove unused imports on save',
+      'organizeImportsOnSaveInfo': 'Asks the LSP server to reorganize the file imports on save. Requires an active LSP.',
+      'fixAllOnSave': 'Fix All on Save',
+      'fixAllOnSaveSub': 'Apply all automatic fixes on save',
+      'fixAllOnSaveInfo': 'Runs all available quick-fixes via LSP on save. Requires an active LSP.',
       'stickyScroll': 'Sticky Scroll',
       'stickyScrollSub': 'Keep the current scope visible at the top',
       'tabSize': 'Tab Size',
@@ -749,6 +799,9 @@ class AppStrings {
       'editorStatusBarInfo': 'Shows the bottom bar of the editor displaying current line, column and total line count.',
       'readOnly': 'Read Only',
       'readOnlySub': 'Disable all editing in the editor',
+      'immersiveScroll': 'Immersive Scroll',
+      'immersiveScrollSub': 'Hide bar and collapse panel when scrolling',
+      'immersiveScrollInfo': 'When scrolling down in the editor, the top bar slides behind the AppBar and the bottom panel collapses into a floating pill. Scroll up to restore.',
       // Terminal / File Explorer
       'showHiddenFiles': 'Show Hidden Files',
       'showHiddenFilesSub': 'Display files starting with .',
@@ -958,6 +1011,14 @@ class AppStrings {
       'secCodeStructure': 'Estructura del código',
       'secHighlight': 'Resaltado',
       'secAdvanced': 'Avanzado',
+      'secPerLanguage': 'Por Idioma',
+      'langOrganizeImports': 'Organizar imports',
+      'langOrganizeImportsSub': 'Organizar imports automáticamente al guardar',
+      'langFixAll': 'Corregir todo al guardar',
+      'langFixAllSub': 'Aplicar todas las correcciones de código al guardar',
+      'langTabSize': 'Tamaño de tabulación',
+      'langInsertSpaces': 'Usar espacios',
+      'langInsertSpacesSub': 'Insertar espacios en lugar de tabulaciones',
       // Editor tiles
       'fontFamily': 'Familia de fuente',
       'fontSize': 'Tamaño de fuente',
@@ -1213,6 +1274,14 @@ class AppStrings {
       'secCodeStructure': 'Structure du code',
       'secHighlight': 'Mise en surbrillance',
       'secAdvanced': 'Avancé',
+      'secPerLanguage': 'Par Langage',
+      'langOrganizeImports': 'Organiser les imports',
+      'langOrganizeImportsSub': 'Organiser automatiquement les imports à l\'enregistrement',
+      'langFixAll': 'Tout corriger à l\'enregistrement',
+      'langFixAllSub': 'Appliquer toutes les corrections de code à l\'enregistrement',
+      'langTabSize': 'Taille de tabulation',
+      'langInsertSpaces': 'Utiliser des espaces',
+      'langInsertSpacesSub': 'Insérer des espaces au lieu des tabulations',
       // Editor tiles
       'fontFamily': 'Famille de police',
       'fontSize': 'Taille de police',
@@ -1468,6 +1537,14 @@ class AppStrings {
       'secCodeStructure': 'Codestruktur',
       'secHighlight': 'Hervorhebung',
       'secAdvanced': 'Erweitert',
+      'secPerLanguage': 'Pro Sprache',
+      'langOrganizeImports': 'Importe organisieren',
+      'langOrganizeImportsSub': 'Importe beim Speichern automatisch organisieren',
+      'langFixAll': 'Alles beim Speichern beheben',
+      'langFixAllSub': 'Alle Code-Korrekturen beim Speichern anwenden',
+      'langTabSize': 'Tab-Größe',
+      'langInsertSpaces': 'Leerzeichen verwenden',
+      'langInsertSpacesSub': 'Leerzeichen statt Tabulatoren einfügen',
       // Editor tiles
       'fontFamily': 'Schriftfamilie',
       'fontSize': 'Schriftgröße',

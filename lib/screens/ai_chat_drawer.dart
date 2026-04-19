@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:code_editor/code_editor.dart';
 import 'package:core/core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:liquid_glass_renderer/liquid_glass_renderer.dart';
 import 'package:provider/provider.dart';
 
 import '../models/ai_agent.dart';
@@ -76,11 +78,13 @@ Rules:
 class AiChatDrawer extends StatefulWidget {
   final VoidCallback onClose;
   final Project project;
+  final bool liquidGlass;
 
   const AiChatDrawer({
     super.key,
     required this.onClose,
     required this.project,
+    this.liquidGlass = false,
   });
 
   @override
@@ -481,42 +485,61 @@ class _AiChatDrawerState extends State<AiChatDrawer> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return ColoredBox(
-      color: cs.surface,
-      child: SafeArea(
-        child: Column(
-          children: [
-            _Header(
-              onClose: widget.onClose,
-              showHistory: _showHistory,
-              onToggleHistory: () => setState(() => _showHistory = !_showHistory),
+    final body = SafeArea(
+      child: Column(
+        children: [
+          _Header(
+            onClose: widget.onClose,
+            showHistory: _showHistory,
+            onToggleHistory: () => setState(() => _showHistory = !_showHistory),
+          ),
+          Divider(height: 1, thickness: 1,
+              color: widget.liquidGlass ? Colors.transparent : cs.outlineVariant),
+          Expanded(
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 180),
+              child: _showHistory
+                  ? _HistoryView(
+                      key: const ValueKey('history'),
+                      onSelect: () => setState(() => _showHistory = false),
+                      onRestore: _restoreSnapshot,
+                    )
+                  : _ChatView(
+                      key: const ValueKey('chat'),
+                      scrollCtrl: _scrollCtrl,
+                      inputCtrl: _inputCtrl,
+                      focusNode: _focusNode,
+                      onSend: _send,
+                      onScrollToBottom: _scrollToBottom,
+                      onAttach: _showContextSheet,
+                      onExecuteOp: _executeOperation,
+                      onResend: _resend,
+                      isBuildingCtx: _buildingCtx,
+                    ),
             ),
-            Divider(height: 1, thickness: 1, color: cs.outlineVariant),
-            Expanded(
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 180),
-                child: _showHistory
-                    ? _HistoryView(
-                        key: const ValueKey('history'),
-                        onSelect: () => setState(() => _showHistory = false),
-                        onRestore: _restoreSnapshot,
-                      )
-                    : _ChatView(
-                        key: const ValueKey('chat'),
-                        scrollCtrl: _scrollCtrl,
-                        inputCtrl: _inputCtrl,
-                        focusNode: _focusNode,
-                        onSend: _send,
-                        onScrollToBottom: _scrollToBottom,
-                        onAttach: _showContextSheet,
-                        onExecuteOp: _executeOperation,
-                        onResend: _resend,
-                        isBuildingCtx: _buildingCtx,
-                      ),
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
+      ),
+    );
+
+    if (!widget.liquidGlass) return ColoredBox(color: cs.surface, child: body);
+
+    final isDark = cs.brightness == Brightness.dark;
+    return LiquidGlass.withOwnLayer(
+      settings: LiquidGlassSettings(
+        glassColor: cs.surface.withValues(alpha: 0.88),
+        blur: 3.0,
+        thickness: 50.0,
+        lightIntensity: isDark ? 0.7 : 1.0,
+        ambientStrength: isDark ? 0.2 : 0.5,
+        lightAngle: math.pi / 4,
+        refractiveIndex: 1.18,
+        saturation: 1.4,
+        chromaticAberration: 0.4,
+      ),
+      shape: LiquidRoundedRectangle(borderRadius: 0),
+      child: GlassGlow(
+        child: Material(type: MaterialType.transparency, child: body),
       ),
     );
   }

@@ -20,7 +20,10 @@ import 'package:expressive_theme_bridge/expressive_theme_bridge.dart';
 
 import 'providers/ai_provider.dart';
 import 'providers/chat_provider.dart';
+import 'providers/git_provider.dart';
+import 'models/extension_theme_meta.dart';
 import 'providers/extensions_provider.dart';
+import 'providers/remote_git_build_provider.dart';
 import 'providers/settings_provider.dart';
 import 'screens/home_screen.dart';
 import 'screens/onboarding_screen.dart';
@@ -63,6 +66,22 @@ const _kFadeTransitionsTheme = PageTransitionsTheme(
     TargetPlatform.fuchsia: _FadePageTransitionsBuilder(),
   },
 );
+
+// ── Selector record types ─────────────────────────────────────────────────────
+
+/// Fields from [SettingsProvider] and [ExtensionsProvider] that actually drive
+/// [MaterialApp] rebuilds (theme, locale, active editor theme).
+/// Fields that don't affect MaterialApp (fontSize, wordWrap, SSH, etc.) are
+/// intentionally excluded so they never trigger a full app rebuild.
+typedef _AppBuildConfig = ({
+  bool useDynamic,
+  bool useAmoled,
+  bool followSystem,
+  bool useDark,
+  Locale? locale,
+  EditorTheme? activeEditorTheme,
+  ExtensionThemeMeta? activeMeta,
+});
 
 // 👇 Defina aqui a cor padrão do app
 class FlIdeApp extends StatefulWidget {
@@ -202,13 +221,22 @@ class _FlIdeAppState extends State<FlIdeApp> {
     ColorScheme? darkDynamic,
     required bool isExpressive,
   }) {
-    return Consumer2<SettingsProvider, ExtensionsProvider>(
-      builder: (context, settings, extensions, _) {
-        if (isExpressive) _syncMaterialYou(settings);
+    return Selector2<SettingsProvider, ExtensionsProvider, _AppBuildConfig>(
+      selector: (_, settings, extensions) => (
+        useDynamic: settings.useDynamicColors,
+        useAmoled: settings.useAmoled,
+        followSystem: settings.followSystemTheme,
+        useDark: settings.useDarkMode,
+        locale: settings.languageLocale,
+        activeEditorTheme: extensions.activeEditorTheme,
+        activeMeta: extensions.activeMeta,
+      ),
+      builder: (context, cfg, _) {
+        if (isExpressive) _syncMaterialYou(context.read<SettingsProvider>());
 
-        final activeEditorTheme = extensions.activeEditorTheme;
-        final activeMeta = extensions.activeMeta;
-        final locale = settings.languageLocale;
+        final activeEditorTheme = cfg.activeEditorTheme;
+        final activeMeta = cfg.activeMeta;
+        final locale = cfg.locale;
 
         late ThemeData lightTheme;
         late ThemeData darkTheme;
@@ -221,14 +249,14 @@ class _FlIdeAppState extends State<FlIdeApp> {
           final editorTheme = _buildEditorThemeData(
             editorTheme: activeEditorTheme,
             brightness: brightness,
-            amoled: settings.useAmoled,
+            amoled: cfg.useAmoled,
           );
           lightTheme = editorTheme;
           darkTheme = editorTheme;
           themeMode =
               activeMeta.dark ? ThemeMode.dark : ThemeMode.light;
         } else {
-          final useDynamic = settings.useDynamicColors;
+          final useDynamic = cfg.useDynamic;
 
           if (isExpressive && lightBase != null) {
             // Expressive theme path — neutralize the default M3 purple seed
@@ -240,7 +268,7 @@ class _FlIdeAppState extends State<FlIdeApp> {
             final baseDark = applyFix
                 ? _neutralizeSurfaces(darkBase!, Brightness.dark)
                 : darkBase!;
-            darkTheme = settings.useAmoled
+            darkTheme = cfg.useAmoled
                 ? _applyAmoledThemeData(baseDark)
                 : baseDark;
           } else {
@@ -256,14 +284,14 @@ class _FlIdeAppState extends State<FlIdeApp> {
                 : seedLight;
             lightTheme = TofuTheme.light(seedColor: seedLight);
             final baseDark = TofuTheme.dark(seedColor: seedDark);
-            darkTheme = settings.useAmoled
+            darkTheme = cfg.useAmoled
                 ? _applyAmoledThemeData(baseDark)
                 : baseDark;
           }
 
-          themeMode = settings.followSystemTheme
+          themeMode = cfg.followSystem
               ? ThemeMode.system
-              : (settings.useDarkMode ? ThemeMode.dark : ThemeMode.light);
+              : (cfg.useDark ? ThemeMode.dark : ThemeMode.light);
         }
 
         return MaterialApp(
@@ -783,14 +811,15 @@ class _AppShellState extends State<_AppShell> {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<SettingsProvider>(
-      builder: (context, settings, _) {
-        if (!settings.isLoaded || !_uiReady) {
+    return Selector<SettingsProvider, ({bool isLoaded, bool onboardingDone})>(
+      selector: (_, s) => (isLoaded: s.isLoaded, onboardingDone: s.onboardingDone),
+      builder: (context, cfg, _) {
+        if (!cfg.isLoaded || !_uiReady) {
           // Brief 2-frame wait for theme to settle after the splash transition.
           return const Scaffold(body: SizedBox.shrink());
         }
 
-        if (!settings.onboardingDone) return const OnboardingScreen();
+        if (!cfg.onboardingDone) return const OnboardingScreen();
 
         return Consumer<RootfsProvider>(
           builder: (context, rootfs, _) {
@@ -811,11 +840,15 @@ class _AppShellState extends State<_AppShell> {
                       ChangeNotifierProvider(create: (_) => EditorProvider()),
                       ChangeNotifierProvider(create: (_) => TerminalProvider()),
                       ChangeNotifierProvider(create: (_) => BuildProvider()),
+                      ChangeNotifierProvider(create: (_) => RemoteGitBuildProvider()),
                       ChangeNotifierProvider(create: (_) => LspProvider()),
                       ChangeNotifierProvider(create: (_) => DebugProvider()),
                       ChangeNotifierProvider(create: (_) => LogcatProvider()),
                       ChangeNotifierProvider(
                         create: (_) => AppInstallerProvider(),
+                      ),
+                      ChangeNotifierProvider(
+                        create: (_) => GitProvider(projectPath: activeProject.path),
                       ),
                       ChangeNotifierProvider<ExtensionsProvider>.value(
                         value: context.read<ExtensionsProvider>(),

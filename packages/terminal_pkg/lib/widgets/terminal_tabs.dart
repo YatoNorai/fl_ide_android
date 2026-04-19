@@ -24,12 +24,16 @@ class TerminalTabs extends StatefulWidget {
   /// Defaults to true when [initialWorkDir] is provided.
   final bool? autoStart;
 
+  /// When true, backgrounds are transparent to show the liquid glass effect.
+  final bool liquidGlass;
+
   const TerminalTabs({
     super.key,
     this.initialWorkDir,
     this.extraEnv,
     this.sshSetup,
     this.autoStart,
+    this.liquidGlass = false,
   });
 
   @override
@@ -99,11 +103,13 @@ class _TerminalTabsState extends State<TerminalTabs> {
               initialWorkDir: widget.initialWorkDir,
               extraEnv: widget.extraEnv,
               sshSetup: widget.sshSetup,
+              liquidGlass: widget.liquidGlass,
             ),
-            Expanded(child: PtyTerminalWidget(session: activeSession)),
+            Expanded(child: PtyTerminalWidget(session: activeSession, liquidGlass: widget.liquidGlass)),
             MiniTerminalKeyBar(
               key: ValueKey(activeSession.id),
               session: activeSession,
+              liquidGlass: widget.liquidGlass,
             ),
           ],
         );
@@ -121,6 +127,7 @@ class _SessionChipBar extends StatelessWidget {
   final String? initialWorkDir;
   final Map<String, String>? extraEnv;
   final Future<void> Function(TerminalSession session)? sshSetup;
+  final bool liquidGlass;
 
   const _SessionChipBar({
     required this.sessions,
@@ -129,6 +136,7 @@ class _SessionChipBar extends StatelessWidget {
     this.initialWorkDir,
     this.extraEnv,
     this.sshSetup,
+    this.liquidGlass = false,
   });
 
   @override
@@ -136,7 +144,7 @@ class _SessionChipBar extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     return Container(
       height: 36,
-      color: cs.surface,
+      color: liquidGlass ? Colors.transparent : cs.surface,
       child: Row(
         children: [
           Expanded(

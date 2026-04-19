@@ -38,7 +38,7 @@ class GlassBackButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final liquidGlass = context.watch<SettingsProvider>().liquidGlass;
+    final liquidGlass = context.select<SettingsProvider, bool>((s) => s.liquidGlass);
     final btn = IconButton(
       icon: Icon(icon, color: iconColor ?? cs.onSurface, size: 22),
       onPressed: onPressed ?? () => Navigator.maybePop(context),

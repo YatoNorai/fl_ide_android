@@ -23,8 +23,8 @@ class DartWidgetParser {
   /// Replace the return expression in the build() method with [newWidgetCode].
   /// Returns the modified source, or the original source if replacement fails.
   String replaceReturnInBuild(String source, String newWidgetCode) {
-    // Find build method position
-    final buildMatch = _buildMethodRegex.firstMatch(source);
+    // Find the same build() method that parseSource() would use
+    final buildMatch = _bestBuildMatch(source);
     if (buildMatch == null) return source;
 
     final braceOpen = source.indexOf('{', buildMatch.end - 1);
@@ -56,13 +56,48 @@ class DartWidgetParser {
     r'Widget\s+build\s*\(\s*BuildContext\s+\w+\s*\)',
   );
 
+  static final _appWrapperRegex = RegExp(
+    r'^(?:const\s+)?(?:Material|Cupertino)App\s*\(',
+  );
+
+  static final _widgetClassRegex = RegExp(
+    r'extends\s+(StatelessWidget|StatefulWidget|State\s*<)',
+  );
+
+  static final _uppercaseStartRegex = RegExp(r'^[A-Z]');
+
+  static final _identifierRegex = RegExp(r'^[A-Za-z_][A-Za-z0-9_.]*$');
+
+  static final _widgetCallRegex = RegExp(r'^[A-Z][A-Za-z0-9_]*\s*\(');
+
+  /// Finds the best [RegExpMatch] for a `build()` method in [source].
+  /// Prefers build() bodies that do NOT return a MaterialApp/CupertinoApp
+  /// (i.e., the actual screen widget, not the app wrapper).
+  RegExpMatch? _bestBuildMatch(String source) {
+    final allMatches = _buildMethodRegex.allMatches(source).toList();
+    if (allMatches.isEmpty) return null;
+
+    RegExpMatch? fallback;
+    for (final m in allMatches) {
+      final braceOpen = source.indexOf('{', m.end - 1);
+      if (braceOpen == -1) continue;
+      final braceClose = _findMatching(source, braceOpen, '{', '}');
+      if (braceClose == -1) continue;
+      final body = source.substring(braceOpen + 1, braceClose);
+      final expr = _returnExpr(body)?.trim() ?? '';
+      if (!_appWrapperRegex.hasMatch(expr)) return m; // prefer non-app-wrapper
+      fallback ??= m;
+    }
+    return fallback;
+  }
+
   /// Returns the body (between braces) of the build() method, or null.
+  /// Skips MaterialApp/CupertinoApp wrappers and prefers the actual screen widget.
   String? _buildBodyOf(String source) {
     // Must be a Widget class
-    if (!RegExp(r'extends\s+(StatelessWidget|StatefulWidget|State\s*<)')
-        .hasMatch(source)) return null;
+    if (!_widgetClassRegex.hasMatch(source)) return null;
 
-    final m = _buildMethodRegex.firstMatch(source);
+    final m = _bestBuildMatch(source);
     if (m == null) return null;
 
     final braceOpen = source.indexOf('{', m.end - 1);
@@ -136,7 +171,7 @@ class DartWidgetParser {
     if (expr.startsWith('new ')) expr = expr.substring(4).trim();
 
     // Must start with an uppercase letter (widget class name)
-    if (expr.isEmpty || !RegExp(r'^[A-Z]').hasMatch(expr)) return null;
+    if (expr.isEmpty || !_uppercaseStartRegex.hasMatch(expr)) return null;
 
     final parenIdx = expr.indexOf('(');
     if (parenIdx == -1) {
@@ -146,7 +181,7 @@ class DartWidgetParser {
 
     final widgetName = expr.substring(0, parenIdx).trim();
     // Reject names that contain spaces or non-identifier chars (unlikely but safe)
-    if (!RegExp(r'^[A-Za-z_][A-Za-z0-9_.]*$').hasMatch(widgetName)) return null;
+    if (!_identifierRegex.hasMatch(widgetName)) return null;
 
     final closeIdx = _findMatching(expr, parenIdx, '(', ')');
     if (closeIdx == -1) return null;
@@ -159,7 +194,7 @@ class DartWidgetParser {
   static const _widgetSlots = {
     'appBar', 'body', 'floatingActionButton', 'drawer', 'endDrawer',
     'bottomNavigationBar', 'bottomSheet', 'leading', 'trailing',
-    'header', 'footer', 'placeholder',
+    'header', 'footer', 'placeholder', 'prefixIcon', 'suffixIcon',
   };
 
   // Named params that take a list of widgets.
@@ -168,12 +203,12 @@ class DartWidgetParser {
   /// Returns true if [value] looks like a Flutter widget constructor call.
   bool _looksLikeWidget(String value) {
     final stripped = value.startsWith('const ') ? value.substring(6).trim() : value;
-    return RegExp(r'^[A-Z][A-Za-z0-9_]*\s*\(').hasMatch(stripped);
+    return _widgetCallRegex.hasMatch(stripped);
   }
 
   WidgetNode? _buildNode(String type, String argsContent) {
     // Use simple type (drop package qualifier, e.g. 'flutter.Column' → 'Column')
-    final simpleName = type.contains('.') ? type.split('.').last : type;
+    final simpleName = _classNameOf(type);
 
     final props = <String, dynamic>{};
     final children = <WidgetNode>[];
@@ -375,6 +410,70 @@ class DartWidgetParser {
           props['fit'] = value;
           break;
 
+        case 'style':
+          // TextStyle(fontSize: 24, fontWeight: ..., color: ...) — extract what we can
+          if (value.contains('TextStyle')) {
+            final fs = RegExp(r'fontSize:\s*([\d.]+)').firstMatch(value);
+            if (fs != null) props['fontSize'] = fs.group(1);
+            final fw = RegExp(r'fontWeight:\s*(FontWeight\.\w+)').firstMatch(value);
+            if (fw != null) props['fontWeight'] = fw.group(1);
+            final clr = RegExp(r'color:\s*(Colors\.\w+(?:\.\w+)?)').firstMatch(value);
+            if (clr != null) props['color'] = clr.group(1);
+          }
+          break;
+
+        case 'crossAxisCount':
+          props['crossAxisCount'] = _numStr(value) ?? value;
+          break;
+
+        case 'crossAxisSpacing':
+          props['crossAxisSpacing'] = _numStr(value);
+          break;
+
+        case 'mainAxisSpacing':
+          props['mainAxisSpacing'] = _numStr(value);
+          break;
+
+        case 'childAspectRatio':
+          props['childAspectRatio'] = _numStr(value);
+          break;
+
+        case 'initiallyExpanded':
+          props['initiallyExpanded'] = value;
+          break;
+
+        case 'maxLines':
+          props['maxLines'] = _numStr(value) ?? value;
+          break;
+
+        case 'textAlign':
+          props['textAlign'] = value;
+          break;
+
+        case 'overflow':
+          props['overflow'] = value;
+          break;
+
+        case 'subtitle': {
+          if (_looksLikeWidget(value)) {
+            final inner = _extractFirstStringArg(value);
+            props['subtitle'] = inner ?? value;
+          } else {
+            props['subtitle'] = _extractStringValue(value) ?? value;
+          }
+          break;
+        }
+
+        case 'tooltip':
+          props['tooltip'] = _extractStringValue(value) ?? value;
+          break;
+
+        case 'semanticLabel':
+        case 'restorationId':
+        case 'key':
+          // Skip framework-internal params
+          break;
+
         default:
           // Store as-is for unknown properties
           props[key] = value;
@@ -382,6 +481,17 @@ class DartWidgetParser {
     }
 
     return WidgetNode(type: simpleName, properties: props, children: children);
+  }
+
+  /// For named constructors ('ListView.builder' → 'ListView'; 'SizedBox.expand' → 'SizedBox').
+  /// Leaves simple names ('Text', 'Row') unchanged.
+  static String _classNameOf(String type) {
+    if (!type.contains('.')) return type;
+    final first = type.split('.').first;
+    // First segment starts with uppercase → it's the class name
+    if (first.isNotEmpty && first[0] != first[0].toLowerCase()) return first;
+    // Otherwise take last segment (package qualifiers, etc.)
+    return type.split('.').last;
   }
 
   // ── Bracket helpers ────────────────────────────────────────────────────────
@@ -465,7 +575,24 @@ class DartWidgetParser {
   /// Extract content between `[` and `]`.
   String? _extractListContent(String s) {
     s = s.trim();
-    if (s.startsWith('const [')) s = s.substring(6).trim();
+    // Strip leading 'const'
+    if (s.startsWith('const ')) s = s.substring(6).trim();
+    // Strip generic type annotation: <Widget>[, <T>[, <Map<String,Widget>>[, etc.
+    if (s.startsWith('<')) {
+      int depth = 0;
+      int i = 0;
+      while (i < s.length) {
+        if (s[i] == '<') depth++;
+        else if (s[i] == '>') {
+          depth--;
+          if (depth == 0) { i++; break; }
+        }
+        i++;
+      }
+      s = s.substring(i).trim();
+      // Strip another 'const' after type annotation: const <Widget>const [
+      if (s.startsWith('const ')) s = s.substring(6).trim();
+    }
     if (!s.startsWith('[')) return null;
     final close = _findMatching(s, 0, '[', ']');
     if (close == -1) return null;

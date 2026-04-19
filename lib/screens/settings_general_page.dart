@@ -154,7 +154,7 @@ class GeneralSettingsPage extends StatelessWidget {
               bottom: Radius.circular(30),
             ),
           ),
-  /*         settingsSwitchTile(
+          settingsSwitchTile(
             context,
             title: s.liquidGlass,
             subtitle: s.liquidGlassSub,
@@ -167,7 +167,7 @@ class GeneralSettingsPage extends StatelessWidget {
             iconBg: Colors.blueGrey,
             icon: FontAwesomeIcons.droplet,
             infoText: s.liquidGlassInfo,
-          ), */
+          ),
           const SizedBox(height: 250),
         ],
       ),

@@ -45,3 +45,10 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Gradle caches and lock files (generated automatically, not project source)
+.gradle/
+**/.gradle/
+**/buildOutputCleanup.lock
+**/checksum.lock
+**/fileHashes.lock

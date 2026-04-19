@@ -139,8 +139,9 @@ class ProjectTemplate {
       // created in seconds instead of minutes.  The workspace sync step
       // (triggered automatically when the project opens) runs pub get
       // in the background OUTPUT terminal.
-      flutterCmd =
-          flutterCmd.replaceFirst('flutter create ', 'flutter create --no-pub ');
+      flutterCmd = flutterCmd.replaceFirst(
+          'flutter create ',
+          'flutter create --no-pub --android-language $androidLanguage ');
       final flutterBase = 'cd "$parentDir" && $flutterCmd';
       final patch = _flutterTemplatePatch(projectPath, projectName, flutterTemplate);
       return '$flutterBase && ${_flutterAndroidFixes(projectPath, useGroovy: useGroovy)} && $patch';
@@ -971,28 +972,29 @@ const styles = StyleSheet.create({
 
   static String _flutterAndroidFixes(String projectPath,
       {bool useGroovy = false}) {
-    // All version constants embedded directly — no Dart interpolation inside
-    // shell sed patterns, which avoids quote-delimiter collisions.
     const ndkVersion        = '27.1.12297006';
     const buildToolsVersion = '35.0.0';
     const androidSdkDir     = r'$PREFIX/opt/android-sdk';
+    // Termux standalone NDK (installed separately from the SDK's ndk/ subdir)
+    const androidNdkDir     = r'$PREFIX/opt/android-ndk';
 
-    // Gradle file path depends on DSL choice.
     final gradleFile = useGroovy
         ? '$projectPath/android/app/build.gradle'
         : '$projectPath/android/app/build.gradle.kts';
 
-    // Build the KTS/Groovy-specific sed snippets as plain Dart strings so
-    // there is never a raw-string delimiter collision with shell quotes.
-    final ndkReplaceExpr = useGroovy
-        ? 's/ndkVersion flutter.ndkVersion/ndkVersion "$ndkVersion"/g'
-        : 's/ndkVersion = flutter.ndkVersion/ndkVersion = "$ndkVersion"/g';
-    final btoolsLine = useGroovy
-        ? '    buildToolsVersion "$buildToolsVersion"'
-        : '    buildToolsVersion = "$buildToolsVersion"';
+    // sed expressions use shell vars $NDK_VER/$BTOOLS_VER with \" (shell
+    // escaped double-quote inside "...") so version strings appear quoted in
+    // the file without breaking the outer shell argument quoting.
+    // Result in shell: sed -i "s/.../ndkVersion = \"$NDK_VER\"/g" "$GRADLE"
+    // \\" in Dart → \" in output (backslash+quote); \$ → literal shell dollar.
+    final ndkSedExpr = useGroovy
+        ? 's/ndkVersion flutter.ndkVersion/ndkVersion \\"\$NDK_VER\\"/g'
+        : 's/ndkVersion = flutter.ndkVersion/ndkVersion = \\"\$NDK_VER\\"/g';
+    // Append line — \" produces a literal " in the file; \$BTOOLS_VER expands.
+    final btoolsAppend = useGroovy
+        ? '    buildToolsVersion \\"\$BTOOLS_VER\\"'
+        : '    buildToolsVersion = \\"\$BTOOLS_VER\\"';
 
-    // Use a shell variable for the NDK version so the sed expression stays
-    // entirely in double quotes — no single-quote/raw-string nesting needed.
     return '(\n'
         '  NDK_VER="$ndkVersion"\n'
         '  BTOOLS_VER="$buildToolsVersion"\n'
@@ -1003,8 +1005,13 @@ const styles = StyleSheet.create({
         '\n'
         '  # ── local.properties ────────────────────────────────────────────\n'
         '  PROPS="$projectPath/android/local.properties"\n'
-        '  NDK_DIR=\$(ls -d "\$SDK_ROOT/ndk/\$NDK_VER" 2>/dev/null || ls -d "\$SDK_ROOT/ndk/"* 2>/dev/null | sort -rV | head -1)\n'
-        '  CMAKE_DIR=\$(ls -d "\$SDK_ROOT/cmake/"*/bin/cmake 2>/dev/null | sort -rV | head -1 | sed "s|/bin/cmake||")\n'
+        // NDK: try sdk/ndk/<exact-ver>, then any sdk/ndk/<ver>, then standalone
+        '  NDK_DIR=\$(ls -d "\$SDK_ROOT/ndk/\$NDK_VER" 2>/dev/null | head -1)\n'
+        '  [ -z "\$NDK_DIR" ] && NDK_DIR=\$(ls -d "\$SDK_ROOT/ndk/"* 2>/dev/null | sort -rV | head -1)\n'
+        '  [ -z "\$NDK_DIR" ] && [ -d "$androidNdkDir" ] && NDK_DIR="$androidNdkDir"\n'
+        // CMake: use the base cmake directory under the SDK root
+        '  CMAKE_DIR=""\n'
+        '  [ -d "\$SDK_ROOT/cmake" ] && CMAKE_DIR="\$SDK_ROOT/cmake"\n'
         '  {\n'
         '    printf "sdk.dir=%s\\n" "\$SDK_ROOT"\n'
         '    [ -n "\$NDK_DIR" ]   && printf "ndk.dir=%s\\n"   "\$NDK_DIR"\n'
@@ -1015,10 +1022,14 @@ const styles = StyleSheet.create({
         '  # ── build.gradle(.kts) ──────────────────────────────────────────\n'
         '  GRADLE="$gradleFile"\n'
         '  if [ -f "\$GRADLE" ]; then\n'
-        '    sed -i "$ndkReplaceExpr" "\$GRADLE"\n'
-        '    grep -qF "ndkVersion" "\$GRADLE" || true\n'
+        // Replace flutter.ndkVersion with the quoted version string.
+        // \"$NDK_VER\" inside "..." produces "27.1.12297006" in the file.
+        '    sed -i "$ndkSedExpr" "\$GRADLE"\n'
+        // Insert buildToolsVersion after ndkVersion line (or compileSdk).
         '    if ! grep -qF "buildToolsVersion" "\$GRADLE"; then\n'
-        '      sed -i "/compileSdk/a\\\\\\n$btoolsLine" "\$GRADLE"\n'
+        '      ANCHOR=\$(grep -n "ndkVersion" "\$GRADLE" | head -1 | cut -d: -f1)\n'
+        '      [ -z "\$ANCHOR" ] && ANCHOR=\$(grep -n "compileSdk" "\$GRADLE" | head -1 | cut -d: -f1)\n'
+        '      [ -n "\$ANCHOR" ] && sed -i "\${ANCHOR}a\\\\    $btoolsAppend" "\$GRADLE"\n'
         '    fi\n'
         '    echo "✓ ndkVersion=\$NDK_VER buildToolsVersion=\$BTOOLS_VER"\n'
         '  fi\n'
@@ -1031,12 +1042,22 @@ const styles = StyleSheet.create({
         '    sed -i "/-XX:+HeapDumpOnOutOfMemoryError/d" "\$GPROPS"\n'
         '    echo "✓ Capped Gradle JVM heap"\n'
         '  fi\n'
+        // aapt2 override — LOCAL BUILDS ONLY.
+        // The GitHub Actions workflow strips this line before pushing
+        // (sed -i '/android.aapt2FromMavenOverride/d' gradle.properties).
         '  AAPT2_BIN=\$(find "\$SDK_ROOT/build-tools/\$BTOOLS_VER" -name aapt2 2>/dev/null | head -1)\n'
         '  [ -z "\$AAPT2_BIN" ] && AAPT2_BIN=\$(find "\$SDK_ROOT/build-tools" -name aapt2 2>/dev/null | sort -rV | head -1)\n'
         '  if [ -n "\$AAPT2_BIN" ] && [ -f "\$GPROPS" ]; then\n'
         '    sed -i "/android.aapt2FromMavenOverride/d" "\$GPROPS"\n'
         '    printf "\\nandroid.aapt2FromMavenOverride=%s\\n" "\$AAPT2_BIN" >> "\$GPROPS"\n'
-        '    echo "✓ aapt2 → \$AAPT2_BIN"\n'
+        '    echo "✓ aapt2 → \$AAPT2_BIN (local only)"\n'
+        '  fi\n'
+        '\n'
+        '  # ── .gitignore — add Gradle lock files ──────────────────────────\n'
+        '  GIGNORE="$projectPath/.gitignore"\n'
+        '  if [ -f "\$GIGNORE" ] && ! grep -qF ".gradle/" "\$GIGNORE"; then\n'
+        '    printf "\\n# Gradle caches and lock files\\n.gradle/\\n**/.gradle/\\n**/buildOutputCleanup.lock\\n**/checksum.lock\\n**/fileHashes.lock\\n" >> "\$GIGNORE"\n'
+        '    echo "✓ Added Gradle lock patterns to .gitignore"\n'
         '  fi\n'
         ') 2>&1';
   }
@@ -1107,51 +1128,58 @@ mkdir -p "$projectPath/app/src/main/res/layout"
 mkdir -p "$projectPath/gradle/wrapper"
 $extraMkdir
 
-cat > "$projectPath/$settingsFile" << \'__LAYEREOF__\'
+# Write static project files in parallel for faster scaffolding.
+cat > "$projectPath/$settingsFile" << \'__LAYEREOF__\' &
 $settingsContent
 __LAYEREOF__
 
-cat > "$projectPath/$rootFile" << \'__LAYEREOF__\'
+cat > "$projectPath/$rootFile" << \'__LAYEREOF__\' &
 $rootBuildContent
 __LAYEREOF__
 
-cat > "$projectPath/$appFile" << \'__LAYEREOF__\'
+cat > "$projectPath/$appFile" << \'__LAYEREOF__\' &
 $appBuildContent
 __LAYEREOF__
 
-cat > "$projectPath/app/src/main/AndroidManifest.xml" << \'__LAYEREOF__\'
+cat > "$projectPath/app/src/main/AndroidManifest.xml" << \'__LAYEREOF__\' &
 $manifestContent
 __LAYEREOF__
 
-cat > "$projectPath/app/src/main/$srcDir/$pkgDir/$className.$fileExt" << \'__LAYEREOF__\'
+cat > "$projectPath/app/src/main/$srcDir/$pkgDir/$className.$fileExt" << \'__LAYEREOF__\' &
 $activityContent
 __LAYEREOF__
 
-${hasLayout ? '''cat > "$projectPath/app/src/main/res/layout/activity_main.xml" << \'__LAYEREOF__\'
+${hasLayout ? '''cat > "$projectPath/app/src/main/res/layout/activity_main.xml" << \'__LAYEREOF__\' &
 $mainLayoutContent
 __LAYEREOF__''' : '# Compose: no layout XML needed'}
 
-$extraFiles
-
-cat > "$projectPath/app/src/main/res/values/strings.xml" << \'__LAYEREOF__\'
+cat > "$projectPath/app/src/main/res/values/strings.xml" << \'__LAYEREOF__\' &
 <resources>
     <string name="app_name">$safeName</string>
 </resources>
 __LAYEREOF__
 
-cat > "$projectPath/app/src/main/res/values/themes.xml" << \'__LAYEREOF__\'
+cat > "$projectPath/app/src/main/res/values/themes.xml" << \'__LAYEREOF__\' &
 $themesContent
 __LAYEREOF__
 
+# Run sequential extra files while parallel writes are in progress, then sync.
+$extraFiles
+wait
+
 SDK_ROOT_LP="\${ANDROID_HOME:-\$PREFIX/opt/android-sdk}"
-# Detect the highest installed NDK version (ls -d sorts; sort -rV picks latest)
-NDK_DIR=\$(ls -d "\$SDK_ROOT_LP/ndk/"* 2>/dev/null | sort -rV | head -1)
-if [ -n "\$NDK_DIR" ]; then
-  printf "sdk.dir=\$SDK_ROOT_LP\\nndk.dir=\$NDK_DIR\\n" > "$projectPath/local.properties"
-else
-  # No NDK installed — write only sdk.dir so Gradle doesn't fail on a bad ndk.dir
-  printf "sdk.dir=\$SDK_ROOT_LP\\n" > "$projectPath/local.properties"
-fi
+# NDK: try sdk/ndk/27.1.12297006, then any sdk/ndk/<ver>, then standalone \$PREFIX/opt/android-ndk
+NDK_DIR=\$(ls -d "\$SDK_ROOT_LP/ndk/27.1.12297006" 2>/dev/null | head -1)
+[ -z "\$NDK_DIR" ] && NDK_DIR=\$(ls -d "\$SDK_ROOT_LP/ndk/"* 2>/dev/null | sort -rV | head -1)
+[ -z "\$NDK_DIR" ] && [ -d "\$PREFIX/opt/android-ndk" ] && NDK_DIR="\$PREFIX/opt/android-ndk"
+# CMake: use the base cmake directory under the SDK root
+CMAKE_DIR=""
+[ -d "\$SDK_ROOT_LP/cmake" ] && CMAKE_DIR="\$SDK_ROOT_LP/cmake"
+{
+  printf "sdk.dir=%s\n" "\$SDK_ROOT_LP"
+  [ -n "\$NDK_DIR" ]   && printf "ndk.dir=%s\n"   "\$NDK_DIR"
+  [ -n "\$CMAKE_DIR" ] && printf "cmake.dir=%s\n" "\$CMAKE_DIR"
+} > "$projectPath/local.properties"
 
 SDK_ROOT="\${ANDROID_HOME:-\$PREFIX/opt/android-sdk}"
 AAPT2_BIN=\$(find "\$SDK_ROOT/build-tools" -name aapt2 2>/dev/null | sort -rV | head -1)

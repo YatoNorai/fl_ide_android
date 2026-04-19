@@ -9,16 +9,8 @@ class SdkDefinition {
   final String verifyCmd;
   final String installScript;
   final String buildCommand;
-
-  /// Shell commands run automatically when [installScript] exits with a
-  /// non-zero status (via `trap … ERR`).  Should forcefully undo everything
-  /// the install script may have created so the user can retry cleanly.
   final String cleanupScript;
-
-  /// Project-level config (new project cmd, entry file, sync, etc.)
   final SdkConfig sdkConfig;
-
-  /// DAP adapter config. Empty (no DAP) for non-Flutter SDKs by default.
   final DapConfig dapConfig;
 
   const SdkDefinition({
@@ -32,17 +24,17 @@ class SdkDefinition {
     this.dapConfig = DapConfig.empty,
   });
 
-  // ── Convenience pass-throughs ─────────────────────────────────────────────
-
-  String get newProjectCmd       => sdkConfig.newProjectCmd;
-  String get defaultEntryFile    => sdkConfig.defaultEntryFile;
+  String get newProjectCmd          => sdkConfig.newProjectCmd;
+  String get defaultEntryFile       => sdkConfig.defaultEntryFile;
   List<String> get projectFileExtensions => sdkConfig.fileExtensions;
-  String get syncCommand         => sdkConfig.syncCommand;
-  String get syncTriggerFile     => sdkConfig.syncTriggerFile;
+  String get syncCommand            => sdkConfig.syncCommand;
+  String get syncTriggerFile        => sdkConfig.syncTriggerFile;
 
-  // ── Hardcoded definitions ─────────────────────────────────────────────────
+  // ── All hardcoded definitions ─────────────────────────────────────────────
 
   static const List<SdkDefinition> all = [
+
+    // ── Flutter ──────────────────────────────────────────────────────────────
     SdkDefinition(
       type: SdkType.flutter,
       verifyBinary: 'flutter',
@@ -53,23 +45,21 @@ rm -f "$PREFIX/bin/flutter" 2>/dev/null
 rm -f flutter_linux_arm64.tar.xz 2>/dev/null
 pkg uninstall -y curl git unzip 2>/dev/null || true
 ''',
-      installScript: '''
+      installScript: r'''
 pkg update -y && pkg install -y curl git unzip
 curl -LO https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_arm64.tar.xz
-mkdir -p \$PREFIX/opt
-tar xf flutter_linux_arm64.tar.xz -C \$PREFIX/opt
+mkdir -p $PREFIX/opt
+tar xf flutter_linux_arm64.tar.xz -C $PREFIX/opt
 rm flutter_linux_arm64.tar.xz
-# Symlink into \$PREFIX/bin so it is on PATH for the IDE process
-ln -sf \$PREFIX/opt/flutter/bin/flutter \$PREFIX/bin/flutter
-# Make flutter available in the current terminal session
-export PATH="\$PREFIX/opt/flutter/bin:\$PATH"
-echo 'export PATH="\$PATH:\$PREFIX/opt/flutter/bin"' >> ~/.bashrc
-flutter config --android-sdk \${ANDROID_HOME:-\$PREFIX/opt/android-sdk}
+ln -sf $PREFIX/opt/flutter/bin/flutter $PREFIX/bin/flutter
+export PATH="$PREFIX/opt/flutter/bin:$PATH"
+echo 'export PATH="$PATH:$PREFIX/opt/flutter/bin"' >> ~/.bashrc
+flutter config --android-sdk ${ANDROID_HOME:-$PREFIX/opt/android-sdk}
 flutter doctor
 ''',
       buildCommand: 'flutter build apk --debug',
       sdkConfig: SdkConfig(
-        newProjectCmd: 'flutter create \$name',
+        newProjectCmd: r'flutter create $name',
         defaultEntryFile: 'lib/main.dart',
         fileExtensions: ['dart', 'yaml', 'json'],
         syncCommand: 'flutter pub get',
@@ -102,6 +92,8 @@ flutter doctor
         ],
       ),
     ),
+
+    // ── Android SDK ───────────────────────────────────────────────────────────
     SdkDefinition(
       type: SdkType.androidSdk,
       verifyBinary: 'sdkmanager',
@@ -115,48 +107,41 @@ rm -f "$PREFIX/bin/sdkmanager" "$PREFIX/bin/adb" 2>/dev/null
 rm -f commandlinetools-linux-*.zip java-language-server.tar.gz 2>/dev/null
 pkg uninstall -y openjdk-17 wget unzip 2>/dev/null || true
 ''',
-      installScript: '''
+      installScript: r'''
 pkg update -y && pkg install -y openjdk-17 wget unzip
-# Use fallback if ANDROID_HOME is not set in this shell session
-export ANDROID_HOME="\${ANDROID_HOME:-\$PREFIX/opt/android-sdk}"
-mkdir -p "\$ANDROID_HOME/cmdline-tools"
+export ANDROID_HOME="${ANDROID_HOME:-$PREFIX/opt/android-sdk}"
+mkdir -p "$ANDROID_HOME/cmdline-tools"
 wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
-unzip -q commandlinetools-linux-*.zip -d "\$ANDROID_HOME/cmdline-tools"
-mv "\$ANDROID_HOME/cmdline-tools/cmdline-tools" "\$ANDROID_HOME/cmdline-tools/latest"
+unzip -q commandlinetools-linux-*.zip -d "$ANDROID_HOME/cmdline-tools"
+mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"
 rm commandlinetools-linux-*.zip
-# Add tools to PATH for this session
-export PATH="\$ANDROID_HOME/cmdline-tools/latest/bin:\$PATH"
+export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
 yes | sdkmanager --licenses
 sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
-# Symlink into \$PREFIX/bin so the IDE process can find them
-ln -sf "\$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "\$PREFIX/bin/sdkmanager"
-ln -sf "\$ANDROID_HOME/platform-tools/adb" "\$PREFIX/bin/adb" 2>/dev/null || true
-echo 'export PATH="\$PATH:\$ANDROID_HOME/cmdline-tools/latest/bin:\$ANDROID_HOME/platform-tools"' >> ~/.bashrc
-# ── java-language-server (Java/Kotlin LSP) ─────────────────────────────────
-# Lightweight single-jar LSP by georgewfraser.  Much more reliable on Android
-# than jdtls or kotlin-language-server: no OSGi, starts in under 10 s.
-mkdir -p "\$PREFIX/opt/java-language-server"
+ln -sf "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "$PREFIX/bin/sdkmanager"
+ln -sf "$ANDROID_HOME/platform-tools/adb" "$PREFIX/bin/adb" 2>/dev/null || true
+echo 'export PATH="$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools"' >> ~/.bashrc
+mkdir -p "$PREFIX/opt/java-language-server"
 wget -q https://github.com/georgewfraser/java-language-server/releases/latest/download/java-language-server.tar.gz
-tar xzf java-language-server.tar.gz -C "\$PREFIX/opt/java-language-server"
+tar xzf java-language-server.tar.gz -C "$PREFIX/opt/java-language-server"
 rm java-language-server.tar.gz
-# Verify the jar landed where the IDE expects it
-ls "\$PREFIX/opt/java-language-server/dist/lang.jar"
-# ── Eclipse LemMinX — XML Language Server ─────────────────────────────────
-# Standalone uber-jar used by the IDE for .xml / AndroidManifest LSP support.
-mkdir -p "\$PREFIX/opt/lemminx"
-wget -q -O "\$PREFIX/opt/lemminx/lemminx.jar" \
+ls "$PREFIX/opt/java-language-server/dist/lang.jar"
+mkdir -p "$PREFIX/opt/lemminx"
+wget -q -O "$PREFIX/opt/lemminx/lemminx.jar" \
   https://github.com/eclipse/lemminx/releases/download/0.29.0/org.eclipse.lemminx-0.29.0-uber.jar
-ls "\$PREFIX/opt/lemminx/lemminx.jar"
+ls "$PREFIX/opt/lemminx/lemminx.jar"
 ''',
       buildCommand: './gradlew assembleDebug',
       sdkConfig: SdkConfig(
-        newProjectCmd: 'mkdir -p \$name',
+        newProjectCmd: r'mkdir -p $name',
         defaultEntryFile: 'app/src/main/java/MainActivity.kt',
         fileExtensions: ['java', 'kotlin', 'kt', 'xml', 'gradle'],
         syncCommand: './gradlew --refresh-dependencies',
         syncTriggerFile: 'app/build.gradle',
       ),
     ),
+
+    // ── React Native ──────────────────────────────────────────────────────────
     SdkDefinition(
       type: SdkType.reactNative,
       verifyBinary: 'node',
@@ -172,6 +157,8 @@ ls "\$PREFIX/opt/lemminx/lemminx.jar"
         syncTriggerFile: 'package.json',
       ),
     ),
+
+    // ── Node.js ───────────────────────────────────────────────────────────────
     SdkDefinition(
       type: SdkType.nodejs,
       verifyBinary: 'node',
@@ -180,28 +167,42 @@ ls "\$PREFIX/opt/lemminx/lemminx.jar"
       installScript: 'pkg update -y && pkg install -y nodejs-lts',
       buildCommand: 'npm run build',
       sdkConfig: SdkConfig(
-        newProjectCmd: 'mkdir -p \$name && cd \$name && npm init -y',
+        newProjectCmd: r'mkdir -p $name && cd $name && npm init -y',
         defaultEntryFile: 'index.js',
         fileExtensions: ['js', 'ts', 'mjs', 'cjs', 'json'],
         syncCommand: 'npm install',
         syncTriggerFile: 'package.json',
       ),
     ),
+
+    // ── Python ────────────────────────────────────────────────────────────────
     SdkDefinition(
       type: SdkType.python,
       verifyBinary: 'python3',
       verifyCmd: 'python3 --version',
       cleanupScript: 'pkg uninstall -y python 2>/dev/null || true',
-      installScript: 'pkg update -y && pkg install -y python',
+      installScript: r'''
+pkg update -y && pkg install -y python
+pip install pylsp debugpy
+''',
       buildCommand: 'python3 main.py',
       sdkConfig: SdkConfig(
-        newProjectCmd: 'mkdir -p \$name',
+        newProjectCmd: r'mkdir -p $name',
         defaultEntryFile: 'main.py',
         fileExtensions: ['py', 'txt', 'cfg', 'toml'],
         syncCommand: 'pip install -r requirements.txt',
         syncTriggerFile: 'requirements.txt',
       ),
+      dapConfig: DapConfig(
+        adapterBinary: r'$PREFIX/bin/python3',
+        adapterArgs: ['-m', 'debugpy.adapter'],
+        adapterId: 'python',
+        launchProgram: 'main.py',
+        buildDoneStrings: ['Debugger is ready'],
+      ),
     ),
+
+    // ── Swift ─────────────────────────────────────────────────────────────────
     SdkDefinition(
       type: SdkType.swift,
       verifyBinary: 'swift',
@@ -210,11 +211,13 @@ ls "\$PREFIX/opt/lemminx/lemminx.jar"
       installScript: 'pkg update -y && pkg install -y swift',
       buildCommand: 'swift build',
       sdkConfig: SdkConfig(
-        newProjectCmd: 'mkdir -p \$name && cd \$name && swift package init --type executable',
+        newProjectCmd: r'mkdir -p $name && cd $name && swift package init --type executable',
         defaultEntryFile: 'Sources/main.swift',
         fileExtensions: ['swift', 'json', 'md'],
       ),
     ),
+
+    // ── Go ────────────────────────────────────────────────────────────────────
     SdkDefinition(
       type: SdkType.go,
       verifyBinary: 'go',
@@ -223,7 +226,6 @@ ls "\$PREFIX/opt/lemminx/lemminx.jar"
       installScript: 'pkg update -y && pkg install -y golang',
       buildCommand: 'go build -o app .',
       sdkConfig: SdkConfig(
-        // printf interprets \n as newline; "fmt" must stay unescaped for shell
         newProjectCmd: r'''mkdir -p $name && cd $name && go mod init $name && printf 'package main\n\nimport "fmt"\n\nfunc main() {\n\tfmt.Println("Hello, World!")\n}\n' > main.go''',
         defaultEntryFile: 'main.go',
         fileExtensions: ['go', 'mod', 'sum'],
@@ -239,6 +241,322 @@ ls "\$PREFIX/opt/lemminx/lemminx.jar"
         buildDoneStrings: ['loaded'],
       ),
     ),
+
+    // ── Kotlin Multiplatform ──────────────────────────────────────────────────
+    SdkDefinition(
+      type: SdkType.kotlinMultiplatform,
+      verifyBinary: 'java',
+      verifyCmd: 'java -version',
+      cleanupScript: 'pkg uninstall -y openjdk-17 2>/dev/null || true',
+      installScript: r'''
+pkg update -y && pkg install -y openjdk-17
+pkg install -y kotlin-language-server 2>/dev/null || true
+echo "✓ Kotlin Multiplatform pronto"
+''',
+      buildCommand: './gradlew assembleDebug',
+      sdkConfig: SdkConfig(
+        newProjectCmd: r'''mkdir -p $name/shared/src/commonMain/kotlin $name/androidApp/src/main/kotlin && cd $name && printf 'fun greeting(): String = "Hello, KMP!"\n' > shared/src/commonMain/kotlin/Greeting.kt''',
+        defaultEntryFile: 'shared/src/commonMain/kotlin/Greeting.kt',
+        fileExtensions: ['kt', 'kts', 'xml', 'gradle', 'json'],
+        syncCommand: './gradlew --refresh-dependencies',
+        syncTriggerFile: 'settings.gradle.kts',
+      ),
+    ),
+
+    // ── C / C++ ───────────────────────────────────────────────────────────────
+    SdkDefinition(
+      type: SdkType.cpp,
+      verifyBinary: 'clang',
+      verifyCmd: 'clang --version',
+      cleanupScript: 'pkg uninstall -y clang cmake make 2>/dev/null || true',
+      installScript: r'''
+pkg update -y && pkg install -y clang clang-tools-extra lldb cmake make
+echo "✓ C/C++ toolchain instalado"
+''',
+      buildCommand: 'cmake --build build',
+      sdkConfig: SdkConfig(
+        newProjectCmd: r'''mkdir -p $name && cd $name && printf '#include <stdio.h>\nint main() { printf("Hello, World!\\n"); return 0; }\n' > main.c && printf 'cmake_minimum_required(VERSION 3.20)\nproject($name)\nadd_executable($name main.c)\n' > CMakeLists.txt && cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON 2>/dev/null | tail -3''',
+        defaultEntryFile: 'main.c',
+        fileExtensions: ['c', 'cpp', 'cc', 'cxx', 'h', 'hpp'],
+        formatCommand: 'clang-format -i .',
+      ),
+      dapConfig: DapConfig(
+        adapterBinary: r'$PREFIX/bin/lldb-vscode',
+        adapterArgs: [],
+        adapterId: 'lldb',
+        launchProgram: './build/main',
+        buildDoneStrings: ['Built target'],
+      ),
+    ),
+
+    // ── Rust ──────────────────────────────────────────────────────────────────
+    SdkDefinition(
+      type: SdkType.rust,
+      verifyBinary: 'rustc',
+      verifyCmd: 'rustc --version',
+      cleanupScript: r'pkg uninstall -y rust 2>/dev/null || true',
+      installScript: r'''
+pkg update -y && pkg install -y rust
+cargo install rust-analyzer 2>&1 || pkg install -y rust-analyzer 2>/dev/null || true
+echo "✓ Rust instalado: $(rustc --version)"
+''',
+      buildCommand: 'cargo build',
+      sdkConfig: SdkConfig(
+        newProjectCmd: r'cargo new $name',
+        defaultEntryFile: 'src/main.rs',
+        fileExtensions: ['rs', 'toml'],
+        syncCommand: 'cargo fetch',
+        syncTriggerFile: 'Cargo.toml',
+        formatCommand: 'cargo fmt',
+      ),
+      dapConfig: DapConfig(
+        adapterBinary: r'$PREFIX/bin/lldb-vscode',
+        adapterArgs: [],
+        adapterId: 'lldb',
+        launchProgram: r'target/debug/$name',
+        buildDoneStrings: ['Finished'],
+      ),
+    ),
+
+    // ── Lua ───────────────────────────────────────────────────────────────────
+    SdkDefinition(
+      type: SdkType.lua,
+      verifyBinary: 'lua',
+      verifyCmd: 'lua -v',
+      cleanupScript: 'pkg uninstall -y lua54 lua-language-server 2>/dev/null || true',
+      installScript: r'''
+pkg update -y && pkg install -y lua54 lua-language-server
+echo "✓ Lua instalado: $(lua -v)"
+''',
+      buildCommand: 'lua main.lua',
+      sdkConfig: SdkConfig(
+        newProjectCmd: r'''mkdir -p $name && printf 'print("Hello, World!")\n' > $name/main.lua''',
+        defaultEntryFile: 'main.lua',
+        fileExtensions: ['lua'],
+      ),
+    ),
+
+    // ── Ruby ──────────────────────────────────────────────────────────────────
+    SdkDefinition(
+      type: SdkType.ruby,
+      verifyBinary: 'ruby',
+      verifyCmd: 'ruby --version',
+      cleanupScript: 'pkg uninstall -y ruby 2>/dev/null || true',
+      installScript: r'''
+pkg update -y && pkg install -y ruby
+gem install solargraph bundler
+echo "✓ Ruby instalado: $(ruby --version)"
+''',
+      buildCommand: 'ruby main.rb',
+      sdkConfig: SdkConfig(
+        newProjectCmd: r'''mkdir -p $name && printf 'puts "Hello, World!"\n' > $name/main.rb''',
+        defaultEntryFile: 'main.rb',
+        fileExtensions: ['rb', 'gemspec'],
+        syncCommand: 'bundle install',
+        syncTriggerFile: 'Gemfile',
+        formatCommand: 'rubocop -A .',
+      ),
+    ),
+
+    // ── PHP ───────────────────────────────────────────────────────────────────
+    SdkDefinition(
+      type: SdkType.php,
+      verifyBinary: 'php',
+      verifyCmd: 'php --version',
+      cleanupScript: 'pkg uninstall -y php 2>/dev/null || true',
+      installScript: r'''
+pkg update -y && pkg install -y php nodejs-lts
+npm install -g intelephense
+echo "✓ PHP instalado: $(php --version | head -1)"
+''',
+      buildCommand: 'php index.php',
+      sdkConfig: SdkConfig(
+        newProjectCmd: r'''mkdir -p $name && printf '<?php\necho "Hello, World!\n";\n' > $name/index.php''',
+        defaultEntryFile: 'index.php',
+        fileExtensions: ['php', 'phtml', 'html'],
+        syncCommand: 'composer install',
+        syncTriggerFile: 'composer.json',
+      ),
+    ),
+
+    // ── Bash / Shell ──────────────────────────────────────────────────────────
+    SdkDefinition(
+      type: SdkType.bash,
+      verifyBinary: 'bash',
+      verifyCmd: 'bash --version',
+      cleanupScript: 'npm uninstall -g bash-language-server 2>/dev/null || true',
+      installScript: r'''
+pkg update -y && pkg install -y nodejs-lts
+npm install -g bash-language-server
+echo "✓ bash-language-server instalado"
+''',
+      buildCommand: 'bash main.sh',
+      sdkConfig: SdkConfig(
+        newProjectCmd: r'''mkdir -p $name && printf '#!/usr/bin/env bash\necho "Hello, World!"\n' > $name/main.sh && chmod +x $name/main.sh''',
+        defaultEntryFile: 'main.sh',
+        fileExtensions: ['sh', 'bash'],
+      ),
+    ),
+
+    // ── HTML / CSS ────────────────────────────────────────────────────────────
+    SdkDefinition(
+      type: SdkType.htmlCss,
+      verifyBinary: 'node',
+      verifyCmd: 'node --version',
+      cleanupScript: 'npm uninstall -g vscode-langservers-extracted 2>/dev/null || true',
+      installScript: r'''
+pkg update -y && pkg install -y nodejs-lts
+npm install -g vscode-langservers-extracted
+echo "✓ HTML/CSS LSP instalado"
+''',
+      buildCommand: 'echo "Abra index.html em um navegador"',
+      sdkConfig: SdkConfig(
+        newProjectCmd: r'''mkdir -p $name && cat > $name/index.html << 'HTMLEOF'
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>$name</title><link rel="stylesheet" href="style.css"></head>
+<body><h1>Hello, World!</h1><script src="script.js"></script></body>
+</html>
+HTMLEOF
+printf 'body { font-family: sans-serif; margin: 2rem; }\n' > $name/style.css
+printf 'console.log("Hello!");\n' > $name/script.js''',
+        defaultEntryFile: 'index.html',
+        fileExtensions: ['html', 'css', 'scss', 'less', 'js'],
+      ),
+    ),
+
+    // ── C# (.NET) ────────────────────────────────────────────────────────────
+    SdkDefinition(
+      type: SdkType.csharp,
+      verifyBinary: 'dotnet',
+      verifyCmd: 'dotnet --version',
+      cleanupScript: r'rm -rf "$HOME/.dotnet" 2>/dev/null || true',
+      installScript: r'''
+pkg update -y && pkg install -y dotnet-sdk
+dotnet tool install -g csharp-ls 2>&1 || true
+echo "✓ .NET instalado: $(dotnet --version)"
+''',
+      buildCommand: 'dotnet build',
+      sdkConfig: SdkConfig(
+        newProjectCmd: r'dotnet new console -n $name',
+        defaultEntryFile: 'Program.cs',
+        fileExtensions: ['cs', 'csproj', 'json'],
+        syncCommand: 'dotnet restore',
+        syncTriggerFile: '*.csproj',
+        formatCommand: 'dotnet format',
+      ),
+    ),
+
+    // ── Scala ────────────────────────────────────────────────────────────────
+    SdkDefinition(
+      type: SdkType.scala,
+      verifyBinary: 'scala',
+      verifyCmd: 'scala --version',
+      cleanupScript: 'pkg uninstall -y scala 2>/dev/null || true',
+      installScript: r'''
+pkg update -y && pkg install -y openjdk-17 scala
+mkdir -p "$HOME/.local/bin"
+curl -fL https://github.com/coursier/launchers/raw/master/cs-aarch64-pc-linux.gz | gzip -d > "$HOME/.local/bin/cs"
+chmod +x "$HOME/.local/bin/cs"
+"$HOME/.local/bin/cs" install metals 2>&1 || true
+echo "✓ Scala e Metals LSP instalados"
+''',
+      buildCommand: 'scala main.scala',
+      sdkConfig: SdkConfig(
+        newProjectCmd: r'''mkdir -p $name && printf 'object Main extends App {\n  println("Hello, World!")\n}\n' > $name/main.scala''',
+        defaultEntryFile: 'main.scala',
+        fileExtensions: ['scala', 'sc', 'sbt'],
+        syncCommand: 'sbt update',
+        syncTriggerFile: 'build.sbt',
+      ),
+    ),
+
+    // ── R ────────────────────────────────────────────────────────────────────
+    SdkDefinition(
+      type: SdkType.r,
+      verifyBinary: 'Rscript',
+      verifyCmd: 'Rscript --version',
+      cleanupScript: 'pkg uninstall -y r-base 2>/dev/null || true',
+      installScript: r'''
+pkg update -y && pkg install -y r-base
+Rscript -e 'install.packages("languageserver", repos="https://cloud.r-project.org")' 2>&1
+echo "✓ R instalado: $(Rscript --version)"
+''',
+      buildCommand: 'Rscript main.R',
+      sdkConfig: SdkConfig(
+        newProjectCmd: r'''mkdir -p $name && printf '# Hello World\ncat("Hello, World!\n")\n' > $name/main.R''',
+        defaultEntryFile: 'main.R',
+        fileExtensions: ['r', 'R', 'Rmd'],
+      ),
+    ),
+
+    // ── Zig ──────────────────────────────────────────────────────────────────
+    SdkDefinition(
+      type: SdkType.zig,
+      verifyBinary: 'zig',
+      verifyCmd: 'zig version',
+      cleanupScript: 'pkg uninstall -y zig zls 2>/dev/null || true',
+      installScript: r'''
+pkg update -y && pkg install -y zig zls
+echo "✓ Zig instalado: $(zig version)"
+''',
+      buildCommand: 'zig build run',
+      sdkConfig: SdkConfig(
+        newProjectCmd: r'mkdir -p $name && cd $name && zig init',
+        defaultEntryFile: 'src/main.zig',
+        fileExtensions: ['zig'],
+        formatCommand: 'zig fmt .',
+      ),
+    ),
+
+    // ── Haskell ───────────────────────────────────────────────────────────────
+    SdkDefinition(
+      type: SdkType.haskell,
+      verifyBinary: 'ghc',
+      verifyCmd: 'ghc --version',
+      cleanupScript: r'pkg uninstall -y ghc cabal-install 2>/dev/null || true',
+      installScript: r'''
+pkg update -y && pkg install -y ghc cabal-install
+cabal update
+cabal install haskell-language-server 2>&1 || true
+echo "✓ Haskell instalado: $(ghc --version)"
+''',
+      buildCommand: 'runghc main.hs',
+      sdkConfig: SdkConfig(
+        newProjectCmd: r'''mkdir -p $name && printf 'main :: IO ()\nmain = putStrLn "Hello, World!"\n' > $name/main.hs''',
+        defaultEntryFile: 'main.hs',
+        fileExtensions: ['hs', 'lhs', 'cabal'],
+        syncCommand: 'cabal update',
+        syncTriggerFile: '*.cabal',
+      ),
+    ),
+
+    // ── Elixir ────────────────────────────────────────────────────────────────
+    SdkDefinition(
+      type: SdkType.elixir,
+      verifyBinary: 'elixir',
+      verifyCmd: 'elixir --version',
+      cleanupScript: 'pkg uninstall -y elixir 2>/dev/null || true',
+      installScript: r'''
+pkg update -y && pkg install -y elixir
+mkdir -p "$HOME/.elixir-ls"
+curl -fL https://github.com/elixir-lsp/elixir-ls/releases/latest/download/elixir-ls.zip \
+  -o /tmp/elixir-ls.zip 2>&1
+unzip -q /tmp/elixir-ls.zip -d "$HOME/.elixir-ls" && rm /tmp/elixir-ls.zip
+chmod +x "$HOME/.elixir-ls/language_server.sh"
+echo "✓ Elixir instalado: $(elixir --version | head -1)"
+''',
+      buildCommand: 'mix run',
+      sdkConfig: SdkConfig(
+        newProjectCmd: r'mix new $name',
+        defaultEntryFile: r'lib/$name.ex',
+        fileExtensions: ['ex', 'exs'],
+        syncCommand: 'mix deps.get',
+        syncTriggerFile: 'mix.exs',
+        formatCommand: 'mix format',
+      ),
+    ),
+
   ];
 
   static SdkDefinition forType(SdkType type) =>

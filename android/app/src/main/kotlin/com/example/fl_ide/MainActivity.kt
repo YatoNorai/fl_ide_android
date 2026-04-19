@@ -1,6 +1,8 @@
 package com.example.fl_ide
 
+import android.content.ComponentCallbacks2
 import android.content.Intent
+import android.content.res.Configuration
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -11,10 +13,27 @@ class MainActivity : FlutterActivity() {
 
     companion object {
         private const val APK_INSTALLER_CHANNEL = "com.example.fl_ide/apk_installer"
+        private const val MEMORY_CHANNEL = "fl_ide/memory"
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
+        val memoryChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, MEMORY_CHANNEL)
+
+        application.registerComponentCallbacks(object : ComponentCallbacks2 {
+            override fun onTrimMemory(level: Int) {
+                runOnUiThread {
+                    memoryChannel.invokeMethod("onTrimMemory", level)
+                }
+            }
+            override fun onLowMemory() {
+                runOnUiThread {
+                    memoryChannel.invokeMethod("onLowMemory", null)
+                }
+            }
+            override fun onConfigurationChanged(newConfig: Configuration) {}
+        })
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, APK_INSTALLER_CHANNEL)
             .setMethodCallHandler { call, result ->

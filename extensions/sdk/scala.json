@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "sdk": "scala",
+  "sdk_version": "latest",
+  "display_name": "Scala",
+  "description": "Scala para Termux no Android ARM64. Inclui o compilador Scala via coursier (cs) e Metals (LSP) para autocompletar, diagnósticos e navegação de código.",
+  "package": {
+    "type": "manual",
+    "arch": "arm64",
+    "size_mb": 200
+  },
+  "package_author": {
+    "name": "EPFL / Scala Center",
+    "github": "https://github.com/coursier/coursier"
+  },
+  "json_author": {
+    "name": "Yato",
+    "date": "2026-04-19"
+  },
+  "install_steps": [
+    {
+      "type": "shell",
+      "command": "pkg update -y 2>&1 && pkg install -y openjdk-17 curl 2>&1",
+      "description": "Instalando Java (OpenJDK 17) e curl"
+    },
+    {
+      "type": "shell",
+      "command": "java -version 2>&1",
+      "description": "Verificando Java"
+    },
+    {
+      "type": "shell",
+      "command": "mkdir -p $HOME/.local/bin && curl -fL https://github.com/coursier/launchers/raw/master/cs-aarch64-pc-linux -o $HOME/.local/bin/cs 2>&1 && chmod +x $HOME/.local/bin/cs && echo 'OK: coursier instalado'",
+      "description": "Instalando coursier (cs) ARM64"
+    },
+    {
+      "type": "shell",
+      "command": "grep -qxF 'export PATH=\"$PATH:$HOME/.local/bin\"' $HOME/.bashrc || echo 'export PATH=\"$PATH:$HOME/.local/bin\"' >> $HOME/.bashrc",
+      "description": "Adicionando .local/bin ao PATH"
+    },
+    {
+      "type": "shell",
+      "command": "export PATH=$PATH:$HOME/.local/bin && cs install scala scala-cli 2>&1 && echo 'OK: Scala instalado'",
+      "description": "Instalando Scala via coursier"
+    },
+    {
+      "type": "shell",
+      "command": "export PATH=$PATH:$HOME/.local/bin && cs install metals 2>&1 && echo 'OK: Metals LSP instalado'",
+      "description": "Instalando Metals (LSP) via coursier"
+    }
+  ],
+  "config_steps": [
+    {
+      "type": "shell",
+      "command": "test -f $HOME/.local/bin/metals && echo 'metals OK' || echo 'AVISO: metals não encontrado'",
+      "description": "Verificando Metals"
+    },
+    {
+      "type": "shell",
+      "command": "export PATH=$PATH:$HOME/.local/bin && scala -version 2>&1 && echo 'Scala OK'",
+      "description": "Verificando Scala"
+    }
+  ],
+  "cleanup_steps": [],
+  "uninstall_steps": [
+    {
+      "type": "shell",
+      "command": "rm -f $HOME/.local/bin/metals $HOME/.local/bin/scala $HOME/.local/bin/cs 2>&1 || true",
+      "description": "Removendo Metals, Scala e coursier"
+    }
+  ],
+  "verify_binary": "cs",
+  "verify_command": "cs version",
+  "run_config": {
+    "run": "scala-cli run .",
+    "supports_devices": false,
+    "build_debug": "scala-cli compile .",
+    "build_release": "scala-cli package . -o app"
+  },
+  "sdk_config": {
+    "new_project_cmd": "mkdir -p $name && cd $name && printf '@main def main(): Unit =\\n  println(\"Hello, World!\")\\n' > Main.scala",
+    "default_entry_file": "Main.scala",
+    "file_extensions": ["scala", "sc", "sbt"],
+    "sync_command": null,
+    "sync_trigger_file": null,
+    "format_command": null
+  },
+  "lsp_config": {
+    "server_binary": "$HOME/.local/bin/metals",
+    "server_args": [],
+    "language_ids": ["scala"]
+  }
+}

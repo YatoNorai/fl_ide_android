@@ -138,6 +138,19 @@ class TerminalSession {
     }
   }
 
+  /// Notifies the session that the app has entered background or foreground.
+  ///
+  /// The xterm [Terminal] object does not expose a post-construction buffer
+  /// resize API, so this is a no-op at the model level. The method exists so
+  /// that callers (e.g. [WorkspaceScreen.didChangeAppLifecycleState]) can
+  /// signal intent without a compile error; a future xterm version that adds
+  /// buffer control can implement the body here.
+  // ignore: avoid_positional_boolean_parameters
+  void setBackgroundMode(bool isBackground) {
+    // No-op: xterm 4.x Terminal.maxLines is set at construction time only.
+    // Override in a subclass or update when the xterm API exposes a setter.
+  }
+
   void kill() {
     _outputSub?.cancel();
     _outputSub = null;

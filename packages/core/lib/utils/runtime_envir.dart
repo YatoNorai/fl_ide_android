@@ -69,6 +69,48 @@ class RuntimeEnvir {
   // Installed by the Android SDK extension at $PREFIX/opt/lemminx/lemminx.jar
   static String get lemminxJar => '$usrPath/opt/lemminx/lemminx.jar';
 
+  // C / C++ — clangd ships with the Termux clang package
+  static String get clangdBin => '$usrPath/bin/clangd';
+  static String get lldbDapBin => '$usrPath/bin/lldb-vscode'; // also tries lldb-dap
+
+  // Rust — rust-analyzer installed via rustup or pkg
+  static String get cargoBin        => '$homePath/.cargo/bin/cargo';
+  static String get rustAnalyzerBin => '$homePath/.cargo/bin/rust-analyzer';
+  static String get rustcBin        => '$homePath/.cargo/bin/rustc';
+
+  // Lua — lua-language-server via pkg
+  static String get luaLsBin => '$usrPath/bin/lua-language-server';
+
+  // Ruby — solargraph installed via gem
+  static String get rubyBin      => '$usrPath/bin/ruby';
+  static String get solargraphBin => '$usrPath/bin/solargraph';
+
+  // PHP
+  static String get phpBin => '$usrPath/bin/php';
+
+  // Zig — zls installed via pkg or cargo
+  static String get zigBin => '$usrPath/bin/zig';
+  static String get zlsBin => '$usrPath/bin/zls';
+
+  // R — r-languageserver
+  static String get rBin => '$usrPath/bin/Rscript';
+
+  // C# — csharp-ls via dotnet tool
+  static String get dotnetBin   => '$homePath/.dotnet/dotnet';
+  static String get csharpLsBin => '$homePath/.dotnet/tools/csharp-ls';
+
+  // Scala — Metals via coursier
+  static String get metalsBin    => '$homePath/.local/bin/metals';
+  static String get coursierBin  => '$homePath/.local/bin/cs';
+
+  // Haskell — HLS via ghcup
+  static String get ghcupBin => '$homePath/.ghcup/bin/ghc';
+  static String get hlsBin   => '$homePath/.ghcup/bin/haskell-language-server-wrapper';
+
+  // Elixir — ElixirLS
+  static String get elixirBin   => '$usrPath/bin/elixir';
+  static String get elixirLsBin => '$homePath/.elixir-ls/language_server.sh';
+
   // Projects dir
   static String get projectsPath => '$homePath/projects';
 

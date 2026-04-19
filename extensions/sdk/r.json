@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "sdk": "r",
+  "sdk_version": "latest",
+  "display_name": "R",
+  "description": "R para ciência de dados no Termux Android ARM64. Inclui o interpretador R via pkg e r-languageserver instalado via install.packages() para autocompletar e diagnósticos.",
+  "package": {
+    "type": "pkg",
+    "arch": "arm64",
+    "size_mb": 120
+  },
+  "package_author": {
+    "name": "Termux / R Project",
+    "github": "https://github.com/termux/termux-packages"
+  },
+  "json_author": {
+    "name": "Yato",
+    "date": "2026-04-19"
+  },
+  "install_steps": [
+    {
+      "type": "shell",
+      "command": "pkg update -y 2>&1 && pkg install -y r-base 2>&1",
+      "description": "Instalando R via pkg"
+    },
+    {
+      "type": "shell",
+      "command": "Rscript --version 2>&1",
+      "description": "Verificando instalação do R"
+    },
+    {
+      "type": "shell",
+      "command": "Rscript -e \"install.packages('languageserver', repos='https://cloud.r-project.org', quiet=FALSE)\" 2>&1 && echo 'OK: r-languageserver instalado'",
+      "description": "Instalando languageserver via install.packages()"
+    },
+    {
+      "type": "shell",
+      "command": "Rscript -e \"library(languageserver); cat('OK: languageserver carregado\\n')\" 2>&1",
+      "description": "Verificando languageserver"
+    }
+  ],
+  "config_steps": [
+    {
+      "type": "shell",
+      "command": "Rscript -e \"installed.packages()[,'Package']\" 2>&1 | grep languageserver && echo 'languageserver OK' || echo 'AVISO: languageserver não instalado'",
+      "description": "Verificando languageserver"
+    }
+  ],
+  "cleanup_steps": [],
+  "uninstall_steps": [
+    {
+      "type": "shell",
+      "command": "Rscript -e \"remove.packages('languageserver')\" 2>&1 || true",
+      "description": "Removendo languageserver"
+    },
+    {
+      "type": "shell",
+      "command": "pkg remove -y r-base 2>&1 || true",
+      "description": "Removendo R"
+    }
+  ],
+  "verify_binary": "Rscript",
+  "verify_command": "Rscript --version",
+  "run_config": {
+    "run": "Rscript main.R",
+    "supports_devices": false,
+    "build_debug": null,
+    "build_release": null
+  },
+  "sdk_config": {
+    "new_project_cmd": "mkdir -p $name && cd $name && printf '# Hello, World!\\ncat(\"Hello, World!\\\\n\")\\n' > main.R",
+    "default_entry_file": "main.R",
+    "file_extensions": ["r", "R", "Rmd", "rmd"],
+    "sync_command": "Rscript -e \"renv::restore()\"",
+    "sync_trigger_file": "renv.lock",
+    "format_command": null
+  },
+  "lsp_config": {
+    "server_binary": "$PREFIX/bin/Rscript",
+    "server_args": ["-e", "languageserver::run()"],
+    "language_ids": ["r"]
+  }
+}

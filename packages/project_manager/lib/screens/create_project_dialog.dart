@@ -85,6 +85,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
   String _gradleDsl = 'Kotlin (.kts)';
   // Flutter-specific options
   FlutterTemplate _flutterTemplate = FlutterTemplate.counterApp;
+  String _flutterNativeLanguage = 'Kotlin';
   // React Native-specific options
   ReactNativeTemplate _rnTemplate = ReactNativeTemplate.blank;
 
@@ -185,6 +186,19 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
           _androidTemplate = AndroidTemplate.emptyActivity;
         }
       });
+    }
+  }
+
+  Future<void> _pickFlutterNativeLanguage() async {
+    final result = await showThemedDialog<String>(
+      context: context,
+      title: 'Linguagem nativa Android',
+      items: const ['Kotlin', 'Java'],
+      current: _flutterNativeLanguage,
+      label: (v) => v,
+    );
+    if (result != null && mounted) {
+      setState(() => _flutterNativeLanguage = result);
     }
   }
 
@@ -292,7 +306,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
       newProjectCmd: overrideCmd,
       projectsBasePath: widget.remoteProjectsPath,
       remoteIsWindows: widget.remoteIsWindows,
-      androidLanguage: _androidLanguage.toLowerCase(),
+      androidLanguage: _selectedSdk == SdkType.flutter
+          ? _flutterNativeLanguage.toLowerCase()
+          : _androidLanguage.toLowerCase(),
       androidMinSdk: _androidMinSdk,
       androidTemplate: _androidTemplate,
       flutterTemplate: _flutterTemplate,
@@ -359,29 +375,23 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
         ),
         centerTitle: true,
       ),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // ── Title ──────────────────────────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-            child: Text(
-              s.newProject,
-              style: GoogleFonts.openSans(
-                color: cs.onSurface,
-                fontSize: 28,
-                fontWeight: FontWeight.w700,
+      body: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // ── Title (rola junto com o conteúdo) ─────────────────────────
+              Padding(
+                padding: const EdgeInsets.fromLTRB(0, 8, 0, 24),
+                child: Text(
+                  s.newProject,
+                  style: GoogleFonts.openSans(
+                    color: cs.onSurface,
+                    fontSize: 28,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
               ),
-            ),
-          ),
-
-          // ── Scrollable fields ──────────────────────────────────────────────
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
                   // SSH indicator banner
                   if (widget.isSshActive &&
                       widget.remoteProjectsPath != null) ...[
@@ -453,6 +463,13 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                       valueText: _gradleDsl,
                       enabled: !_creating,
                       onTap: _creating ? null : _pickGradleDsl,
+                    ),
+                    const SizedBox(height: 16),
+                    _SelectTile(
+                      label: 'Linguagem nativa Android',
+                      valueText: _flutterNativeLanguage,
+                      enabled: !_creating,
+                      onTap: _creating ? null : _pickFlutterNativeLanguage,
                     ),
                   ],
 
@@ -595,13 +612,10 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                     ),
                   ],
 
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 100),
                 ],
               ),
             ),
-          ),
-        ],
-      ),
       extendBody: true,
       bottomNavigationBar: Padding(
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),

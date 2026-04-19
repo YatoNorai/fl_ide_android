@@ -13,6 +13,9 @@ part 'chat_models.dart';
 // ── Provider ──────────────────────────────────────────────────────────────────
 
 class ChatProvider extends ChangeNotifier {
+  static const _maxConversations = 30;
+  static const _maxSnapshots = 50;
+
   final List<ChatConversation> _conversations = [];
   ChatConversation? _activeConversation;
   AiAgent _selectedAgent = kDefaultAgents.first;
@@ -107,8 +110,14 @@ class ChatProvider extends ChangeNotifier {
         _conversations.add(
             ChatConversation.fromJson(c as Map<String, dynamic>));
       }
+      if (_conversations.length > _maxConversations) {
+        _conversations.removeRange(_maxConversations, _conversations.length);
+      }
       for (final s in (data['snapshots'] as List? ?? [])) {
         _snapshots.add(ProjectSnapshot.fromJson(s as Map<String, dynamic>));
+      }
+      if (_snapshots.length > _maxSnapshots) {
+        _snapshots.removeRange(_maxSnapshots, _snapshots.length);
       }
       _userMessageCount = (data['userMessageCount'] as int?) ?? 0;
       _alwaysAcceptCmds
@@ -147,6 +156,9 @@ class ChatProvider extends ChangeNotifier {
 
   void addSnapshot(ProjectSnapshot snapshot) {
     _snapshots.insert(0, snapshot);
+    if (_snapshots.length > _maxSnapshots) {
+      _snapshots.removeRange(_maxSnapshots, _snapshots.length);
+    }
     saveProject();
     notifyListeners();
   }
@@ -237,6 +249,9 @@ class ChatProvider extends ChangeNotifier {
         agent: _selectedAgent,
       );
       _conversations.insert(0, conv);
+      if (_conversations.length > _maxConversations) {
+        _conversations.removeRange(_maxConversations, _conversations.length);
+      }
       _activeConversation = conv;
     }
 
@@ -319,6 +334,9 @@ class ChatProvider extends ChangeNotifier {
         agent: _selectedAgent,
       );
       _conversations.insert(0, conv);
+      if (_conversations.length > _maxConversations) {
+        _conversations.removeRange(_maxConversations, _conversations.length);
+      }
       _activeConversation = conv;
     }
 

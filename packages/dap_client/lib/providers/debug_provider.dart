@@ -129,6 +129,9 @@ class DebugProvider extends ChangeNotifier {
     String platform = 'android',
     DapConfig? dapConfig,
   }) async {
+    // Always free any leaked handles from a previous session before checking
+    // status — prevents multiple processes accumulating on rapid re-starts.
+    await _cancelSubscriptionsAndKillProcesses();
     if (_status != DebugStatus.idle) return;
     _error = null;
     _output = '';
@@ -257,6 +260,7 @@ class DebugProvider extends ChangeNotifier {
     String platform = 'android',
     DapConfig? dapConfig,
   }) async {
+    await _cancelSubscriptionsAndKillProcesses();
     if (_status != DebugStatus.idle) return;
     _error = null;
     _output = '';
@@ -310,6 +314,7 @@ class DebugProvider extends ChangeNotifier {
   /// Start a generic build session (e.g. `./gradlew assembleDebug` for Android).
   /// Used for SDKs that have no DAP adapter but need a build/run command.
   Future<void> startBuildSession(Project project, String buildCommand) async {
+    await _cancelSubscriptionsAndKillProcesses();
     if (_status != DebugStatus.idle) return;
     _error = null;
     _output = '';
@@ -405,6 +410,7 @@ class DebugProvider extends ChangeNotifier {
   /// Start a Metro bundler session for React Native / Expo projects.
   /// This is used instead of a DAP session when no DAP adapter is available.
   Future<void> startMetroSession(Project project) async {
+    await _cancelSubscriptionsAndKillProcesses();
     if (_status != DebugStatus.idle) return;
     _error = null;
     _output = '';
@@ -550,10 +556,10 @@ fs.watch = function (filename, options, listener) {
         notifyListeners();
       }
 
-      _metroProcess!.stdout
+      _buildStdoutSub = _metroProcess!.stdout
           .transform(const Utf8Decoder(allowMalformed: true))
           .listen(handleChunk);
-      _metroProcess!.stderr
+      _buildStderrSub = _metroProcess!.stderr
           .transform(const Utf8Decoder(allowMalformed: true))
           .listen(handleChunk);
 
@@ -593,15 +599,40 @@ fs.watch = function (filename, options, listener) {
     await _cleanup();
   }
 
-  Future<void> _cleanup() async {
-    _metroProcess?.kill();
-    _metroProcess = null;
-    _adapterProcess?.kill();
-    _adapterProcess = null;
+  /// Cancel subscriptions and kill processes without touching UI state.
+  /// Called at the very start of every session-start method so that leaked
+  /// handles from a previous crashed session are always freed before new ones
+  /// are created — even when the status guard would otherwise return early.
+  Future<void> _cancelSubscriptionsAndKillProcesses() async {
+    _outputNotifyTimer?.cancel();
+    _outputNotifyTimer = null;
     await _buildStdoutSub?.cancel();
     _buildStdoutSub = null;
     await _buildStderrSub?.cancel();
     _buildStderrSub = null;
+    try { _metroProcess?.kill(); } catch (_) {}
+    _metroProcess = null;
+    try { _adapterProcess?.kill(); } catch (_) {}
+    _adapterProcess = null;
+    await _eventSub?.cancel();
+    _eventSub = null;
+    await _client?.dispose();
+    _client = null;
+  }
+
+  /// Cancel all active subscriptions and kill all child processes.
+  /// Every kill() is guarded individually so one failure never skips the rest.
+  Future<void> _cleanup() async {
+    _outputNotifyTimer?.cancel();
+    _outputNotifyTimer = null;
+    await _buildStdoutSub?.cancel();
+    _buildStdoutSub = null;
+    await _buildStderrSub?.cancel();
+    _buildStderrSub = null;
+    try { _metroProcess?.kill(); } catch (_) {}
+    _metroProcess = null;
+    try { _adapterProcess?.kill(); } catch (_) {}
+    _adapterProcess = null;
     await _eventSub?.cancel();
     _eventSub = null;
     await _client?.dispose();
@@ -1159,10 +1190,10 @@ fs.watch = function (filename, options, listener) {
   void dispose() {
     _disposed = true;
     _outputNotifyTimer?.cancel();
-    _metroProcess?.kill();
-    _adapterProcess?.kill();
     _buildStdoutSub?.cancel();
     _buildStderrSub?.cancel();
+    try { _metroProcess?.kill(); } catch (_) {}
+    try { _adapterProcess?.kill(); } catch (_) {}
     _eventSub?.cancel();
     _client?.dispose();
     super.dispose();

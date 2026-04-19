@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "sdk": "rust",
+  "sdk_version": "latest",
+  "display_name": "Rust",
+  "description": "Rust para Termux no Android ARM64. Inclui o compilador rustc + cargo via pkg ou rustup, rust-analyzer (LSP) e lldb-vscode (adaptador DAP).",
+  "package": {
+    "type": "pkg",
+    "arch": "arm64",
+    "size_mb": 300
+  },
+  "package_author": {
+    "name": "Termux / Rust Team",
+    "github": "https://github.com/termux/termux-packages"
+  },
+  "json_author": {
+    "name": "Yato",
+    "date": "2026-04-19"
+  },
+  "install_steps": [
+    {
+      "type": "shell",
+      "command": "pkg update -y 2>&1 && pkg install -y rust 2>&1",
+      "description": "Instalando rustc e cargo via pkg"
+    },
+    {
+      "type": "shell",
+      "command": "rustc --version 2>&1 && cargo --version 2>&1",
+      "description": "Verificando instalação do Rust"
+    },
+    {
+      "type": "shell",
+      "command": "pkg install -y rust-analyzer 2>&1 || cargo install rust-analyzer 2>&1 && echo 'OK: rust-analyzer instalado'",
+      "description": "Instalando rust-analyzer (LSP)"
+    },
+    {
+      "type": "shell",
+      "command": "rust-analyzer --version 2>&1 && echo 'OK: rust-analyzer OK'",
+      "description": "Verificando rust-analyzer"
+    },
+    {
+      "type": "shell",
+      "command": "pkg install -y lldb 2>&1 && echo 'OK: lldb instalado' || echo 'AVISO: lldb não disponível para DAP'",
+      "description": "Instalando lldb (debugger DAP)"
+    }
+  ],
+  "config_steps": [
+    {
+      "type": "shell",
+      "command": "test -f $HOME/.cargo/bin/rust-analyzer && echo 'rust-analyzer (cargo) OK' || test -f $PREFIX/bin/rust-analyzer && echo 'rust-analyzer (pkg) OK' || echo 'AVISO: rust-analyzer não encontrado'",
+      "description": "Verificando rust-analyzer"
+    },
+    {
+      "type": "shell",
+      "command": "test -f $PREFIX/bin/lldb-vscode && echo 'lldb-vscode OK' || echo 'AVISO: adaptador DAP não encontrado'",
+      "description": "Verificando lldb-vscode (adaptador DAP)"
+    },
+    {
+      "type": "shell",
+      "command": "cargo --version 2>&1 && echo 'cargo OK'",
+      "description": "Verificando cargo"
+    }
+  ],
+  "cleanup_steps": [],
+  "uninstall_steps": [
+    {
+      "type": "shell",
+      "command": "pkg remove -y rust rust-analyzer 2>&1 || true",
+      "description": "Removendo rustc, cargo e rust-analyzer"
+    }
+  ],
+  "verify_binary": "rustc",
+  "verify_command": "rustc --version",
+  "run_config": {
+    "run": "cargo run",
+    "supports_devices": false,
+    "build_debug": "cargo build",
+    "build_release": "cargo build --release"
+  },
+  "sdk_config": {
+    "new_project_cmd": "cargo new $name && echo 'OK: projeto Rust criado'",
+    "default_entry_file": "src/main.rs",
+    "file_extensions": ["rs", "toml"],
+    "sync_command": "cargo fetch",
+    "sync_trigger_file": "Cargo.toml",
+    "format_command": "cargo fmt"
+  },
+  "lsp_config": {
+    "server_binary": "$PREFIX/bin/rust-analyzer",
+    "server_args": [],
+    "language_ids": ["rust"]
+  },
+  "dap_config": {
+    "adapter_binary": "$PREFIX/bin/lldb-vscode",
+    "adapter_args": [],
+    "adapter_id": "lldb",
+    "launch_program": "${workspaceFolder}/target/debug/${workspaceFolderBasename}",
+    "build_done_strings": []
+  }
+}

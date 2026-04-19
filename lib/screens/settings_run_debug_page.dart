@@ -99,8 +99,9 @@ class RunDebugSettingsPage extends StatelessWidget {
                 }),
               const SizedBox(height: 16),
                     settingsSectionHeader(context,'Debug Platform'),
-              Consumer<SettingsProvider>(
-                builder: (context, settings, _) {
+              Selector<SettingsProvider, Map<String, String>>(
+                selector: (_, s) => s.debugPlatforms,
+                builder: (context, debugPlatforms, _) {
                   final debugSdks = installed.where((t) {
                     final platforms = supportedPlatforms(t);
                     return platforms.length > 1 || t == SdkType.flutter;
@@ -122,7 +123,7 @@ class RunDebugSettingsPage extends StatelessWidget {
                       final idx = e.key;
                       final sdkType = e.value;
                       final platforms = supportedPlatforms(sdkType);
-                      final savedName = settings.debugPlatformFor(sdkType.name);
+                      final savedName = debugPlatforms[sdkType.name];
                       final currentPlatform = savedName != null
                           ? platforms.firstWhere(
                               (p) => p.name == savedName,
@@ -157,7 +158,7 @@ class RunDebugSettingsPage extends StatelessWidget {
                             sdkType,
                             platforms,
                             currentPlatform,
-                            settings,
+                            context.read<SettingsProvider>(),
                           ),
                         ),
                       );
@@ -167,8 +168,9 @@ class RunDebugSettingsPage extends StatelessWidget {
               ),
               const SizedBox(height: 16),
                       settingsSectionHeader(context,s.lspPaths),
-              Consumer<SettingsProvider>(
-                builder: (context, settings, _) {
+              Selector<SettingsProvider, Map<String, String>>(
+                selector: (_, s) => s.lspPaths,
+                builder: (context, lspPaths, _) {
                   final lspItems = [
                     ('dart', 'Dart LSP', FontAwesomeIcons.code, Colors.blue),
                     ('ts', 'TypeScript LSP', FontAwesomeIcons.code, Colors.yellow.shade700),
@@ -186,9 +188,9 @@ class RunDebugSettingsPage extends StatelessWidget {
                         label: label,
                         iconBg: color,
                         icon: icon,
-                        value: settings.lspPathFor(ext),
+                        value: lspPaths[ext.toLowerCase()] ?? '',
                         hint: 'e.g. /data/data/com.termux/files/usr/bin/...',
-                        onSave: (v) => settings.setLspPath(ext, v),
+                        onSave: (v) => context.read<SettingsProvider>().setLspPath(ext, v),
                         borderRadius: BorderRadius.vertical(
                           top: isFirst ? const Radius.circular(30) : const Radius.circular(5),
                           bottom: isLast ? const Radius.circular(30) : const Radius.circular(5),

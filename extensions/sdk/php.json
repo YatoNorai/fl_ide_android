@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "sdk": "php",
+  "sdk_version": "latest",
+  "display_name": "PHP",
+  "description": "PHP para Termux no Android ARM64. Inclui o interpretador PHP via pkg e Intelephense (LSP) instalado via npm para autocompletar, diagnósticos e navegação de código.",
+  "package": {
+    "type": "pkg",
+    "arch": "arm64",
+    "size_mb": 60
+  },
+  "package_author": {
+    "name": "Termux / PHP Group",
+    "github": "https://github.com/termux/termux-packages"
+  },
+  "json_author": {
+    "name": "Yato",
+    "date": "2026-04-19"
+  },
+  "install_steps": [
+    {
+      "type": "shell",
+      "command": "pkg update -y 2>&1 && pkg install -y php 2>&1",
+      "description": "Instalando PHP via pkg"
+    },
+    {
+      "type": "shell",
+      "command": "php --version 2>&1",
+      "description": "Verificando instalação do PHP"
+    },
+    {
+      "type": "shell",
+      "command": "pkg install -y nodejs 2>&1 || true",
+      "description": "Instalando Node.js (necessário para Intelephense)"
+    },
+    {
+      "type": "shell",
+      "command": "npm install -g intelephense 2>&1 && echo 'OK: Intelephense instalado'",
+      "description": "Instalando Intelephense (LSP) via npm"
+    },
+    {
+      "type": "shell",
+      "command": "node $(npm root -g)/intelephense/lib/intelephense.js --version 2>&1 && echo 'OK: Intelephense OK'",
+      "description": "Verificando Intelephense"
+    }
+  ],
+  "config_steps": [
+    {
+      "type": "shell",
+      "command": "npm root -g 2>&1",
+      "description": "Verificando diretório global do npm"
+    },
+    {
+      "type": "shell",
+      "command": "test -d $(npm root -g 2>/dev/null)/intelephense && echo 'intelephense OK' || echo 'AVISO: intelephense não encontrado'",
+      "description": "Verificando instalação do Intelephense"
+    }
+  ],
+  "cleanup_steps": [],
+  "uninstall_steps": [
+    {
+      "type": "shell",
+      "command": "npm uninstall -g intelephense 2>&1 || true",
+      "description": "Removendo Intelephense"
+    },
+    {
+      "type": "shell",
+      "command": "pkg remove -y php 2>&1 || true",
+      "description": "Removendo PHP"
+    }
+  ],
+  "verify_binary": "php",
+  "verify_command": "php --version",
+  "run_config": {
+    "run": "php index.php",
+    "supports_devices": false,
+    "build_debug": null,
+    "build_release": null
+  },
+  "sdk_config": {
+    "new_project_cmd": "mkdir -p $name && cd $name && printf '<?php\\necho \"Hello, World!\\\\n\";\\n' > index.php",
+    "default_entry_file": "index.php",
+    "file_extensions": ["php", "phtml", "php3", "php4", "php5", "phps"],
+    "sync_command": "composer install",
+    "sync_trigger_file": "composer.json",
+    "format_command": null
+  },
+  "lsp_config": {
+    "server_binary": "$PREFIX/bin/node",
+    "server_args": ["$(npm root -g)/intelephense/lib/intelephense.js", "--stdio"],
+    "language_ids": ["php"]
+  }
+}

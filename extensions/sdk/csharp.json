@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "sdk": "csharp",
+  "sdk_version": "latest",
+  "display_name": "C# (.NET)",
+  "description": "C# e .NET para Termux no Android ARM64. Inclui o .NET SDK via instalação manual e csharp-ls (LSP) via dotnet tool para autocompletar e diagnósticos.",
+  "package": {
+    "type": "manual",
+    "arch": "arm64",
+    "size_mb": 400
+  },
+  "package_author": {
+    "name": "Microsoft / .NET Foundation",
+    "github": "https://github.com/nickcoutsos/dotnet-termux"
+  },
+  "json_author": {
+    "name": "Yato",
+    "date": "2026-04-19"
+  },
+  "install_steps": [
+    {
+      "type": "shell",
+      "command": "pkg update -y 2>&1 && pkg install -y curl proot 2>&1",
+      "description": "Instalando dependências"
+    },
+    {
+      "type": "shell",
+      "command": "DOTNET_VERSION=$(curl -s https://api.github.com/repos/termux-user-repository/dotnet-packages/releases/latest | grep '\"tag_name\"' | sed 's/.*\"tag_name\": \"//;s/\".*//' 2>/dev/null) && echo \"Versão .NET disponível: $DOTNET_VERSION\" && curl -L \"https://github.com/termux-user-repository/dotnet-packages/releases/latest/download/dotnet-sdk-arm64.tar.gz\" -o /tmp/dotnet.tar.gz 2>&1 && mkdir -p $HOME/.dotnet && tar -xzf /tmp/dotnet.tar.gz -C $HOME/.dotnet 2>&1 && rm /tmp/dotnet.tar.gz && echo 'OK: .NET SDK extraído'",
+      "description": "Baixando e instalando .NET SDK ARM64"
+    },
+    {
+      "type": "shell",
+      "command": "grep -qxF 'export DOTNET_ROOT=\"$HOME/.dotnet\"' $HOME/.bashrc || echo 'export DOTNET_ROOT=\"$HOME/.dotnet\"' >> $HOME/.bashrc; grep -qxF 'export PATH=\"$PATH:$HOME/.dotnet:$HOME/.dotnet/tools\"' $HOME/.bashrc || echo 'export PATH=\"$PATH:$HOME/.dotnet:$HOME/.dotnet/tools\"' >> $HOME/.bashrc",
+      "description": "Adicionando DOTNET_ROOT e paths ao .bashrc"
+    },
+    {
+      "type": "shell",
+      "command": "export DOTNET_ROOT=$HOME/.dotnet && export PATH=$PATH:$HOME/.dotnet && dotnet --version 2>&1 && echo 'OK: dotnet OK'",
+      "description": "Verificando .NET SDK"
+    },
+    {
+      "type": "shell",
+      "command": "export DOTNET_ROOT=$HOME/.dotnet && export PATH=$PATH:$HOME/.dotnet:$HOME/.dotnet/tools && dotnet tool install --global csharp-ls 2>&1 && echo 'OK: csharp-ls instalado'",
+      "description": "Instalando csharp-ls (LSP) via dotnet tool"
+    }
+  ],
+  "config_steps": [
+    {
+      "type": "shell",
+      "command": "test -f $HOME/.dotnet/tools/csharp-ls && echo 'csharp-ls OK' || echo 'AVISO: csharp-ls não encontrado'",
+      "description": "Verificando csharp-ls"
+    },
+    {
+      "type": "shell",
+      "command": "export DOTNET_ROOT=$HOME/.dotnet && export PATH=$PATH:$HOME/.dotnet && dotnet --version 2>&1",
+      "description": "Verificando versão do .NET"
+    }
+  ],
+  "cleanup_steps": [],
+  "uninstall_steps": [
+    {
+      "type": "shell",
+      "command": "export DOTNET_ROOT=$HOME/.dotnet && export PATH=$PATH:$HOME/.dotnet:$HOME/.dotnet/tools && dotnet tool uninstall --global csharp-ls 2>&1 || true",
+      "description": "Removendo csharp-ls"
+    },
+    {
+      "type": "shell",
+      "command": "rm -rf $HOME/.dotnet 2>&1 || true",
+      "description": "Removendo .NET SDK"
+    },
+    {
+      "type": "shell",
+      "command": "sed -i '/DOTNET_ROOT/d; /\\.dotnet/d' $HOME/.bashrc 2>&1 || true",
+      "description": "Limpando .bashrc"
+    }
+  ],
+  "verify_binary": "dotnet",
+  "verify_command": "dotnet --version",
+  "run_config": {
+    "run": "dotnet run",
+    "supports_devices": false,
+    "build_debug": "dotnet build",
+    "build_release": "dotnet publish -c Release"
+  },
+  "sdk_config": {
+    "new_project_cmd": "dotnet new console -n $name && cd $name && echo 'OK: projeto C# criado'",
+    "default_entry_file": "Program.cs",
+    "file_extensions": ["cs", "csproj", "sln"],
+    "sync_command": "dotnet restore",
+    "sync_trigger_file": "*.csproj",
+    "format_command": "dotnet format"
+  },
+  "lsp_config": {
+    "server_binary": "$HOME/.dotnet/tools/csharp-ls",
+    "server_args": [],
+    "language_ids": ["csharp"]
+  }
+}

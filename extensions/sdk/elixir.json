@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "sdk": "elixir",
+  "sdk_version": "latest",
+  "display_name": "Elixir",
+  "description": "Elixir/Phoenix para Termux no Android ARM64. Inclui Elixir + Erlang via pkg e ElixirLS (LSP) para autocompletar, diagnósticos e navegação de código.",
+  "package": {
+    "type": "pkg",
+    "arch": "arm64",
+    "size_mb": 200
+  },
+  "package_author": {
+    "name": "Termux / Elixir Team",
+    "github": "https://github.com/termux/termux-packages"
+  },
+  "json_author": {
+    "name": "Yato",
+    "date": "2026-04-19"
+  },
+  "install_steps": [
+    {
+      "type": "shell",
+      "command": "pkg update -y 2>&1 && pkg install -y elixir erlang 2>&1",
+      "description": "Instalando Elixir e Erlang via pkg"
+    },
+    {
+      "type": "shell",
+      "command": "elixir --version 2>&1",
+      "description": "Verificando instalação do Elixir"
+    },
+    {
+      "type": "shell",
+      "command": "pkg install -y curl unzip 2>&1 || true",
+      "description": "Instalando dependências para ElixirLS"
+    },
+    {
+      "type": "shell",
+      "command": "ELS_VERSION=$(curl -s https://api.github.com/repos/elixir-lsp/elixir-ls/releases/latest | grep '\"tag_name\"' | sed 's/.*\"tag_name\": \"//;s/\".*//' 2>/dev/null) && echo \"Versão ElixirLS: $ELS_VERSION\" && mkdir -p $HOME/.elixir-ls && curl -L \"https://github.com/elixir-lsp/elixir-ls/releases/download/$ELS_VERSION/elixir-ls-v${ELS_VERSION#v}.zip\" -o /tmp/elixirls.zip 2>&1 && unzip -o /tmp/elixirls.zip -d $HOME/.elixir-ls 2>&1 && chmod +x $HOME/.elixir-ls/language_server.sh && rm /tmp/elixirls.zip && echo 'OK: ElixirLS instalado'",
+      "description": "Baixando e instalando ElixirLS"
+    },
+    {
+      "type": "shell",
+      "command": "test -f $HOME/.elixir-ls/language_server.sh && echo 'ElixirLS OK' || echo 'ERRO: ElixirLS não encontrado'",
+      "description": "Verificando ElixirLS"
+    }
+  ],
+  "config_steps": [
+    {
+      "type": "shell",
+      "command": "test -f $HOME/.elixir-ls/language_server.sh && echo 'language_server.sh OK' || echo 'AVISO: ElixirLS não instalado'",
+      "description": "Verificando ElixirLS"
+    },
+    {
+      "type": "shell",
+      "command": "elixir --version 2>&1 && mix --version 2>&1",
+      "description": "Verificando Elixir e Mix"
+    }
+  ],
+  "cleanup_steps": [],
+  "uninstall_steps": [
+    {
+      "type": "shell",
+      "command": "rm -rf $HOME/.elixir-ls 2>&1 || true",
+      "description": "Removendo ElixirLS"
+    },
+    {
+      "type": "shell",
+      "command": "pkg remove -y elixir erlang 2>&1 || true",
+      "description": "Removendo Elixir e Erlang"
+    }
+  ],
+  "verify_binary": "elixir",
+  "verify_command": "elixir --version",
+  "run_config": {
+    "run": "elixir main.exs",
+    "supports_devices": false,
+    "build_debug": "mix compile",
+    "build_release": "mix release"
+  },
+  "sdk_config": {
+    "new_project_cmd": "mix new $name && echo 'OK: projeto Elixir criado'",
+    "default_entry_file": "lib/$name.ex",
+    "file_extensions": ["ex", "exs"],
+    "sync_command": "mix deps.get",
+    "sync_trigger_file": "mix.exs",
+    "format_command": "mix format"
+  },
+  "lsp_config": {
+    "server_binary": "$HOME/.elixir-ls/language_server.sh",
+    "server_args": [],
+    "language_ids": ["elixir"]
+  }
+}

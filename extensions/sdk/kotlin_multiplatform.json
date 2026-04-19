@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "sdk": "kotlinMultiplatform",
+  "sdk_version": "latest",
+  "display_name": "Kotlin Multiplatform",
+  "description": "Kotlin Multiplatform para Termux no Android ARM64. Inclui o compilador Kotlin via pkg, kotlin-language-server (LSP) e suporte a projetos KMP compartilhando código entre plataformas.",
+  "package": {
+    "type": "pkg",
+    "arch": "arm64",
+    "size_mb": 250
+  },
+  "package_author": {
+    "name": "Termux / JetBrains",
+    "github": "https://github.com/termux/termux-packages"
+  },
+  "json_author": {
+    "name": "Yato",
+    "date": "2026-04-19"
+  },
+  "install_steps": [
+    {
+      "type": "shell",
+      "command": "pkg update -y 2>&1 && pkg install -y kotlin 2>&1",
+      "description": "Instalando o compilador Kotlin via pkg"
+    },
+    {
+      "type": "shell",
+      "command": "kotlinc -version 2>&1",
+      "description": "Verificando instalação do Kotlin"
+    },
+    {
+      "type": "shell",
+      "command": "pkg install -y zip unzip curl 2>&1 || true",
+      "description": "Instalando dependências para kotlin-language-server"
+    },
+    {
+      "type": "shell",
+      "command": "KLS_VERSION=$(curl -s https://api.github.com/repos/fwcd/kotlin-language-server/releases/latest | grep '\"tag_name\"' | sed 's/.*\"tag_name\": \"//;s/\".*//' 2>/dev/null) && echo \"Versão mais recente: $KLS_VERSION\" && mkdir -p $PREFIX/opt/kotlin-language-server && curl -L \"https://github.com/fwcd/kotlin-language-server/releases/download/$KLS_VERSION/server.zip\" -o /tmp/kls.zip 2>&1 && unzip -o /tmp/kls.zip -d $PREFIX/opt/kotlin-language-server 2>&1 && rm /tmp/kls.zip && echo 'OK: kotlin-language-server instalado'",
+      "description": "Baixando e instalando kotlin-language-server"
+    },
+    {
+      "type": "shell",
+      "command": "echo '#!/data/data/com.termux/files/usr/bin/bash\\nexec $PREFIX/opt/kotlin-language-server/server/bin/kotlin-language-server \"$@\"' > $PREFIX/bin/kotlin-language-server && chmod +x $PREFIX/bin/kotlin-language-server && echo 'OK: symlink criado'",
+      "description": "Criando script wrapper para kotlin-language-server"
+    }
+  ],
+  "config_steps": [
+    {
+      "type": "shell",
+      "command": "test -f $PREFIX/bin/kotlin-language-server && echo 'kotlin-language-server OK' || echo 'AVISO: kotlin-language-server não encontrado'",
+      "description": "Verificando kotlin-language-server"
+    },
+    {
+      "type": "shell",
+      "command": "kotlinc -version 2>&1 && echo 'Kotlin OK'",
+      "description": "Verificando compilador Kotlin"
+    }
+  ],
+  "cleanup_steps": [],
+  "uninstall_steps": [
+    {
+      "type": "shell",
+      "command": "rm -rf $PREFIX/opt/kotlin-language-server $PREFIX/bin/kotlin-language-server 2>&1 || true",
+      "description": "Removendo kotlin-language-server"
+    },
+    {
+      "type": "shell",
+      "command": "pkg remove -y kotlin 2>&1 || true",
+      "description": "Removendo o compilador Kotlin"
+    }
+  ],
+  "verify_binary": "kotlinc",
+  "verify_command": "kotlinc -version",
+  "run_config": {
+    "run": "kotlinc main.kt -include-runtime -d app.jar && java -jar app.jar",
+    "supports_devices": false,
+    "build_debug": "kotlinc . -include-runtime -d app.jar",
+    "build_release": "kotlinc . -include-runtime -d app.jar"
+  },
+  "sdk_config": {
+    "new_project_cmd": "mkdir -p $name/src && cd $name && printf 'fun main() {\\n    println(\"Hello, World!\")\\n}\\n' > src/Main.kt",
+    "default_entry_file": "src/Main.kt",
+    "file_extensions": ["kt", "kts"],
+    "sync_command": null,
+    "sync_trigger_file": null,
+    "format_command": null
+  },
+  "lsp_config": {
+    "server_binary": "$PREFIX/bin/kotlin-language-server",
+    "server_args": [],
+    "language_ids": ["kotlin"]
+  }
+}

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:core/core.dart';
@@ -69,6 +70,10 @@ class EditorProvider extends ChangeNotifier {
   /// diagnostics are retained even after the file tab is closed.
   final Map<String, List<DiagnosticRegion>> _diagnosticsCache = {};
 
+  // Debounce timer: coalesces rapid diagnostic pushes (e.g. during workspace
+  // scan or fast typing) into a single notifyListeners() call.
+  Timer? _diagNotifyTimer;
+
   Map<String, List<DiagnosticRegion>> get diagnosticsCache =>
       Map.unmodifiable(_diagnosticsCache);
 
@@ -78,7 +83,17 @@ class EditorProvider extends ChangeNotifier {
     } else {
       _diagnosticsCache[filePath] = List.unmodifiable(regions);
     }
-    notifyListeners();
+    // Batch rapid diagnostic updates (workspace scan fires up to 400 at once)
+    // into a single rebuild every 150 ms. Visual underlines are unaffected —
+    // those come directly from the QuillCodeController, not from this cache.
+    _diagNotifyTimer?.cancel();
+    _diagNotifyTimer = Timer(const Duration(milliseconds: 150), notifyListeners);
+  }
+
+  @override
+  void dispose() {
+    _diagNotifyTimer?.cancel();
+    super.dispose();
   }
   /// Path of the most recently saved file. Updated on every saveActiveFile call.
   String? lastSavedPath;
@@ -228,15 +243,38 @@ class EditorProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Saves the active file.
-  /// If [format] is true and the file is a .dart file, runs
-  /// `dart format --output show` and applies the formatted output.
-  /// For remote files, uses the SFTP write callback (no dart format).
-  Future<void> saveActiveFile({bool format = false}) async {
+  /// Saves the active file, running LSP on-save actions when [organizeImports]
+  /// or [fixAll] are true, and formatting via LSP or `dart format` when
+  /// [format] is true.  For remote files, SFTP write is used (no dart format).
+  Future<void> saveActiveFile({
+    bool format = false,
+    bool organizeImports = false,
+    bool fixAll = false,
+  }) async {
     final f = activeFile;
     if (f == null || f.controller == null) return;
+    final ctrl = f.controller!;
 
-    String content = f.controller!.content.fullText;
+    // Run LSP on-save actions (organizeImports → fixAll → format).
+    // These mutate the controller's document in-place.
+    if (organizeImports) {
+      final edits = await ctrl.lspOnSaveCodeActions(['source.organizeImports']);
+      ctrl.applyLspEdits(edits);
+    }
+    if (fixAll) {
+      final edits = await ctrl.lspOnSaveCodeActions(['source.fixAll', 'quickfix']);
+      ctrl.applyLspEdits(edits);
+    }
+    bool lspFormatApplied = false;
+    if (format) {
+      final edits = await ctrl.lspFormat();
+      if (edits.isNotEmpty) {
+        ctrl.applyLspEdits(edits);
+        lspFormatApplied = true;
+      }
+    }
+
+    String content = ctrl.content.fullText;
 
     if (_remoteWriteFile != null) {
       try { await _remoteWriteFile!(f.path, content); } catch (_) {}
@@ -246,21 +284,9 @@ class EditorProvider extends ChangeNotifier {
       return;
     }
 
-    if (format && f.extension == 'dart') {
-      try {
-        // Write first so dart format can read the file.
-        await File(f.path).writeAsString(content);
-        final dart = '${RuntimeEnvir.usrPath}/bin/dart';
-        await Process.run(
-          dart,
-          ['format', f.path],
-          environment: RuntimeEnvir.baseEnv,
-        );
-        // Read back the (possibly) formatted content.
-        content = await File(f.path).readAsString();
-      } catch (_) {
-        // Formatting failed — save unformatted anyway.
-      }
+    // Fallback: dart format subprocess only when LSP returned no edits.
+    if (format && !lspFormatApplied && f.extension == 'dart') {
+      content = await _dartFormat(f.path, content);
     }
 
     await File(f.path).writeAsString(content);
@@ -284,21 +310,31 @@ class EditorProvider extends ChangeNotifier {
       }
 
       if (format && f.extension == 'dart') {
-        try {
-          await File(f.path).writeAsString(content);
-          final dart = '${RuntimeEnvir.usrPath}/bin/dart';
-          await Process.run(
-            dart,
-            ['format', f.path],
-            environment: RuntimeEnvir.baseEnv,
-          );
-          content = await File(f.path).readAsString();
-        } catch (_) {}
+        content = await _dartFormat(f.path, content);
       }
       await File(f.path).writeAsString(content);
       f.isDirty = false;
     }
     notifyListeners();
+  }
+
+  /// Runs `dart format` on [path] and returns the formatted content.
+  /// Returns [original] unchanged if the dart binary is not found or formatting fails.
+  static Future<String> _dartFormat(String path, String original) async {
+    try {
+      final dart = '${RuntimeEnvir.usrPath}/bin/dart';
+      if (!await File(dart).exists()) return original;
+      await File(path).writeAsString(original);
+      final result = await Process.run(
+        dart,
+        ['format', path],
+        environment: RuntimeEnvir.baseEnv,
+      );
+      if (result.exitCode != 0) return original;
+      return await File(path).readAsString();
+    } catch (_) {
+      return original;
+    }
   }
 
   void markDirty() {
@@ -369,6 +405,10 @@ class EditorProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// True if any open file has unsaved changes (isDirty == true).
+  /// Used by the auto-save timer to skip the disk write when nothing changed.
+  bool get hasUnsavedChanges => _openFiles.any((f) => f.isDirty);
+
   bool get canUndo => activeFile?.controller?.content.canUndo ?? false;
   bool get canRedo => activeFile?.controller?.content.canRedo ?? false;
 
@@ -414,12 +454,41 @@ class EditorProvider extends ChangeNotifier {
 
   Future<void> refreshTree() async {
     if (_rootNode == null) return;
+    // Snapshot which paths were expanded before the rebuild wipes them.
+    final expanded = <String>{};
+    _collectExpanded(_rootNode!, expanded);
+
     if (_remoteListDir != null) {
       _rootNode = await FileNode.fromRemote(_rootNode!.path, _remoteListDir!);
     } else {
       _rootNode = await FileNode.fromPath(_rootNode!.path);
     }
+    // Re-expand paths that were open before the refresh.
+    await _restoreExpanded(_rootNode!, expanded);
     notifyListeners();
+  }
+
+  void _collectExpanded(FileNode node, Set<String> out) {
+    if (!node.isDirectory) return;
+    if (node.isExpanded) {
+      out.add(node.path);
+      for (final child in node.children) {
+        _collectExpanded(child, out);
+      }
+    }
+  }
+
+  Future<void> _restoreExpanded(FileNode node, Set<String> expanded) async {
+    if (!node.isDirectory || !expanded.contains(node.path)) return;
+    if (_remoteListDir != null) {
+      await node.loadRemoteChildren(_remoteListDir!);
+    } else {
+      await node.loadChildren();
+    }
+    node.isExpanded = true;
+    for (final child in node.children) {
+      await _restoreExpanded(child, expanded);
+    }
   }
 
   /// Closes [filePath] from the editor if it is currently open so that when

@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "sdk": "haskell",
+  "sdk_version": "latest",
+  "display_name": "Haskell",
+  "description": "Haskell para Termux no Android ARM64. Inclui GHC via ghcup e HLS (Haskell Language Server) para autocompletar, diagnósticos e type-checking em tempo real.",
+  "package": {
+    "type": "manual",
+    "arch": "arm64",
+    "size_mb": 500
+  },
+  "package_author": {
+    "name": "GHC Team / Haskell.org",
+    "github": "https://github.com/haskell/ghcup-hs"
+  },
+  "json_author": {
+    "name": "Yato",
+    "date": "2026-04-19"
+  },
+  "install_steps": [
+    {
+      "type": "shell",
+      "command": "pkg update -y 2>&1 && pkg install -y curl libffi libgmp 2>&1",
+      "description": "Instalando dependências para ghcup"
+    },
+    {
+      "type": "shell",
+      "command": "curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | BOOTSTRAP_HASKELL_NONINTERACTIVE=1 BOOTSTRAP_HASKELL_MINIMAL=1 sh 2>&1 && echo 'OK: ghcup instalado'",
+      "description": "Instalando ghcup (gerenciador de toolchain Haskell)"
+    },
+    {
+      "type": "shell",
+      "command": "grep -qxF 'source $HOME/.ghcup/env' $HOME/.bashrc || echo 'source $HOME/.ghcup/env' >> $HOME/.bashrc",
+      "description": "Adicionando ghcup ao .bashrc"
+    },
+    {
+      "type": "shell",
+      "command": "source $HOME/.ghcup/env 2>/dev/null && ghcup install ghc recommended 2>&1 && ghcup set ghc recommended 2>&1 && echo 'OK: GHC instalado'",
+      "description": "Instalando GHC (compilador Haskell)"
+    },
+    {
+      "type": "shell",
+      "command": "source $HOME/.ghcup/env 2>/dev/null && ghcup install hls latest 2>&1 && ghcup set hls latest 2>&1 && echo 'OK: HLS instalado'",
+      "description": "Instalando HLS (Haskell Language Server)"
+    },
+    {
+      "type": "shell",
+      "command": "source $HOME/.ghcup/env 2>/dev/null && ghcup install cabal latest 2>&1 && echo 'OK: cabal instalado'",
+      "description": "Instalando cabal (gerenciador de pacotes Haskell)"
+    }
+  ],
+  "config_steps": [
+    {
+      "type": "shell",
+      "command": "test -f $HOME/.ghcup/bin/haskell-language-server-wrapper && echo 'HLS OK' || echo 'AVISO: HLS não encontrado'",
+      "description": "Verificando HLS"
+    },
+    {
+      "type": "shell",
+      "command": "source $HOME/.ghcup/env 2>/dev/null && ghc --version 2>&1",
+      "description": "Verificando GHC"
+    }
+  ],
+  "cleanup_steps": [],
+  "uninstall_steps": [
+    {
+      "type": "shell",
+      "command": "rm -rf $HOME/.ghcup $HOME/.cabal 2>&1 || true",
+      "description": "Removendo ghcup e cabal"
+    },
+    {
+      "type": "shell",
+      "command": "sed -i '/ghcup/d' $HOME/.bashrc 2>&1 || true",
+      "description": "Limpando .bashrc"
+    }
+  ],
+  "verify_binary": "ghc",
+  "verify_command": "ghc --version",
+  "run_config": {
+    "run": "runghc Main.hs",
+    "supports_devices": false,
+    "build_debug": "cabal build",
+    "build_release": "cabal build -O2"
+  },
+  "sdk_config": {
+    "new_project_cmd": "cabal init -n --is-executable --main-is=Main --package-name=$name $name && cd $name && echo 'OK: projeto Haskell criado'",
+    "default_entry_file": "app/Main.hs",
+    "file_extensions": ["hs", "lhs", "cabal"],
+    "sync_command": "cabal update && cabal install",
+    "sync_trigger_file": "*.cabal",
+    "format_command": "ormolu --mode inplace **/*.hs"
+  },
+  "lsp_config": {
+    "server_binary": "$HOME/.ghcup/bin/haskell-language-server-wrapper",
+    "server_args": ["--lsp"],
+    "language_ids": ["haskell"]
+  }
+}

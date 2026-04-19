@@ -34,10 +34,10 @@ void main() async {
   FlutterForegroundTask.init(
     androidNotificationOptions: AndroidNotificationOptions(
       channelId: 'layer_service',
-      channelName: 'L A Y E R',
-      channelDescription: 'Keeps L A Y E R active while developing',
-      channelImportance: NotificationChannelImportance.LOW,
-      priority: NotificationPriority.LOW,
+      channelName: 'FL IDE Background',
+      channelDescription: 'Keeps FL IDE active while developing',
+      channelImportance: NotificationChannelImportance.HIGH,
+      priority: NotificationPriority.HIGH,
       onlyAlertOnce: true,
       enableVibration: false,
       playSound: false,

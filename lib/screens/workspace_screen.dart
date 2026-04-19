@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:app_installer/app_installer.dart';
 import 'package:build_runner_pkg/build_runner_pkg.dart'
@@ -24,6 +25,9 @@ import 'package:ssh_pkg/ssh_pkg.dart';
 import 'package:oc_liquid_glass/oc_liquid_glass.dart';
 
 import '../app.dart' show editorThemeFromScheme, showThemedDialog;
+import '../providers/git_provider.dart';
+import '../providers/remote_git_build_provider.dart';
+import 'git_panel.dart';
 import '../foreground_service.dart';
 import 'ai_chat_drawer.dart';
 import '../l10n/app_strings.dart';
@@ -134,7 +138,6 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
       parent: _aiDrawerCtrl,
       curve: Curves.easeInOut,
     );
-
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
@@ -229,6 +232,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
       // Use SSH shell only for remote projects; local projects use PTY.
       final session = await context.read<TerminalProvider>().createSession(
         label: widget.project.name,
+        // Local projects: PTY starts directly in the project directory.
+        // Remote projects: PTY is local (home), shell navigates via cd below.
         workingDirectory: isRemoteProject ? null : widget.project.path,
         sshSetup: isRemoteProject
             ? (s) async {
@@ -245,10 +250,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
               }
             : null,
       );
-      // For remote projects, cd into the project dir after the SSH shell is ready.
-      // Local projects already start in workingDirectory — no cd needed.
-      // A short settle delay is kept for local so the frame stabilises before
-      // LSP init (and as a mounted-check opportunity after the createSession await).
+      // Remote SSH sessions need a cd after the shell settles.
+      // Local sessions already start in the project directory via workingDirectory.
       if (isRemoteProject) {
         final shellDelay = ssh.remoteIsWindows
             ? const Duration(milliseconds: 2500)
@@ -259,7 +262,6 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
       } else {
         await Future.delayed(const Duration(milliseconds: 300));
         if (!mounted) return;
-        session.writeCommand('cd "${widget.project.path}"');
       }
 
       // ── Phase 3: LSP ──────────────────────────────────────────────────────
@@ -342,6 +344,17 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
             };
           }
 
+          // Also listen for LspProvider status transitioning to ready
+          // (happens as soon as initialize completes, before first diagnostics).
+          void onLspStatusChange() {
+            if (lspProv.isReady && mounted &&
+                _initPhase == _InitPhase.startingLsp) {
+              setState(() => _initPhase = _InitPhase.ready);
+              lspProv.removeListener(onLspStatusChange);
+            }
+          }
+          lspProv.addListener(onLspStatusChange);
+
           // Fallback: if the LSP initialises but the server never sends a
           // publishDiagnostics notification (e.g. completely clean project,
           // or a JVM server whose first analysis takes longer than the
@@ -356,6 +369,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
           };
           Future.delayed(Duration(seconds: fallbackSecs), () {
             if (!mounted) return;
+            lspProv.removeListener(onLspStatusChange);
             context.read<LspProvider>().markReady();
             setState(() => _initPhase = _InitPhase.ready);
           });
@@ -391,10 +405,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
       }
 
       // Auto-save every 30 seconds
-      _autoSaveTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-        if (!mounted) return;
-        context.read<EditorProvider>().saveActiveFile();
-      });
+      _startAutoSaveTimer();
 
       // Pre-seed APK state so that an APK that already existed when the project
       // was opened does NOT immediately trigger the install dialog.  The dialog
@@ -409,10 +420,26 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
       // APK poll — detect APKs built via terminal (flutter build apk, etc.)
       // Scans output directories every 4 s; triggers install dialog when the
       // modification time of the latest APK changes.
-      _apkPollTimer = Timer.periodic(const Duration(seconds: 4), (_) {
-        if (!mounted) return;
-        _checkForNewTerminalApk();
-      });
+      _startApkPollTimer();
+    });
+  }
+
+  void _startAutoSaveTimer() {
+    _autoSaveTimer?.cancel();
+    _autoSaveTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (!mounted) return;
+      final editor = context.read<EditorProvider>();
+      if (editor.hasUnsavedChanges) {
+        editor.saveActiveFile();
+      }
+    });
+  }
+
+  void _startApkPollTimer() {
+    _apkPollTimer?.cancel();
+    _apkPollTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+      if (!mounted) return;
+      _checkForNewTerminalApk();
     });
   }
 
@@ -434,7 +461,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   // when the user switches to a different language and we need to restart.
   String _lspStartedExt = '';
 
-  void _onEditorChanged() {
+  Future<void> _onEditorChanged() async {
     if (!mounted) return;
     final saved = _editorProvider?.lastSavedPath;
     if (saved != null &&
@@ -445,10 +472,16 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
       final isOpen = _editorProvider?.openFiles.any((f) => f.path == saved) ?? false;
       if (isOpen) {
         final file = File(saved);
-        if (file.existsSync()) {
-          final current = _depSection(file.readAsStringSync(), widget.project.sdk);
-          if (current != _depSectionSnapshot) {
-            setState(() => _syncBannerVisible = true);
+        if (await file.exists()) {
+          try {
+            final contents = await file.readAsString();
+            if (!mounted) return;
+            final current = _depSection(contents, widget.project.sdk);
+            if (current != _depSectionSnapshot) {
+              setState(() => _syncBannerVisible = true);
+            }
+          } catch (e) {
+            debugPrint('[WorkspaceScreen] _onEditorChanged: failed to read $saved: $e');
           }
         }
       }
@@ -485,6 +518,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
         customPaths: settings.lspPaths,
       );
     }
+
   }
 
   void _onDebugChanged() {
@@ -583,6 +617,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
           onClose: _hidePreview,
           navigatorContext: context,
           coordinator: _snapCoordinator,
+          liquidGlass: context.read<SettingsProvider>().liquidGlass,
         ),
       ),
     );
@@ -600,12 +635,37 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   }
 
   @override
-  @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // When the IDE goes to the background while a debug/build session is active,
-    // the foreground service keeps the process alive so SSH keepalive and LSP
-    // connections survive screen-off.  No action needed here beyond logging.
     debugPrint('[WorkspaceScreen] lifecycle → $state');
+    if (state == AppLifecycleState.paused) {
+      // Cancel background timers to avoid waking the process while paused.
+      _apkPollTimer?.cancel();
+      _apkPollTimer = null;
+      _autoSaveTimer?.cancel();
+      _autoSaveTimer = null;
+      // Flush the active file before going to background.
+      if (mounted) {
+        context.read<EditorProvider>().saveActiveFile();
+      }
+      // Reduce terminal buffer pressure while the app is in the background.
+      if (mounted) {
+        final terminals = context.read<TerminalProvider>();
+        for (final s in terminals.sessions) {
+          s.setBackgroundMode(true);
+        }
+      }
+    } else if (state == AppLifecycleState.resumed) {
+      // Recreate timers now that the app is foregrounded again.
+      _startApkPollTimer();
+      _startAutoSaveTimer();
+      // Restore terminal sessions to foreground mode.
+      if (mounted) {
+        final terminals = context.read<TerminalProvider>();
+        for (final s in terminals.sessions) {
+          s.setBackgroundMode(false);
+        }
+      }
+    }
   }
 
   @override
@@ -627,17 +687,22 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   }
 
   Future<void> _startForegroundService() async {
-    try {
-      await FlutterForegroundTask.startService(
-        serviceId: 256,
-        notificationTitle: 'FL IDE',
-        notificationText: widget.project.name,
-        callback: fgServiceCallback,
-      );
-      debugPrint('[FgService] started for ${widget.project.name}');
-    } catch (e) {
-      debugPrint('[FgService] start failed: $e');
+    for (int i = 0; i < 3; i++) {
+      try {
+        await FlutterForegroundTask.startService(
+          serviceId: 256,
+          notificationTitle: 'FL IDE',
+          notificationText: widget.project.name,
+          callback: fgServiceCallback,
+        );
+        debugPrint('[FgService] started for ${widget.project.name}');
+        return;
+      } catch (e) {
+        debugPrint('[FgService] tentativa ${i + 1} falhou: $e');
+        if (i < 2) await Future.delayed(Duration(milliseconds: 200 * (i + 1)));
+      }
     }
+    debugPrint('[FgService] FALHOU após 3 tentativas');
   }
 
   Future<void> _stopForegroundService() async {
@@ -693,8 +758,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
       final dir = Directory(srcDir);
       if (!dir.existsSync()) continue;
       try {
-        final files = dir
-            .listSync(recursive: true)
+        final allEntries = await dir.list(recursive: true).toList();
+        final files = allEntries
             .whereType<File>()
             .where((f) => f.path.endsWith('.kt') || f.path.endsWith('.java'))
             .toList()
@@ -708,7 +773,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     // Last resort: open the first non-hidden file at the project root
     try {
       final dir = Directory(projectPath);
-      final entries = dir.listSync(recursive: false)
+      final allRootEntries = await dir.list(recursive: false).toList();
+      final entries = allRootEntries
           .whereType<File>()
           .where((f) => !f.path.split('/').last.startsWith('.'))
           .toList();
@@ -732,6 +798,34 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
         return 'swift';
       case SdkType.go:
         return 'go';
+      case SdkType.kotlinMultiplatform:
+        return 'kt';
+      case SdkType.cpp:
+        return 'cpp';
+      case SdkType.rust:
+        return 'rs';
+      case SdkType.lua:
+        return 'lua';
+      case SdkType.ruby:
+        return 'rb';
+      case SdkType.php:
+        return 'php';
+      case SdkType.bash:
+        return 'sh';
+      case SdkType.htmlCss:
+        return 'html';
+      case SdkType.csharp:
+        return 'cs';
+      case SdkType.scala:
+        return 'scala';
+      case SdkType.r:
+        return 'r';
+      case SdkType.zig:
+        return 'zig';
+      case SdkType.haskell:
+        return 'hs';
+      case SdkType.elixir:
+        return 'ex';
     }
   }
 
@@ -892,7 +986,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   @override
   Widget build(BuildContext context) {
     final keyboardVisible = MediaQuery.of(context).viewInsets.bottom > 150;
-    final liquidGlass = context.watch<SettingsProvider>().liquidGlass;
+    final liquidGlass = context.select<SettingsProvider, bool>((s) => s.liquidGlass);
 
     return PopScope(
       canPop: false,
@@ -923,6 +1017,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
               ),
               builder: (context, mainChild) {
                 final cs    = Theme.of(context).colorScheme;
+                final isDark = cs.brightness == Brightness.dark;
                 final leftV = _drawerAnim.value;
                 return Stack(
                   children: [
@@ -934,37 +1029,36 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                         child: SafeArea(
                           child: Column(
                             children: [
-                              if (liquidGlass)
-                                LiquidGlassLayer(
-                                  child: LiquidGlass(
-                                    shape: LiquidRoundedSuperellipse(borderRadius: 30),
-                                    child: _WorkspaceAppBar(
+                              liquidGlass
+                                  ? LiquidGlassLayer(
+                                      child: LiquidGlass(
+                                        shape: LiquidRoundedSuperellipse(borderRadius: 30),
+                                        child: _WorkspaceAppBar(
+                                          project: widget.project,
+                                          drawerAnim: _drawerAnim,
+                                          onMenuTap: _toggleDrawer,
+                                          onAiTap: _toggleAiDrawer,
+                                          liquidGlass: true,
+                                          sheetKey: _sheetKey,
+                                          onShowWebPreview: () {
+                                            final url = context.read<DebugProvider>().webServerUrl;
+                                            _showPreview(url: url);
+                                          },
+                                        ),
+                                      ),
+                                    )
+                                  : _WorkspaceAppBar(
                                       project: widget.project,
                                       drawerAnim: _drawerAnim,
                                       onMenuTap: _toggleDrawer,
                                       onAiTap: _toggleAiDrawer,
-                                      liquidGlass: true,
+                                      liquidGlass: false,
                                       sheetKey: _sheetKey,
                                       onShowWebPreview: () {
                                         final url = context.read<DebugProvider>().webServerUrl;
                                         _showPreview(url: url);
                                       },
                                     ),
-                                  ),
-                                )
-                              else
-                                _WorkspaceAppBar(
-                                  project: widget.project,
-                                  drawerAnim: _drawerAnim,
-                                  onMenuTap: _toggleDrawer,
-                                  onAiTap: _toggleAiDrawer,
-                                  liquidGlass: false,
-                                  sheetKey: _sheetKey,
-                                  onShowWebPreview: () {
-                                    final url = context.read<DebugProvider>().webServerUrl;
-                                    _showPreview(url: url);
-                                  },
-                                ),
                               Expanded(child: mainChild!),
                             ],
                           ),
@@ -986,6 +1080,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                             child: _DrawerContent(
                               project: widget.project,
                               onClose: _closeDrawer,
+                              liquidGlass: liquidGlass,
                               onTabChange: (i) {
                                 _sheetKey.currentState?.selectToolTab(i);
                                 _closeDrawer();
@@ -995,13 +1090,24 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                             ),
                           );
                           if (liquidGlass) {
-                            return OCLiquidGlassGroup(
-                              settings: _kGlassSettings,
-                              child: OCLiquidGlass(
-                                color: cs.surfaceContainerLow
-                                    .withValues(alpha: 0.10),
-                                borderRadius: 0,
-                                child: drawerContent,
+                            return LiquidGlass.withOwnLayer(
+                              settings: LiquidGlassSettings(
+                                glassColor: cs.surface.withValues(alpha: 0.88),
+                                blur: 3.0,
+                                thickness: 50.0,
+                                lightIntensity: isDark ? 0.7 : 1.0,
+                                ambientStrength: isDark ? 0.2 : 0.5,
+                                lightAngle: math.pi / 4,
+                                refractiveIndex: 1.18,
+                                saturation: 1.4,
+                                chromaticAberration: 0.4,
+                              ),
+                              shape: LiquidRoundedRectangle(borderRadius: 0),
+                              child: GlassGlow(
+                                child: Material(
+                                  type: MaterialType.transparency,
+                                  child: drawerContent,
+                                ),
                               ),
                             );
                           }
@@ -1034,6 +1140,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                 child: AiChatDrawer(
                   onClose: _closeAiDrawer,
                   project: widget.project,
+                  liquidGlass: liquidGlass,
                 ),
                 builder: (ctx, child) {
                   final v = _aiDrawerAnim.value;
@@ -1047,7 +1154,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
               ),
             ),
           ],
-        ),
+        ),    // Stack
       ),
     );
   }
@@ -1112,6 +1219,36 @@ class _WorkspaceAppBarState extends State<_WorkspaceAppBar> {
     // Save (+ format) all open files before building.
     await context.read<EditorProvider>().saveAllFiles(format: settings.formatOnSave);
     if (!context.mounted) return;
+
+    // ── Remote build via GitHub Actions ──────────────────────────────────────
+    if (settings.remoteGitBuild && settings.githubToken.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!context.mounted) return;
+        widget.sheetKey.currentState?.selectToolTab(5); // 5 = OUTPUT
+        widget.sheetKey.currentState?.expandToMid();
+      });
+      final remoteProv = context.read<RemoteGitBuildProvider>();
+      final buildProv  = context.read<BuildProvider>();
+      remoteProv.start(
+        project: widget.project,
+        buildProv: buildProv,
+        githubToken: settings.githubToken,
+      ).then((_) {
+        if (!context.mounted) return;
+        context.read<EditorProvider>().refreshTree();
+        final apk = buildProv.apkPath;
+        if (apk != null) {
+          context.findAncestorStateOfType<_WorkspaceScreenState>()
+              ?._showApkInstallDialog(apk);
+        }
+      }).catchError((e) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erro na compilação remota: $e')),
+        );
+      });
+      return;
+    }
 
     final platforms = supportedPlatforms(widget.project.sdk);
     if (platforms.isEmpty) return;
@@ -1232,9 +1369,11 @@ class _WorkspaceAppBarState extends State<_WorkspaceAppBar> {
                     : _buildNormalBar(cs),
               ),
             ),
-            Consumer<DebugProvider>(
-              builder: (context, dbg, _) =>
-                  (dbg.status == DebugStatus.starting || dbg.isBuilding)
+            Consumer2<DebugProvider, RemoteGitBuildProvider>(
+              builder: (context, dbg, remote, _) =>
+                  (dbg.status == DebugStatus.starting ||
+                      dbg.isBuilding ||
+                      remote.isRunning)
                       ? LinearProgressIndicator(
                           year2023: true,
                           color: cs.primary,
@@ -1312,7 +1451,7 @@ class _WorkspaceAppBarState extends State<_WorkspaceAppBar> {
           animation: widget.drawerAnim,
           builder: (_, __) => IconButton(
             icon: AnimatedIcon(
-              icon: AnimatedIcons.menu_arrow,
+              icon: AnimatedIcons.menu_close,
               progress: widget.drawerAnim,
               size: 24,
             ),
@@ -1375,9 +1514,27 @@ class _WorkspaceAppBarState extends State<_WorkspaceAppBar> {
                 )
               : const SizedBox.shrink(),
         ),
-        // ── Run / Stop DAP button ──────────────────────────────────
-        Consumer<DebugProvider>(
-          builder: (context, dbg, _) {
+        // ── Run / Stop button ──────────────────────────────────────
+        Consumer2<DebugProvider, RemoteGitBuildProvider>(
+          builder: (context, dbg, remote, _) {
+            // Remote build in progress → stop button cancels remote build.
+            if (remote.isRunning) {
+              return IconButton(
+                icon: Container(
+                  width: 20,
+                  height: 20,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: cs.error, width: 2),
+                  ),
+                  child: Icon(Icons.stop, color: cs.error, size: 11),
+                ),
+                onPressed: () => remote.cancel(),
+                tooltip: 'Interromper compilação remota',
+                constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+              );
+            }
+            // Local DAP/build session active → stop button ends the session.
             if (dbg.isActive) {
               return IconButton(
                 icon: Container(
@@ -1453,7 +1610,7 @@ class _WorkspaceAppBarState extends State<_WorkspaceAppBar> {
             constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
           ),
         // ── Design / Visual Editor (shown for .dart files) ────────
-        Consumer<EditorProvider>(
+      /*   Consumer<EditorProvider>(
           builder: (context, editor, _) {
             final file = editor.activeFile;
             if (file == null || file.extension != 'dart') {
@@ -1466,10 +1623,10 @@ class _WorkspaceAppBarState extends State<_WorkspaceAppBar> {
               constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
             );
           },
-        ),
+        ), */
         // ── AI chat ───────────────────────────────────────────────
         IconButton(
-          icon: Icon(Icons.auto_awesome_rounded, color: cs.onSurface, size: 21),
+          icon: Icon(Icons.branding_watermark, color: cs.onSurface, size: 21),
           onPressed: widget.onAiTap,
           tooltip: 'Chat IA',
           constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
@@ -1489,7 +1646,11 @@ class _WorkspaceAppBarState extends State<_WorkspaceAppBar> {
               case 'redo':
                 editor.redo();
               case 'save':
-                editor.saveActiveFile(format: settings.formatOnSave);
+                editor.saveActiveFile(
+                  format: settings.formatOnSave,
+                  organizeImports: settings.organizeImportsOnSave,
+                  fixAll: settings.fixAllOnSave,
+                );
               case 'sync':
                 editor.loadProject(widget.project.path);
               case 'search':
@@ -1643,13 +1804,14 @@ void _showPlatformPickerSheet(BuildContext context, Project project) {
   showModalBottomSheet<void>(
     context: context,
     backgroundColor: Colors.transparent,
+    barrierColor: Colors.transparent,
     isScrollControlled: true,
     builder: (sheetCtx) {
       final cs = Theme.of(sheetCtx).colorScheme;
       return StatefulBuilder(
         builder: (ctx, setSheetState) {
           return Container(
-            margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+           // margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
             decoration: BoxDecoration(
               color: cs.surfaceContainerHigh,
               borderRadius: BorderRadius.circular(16),
@@ -1723,7 +1885,7 @@ void _showPlatformPickerSheet(BuildContext context, Project project) {
                                   ),
                                 ),
                                 if (isActive)
-                                  Icon(Icons.check_circle_rounded, size: 18, color: cs.primary),
+                                  Icon(Icons.check_rounded, size: 18, color: cs.primary),
                               ],
                             ),
                           ),
@@ -1850,42 +2012,55 @@ class _MainContentState extends State<_MainContent> {
     super.dispose();
   }
 
+  Widget _buildEditor(BuildContext context) {
+    final liquidGlass = widget.liquidGlass;
+    return Selector<SettingsProvider, Object>(
+      selector: (_, s) => s.editorConfigSnapshot,
+      builder: (context, _, __) {
+        final settings = context.read<SettingsProvider>();
+        return EditorArea(
+          editorTheme: context.watch<ExtensionsProvider>().activeEditorTheme ??
+              editorThemeFromScheme(Theme.of(context).colorScheme),
+          showSymbolBar: false,
+          fontSize: settings.fontSize,
+          fontFamily: settings.fontFamily,
+          configureProps: settings.applyToProps,
+          onDiagnosticTap: () {
+            widget.sheetKey.currentState?.selectToolTab(1); // 1 = PROBLEMS
+            widget.sheetKey.currentState?.expandToMid();
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final settings = context.watch<SettingsProvider>();
-    final liquidGlass = widget.liquidGlass;
+    final git = context.watch<GitProvider>();
     return LayoutBuilder(
       builder: (context, constraints) {
-        final editorBottomPad = _BottomSheetPanelState._kPeekBarH;
-
         final stack = Stack(
           children: [
-            // ── Editor (full height, dynamic bottom padding) ──────────────
+            // ── Editor (or diff view) ─────────────────────────────────────
             Padding(
-              padding: EdgeInsets.only(bottom: editorBottomPad),
-              child: Focus(
-                focusNode: _mainEditorFocusNode,
-                canRequestFocus: false,
-                skipTraversal: true,
-                child: EditorArea(
-                  editorTheme: context.watch<ExtensionsProvider>().activeEditorTheme ??
-                      editorThemeFromScheme(Theme.of(context).colorScheme),
-                  showSymbolBar: false,
-                  fontSize: settings.fontSize,
-                  fontFamily: settings.fontFamily,
-                  configureProps: settings.applyToProps,
-                  onDiagnosticTap: () {
-                    widget.sheetKey.currentState?.selectToolTab(1); // 1 = PROBLEMS
-                    widget.sheetKey.currentState?.expandToMid();
-                  },
-                ),
-              ),
+              padding: const EdgeInsets.only(bottom: _BottomSheetPanelState._kPeekBarH),
+              child: git.showDiff
+                  ? GitDiffView(
+                      filePath: git.diffFilePath!,
+                      originalContent: git.diffOriginalContent ?? '',
+                      modifiedContent: git.diffModifiedContent ?? '',
+                      onClose: () => context.read<GitProvider>().closeDiff(),
+                    )
+                  : Focus(
+                      focusNode: _mainEditorFocusNode,
+                      canRequestFocus: false,
+                      skipTraversal: true,
+                      child: _buildEditor(context),
+                    ),
             ),
             // ── Floating debug execution bar ─────────────────────────────
             _DebugExecutionOverlay(coordinator: widget.snapCoordinator),
-            // ── Sync banner: anchored at editor bottom, slides in above
-            //    the peek bar. Rendered BEFORE the sheet so it stays in
-            //    the code area and the sheet slides over it when expanded.
+            // ── Sync banner ───────────────────────────────────────────────
             Positioned(
               left: 0,
               right: 0,
@@ -1903,7 +2078,7 @@ class _MainContentState extends State<_MainContent> {
                     : const SizedBox.shrink(),
               ),
             ),
-            // ── Bottom sheet overlaid on top (draggable) ─────────────────
+            // ── Bottom sheet ──────────────────────────────────────────────
             Positioned(
               left: 0,
               right: 0,
@@ -1913,17 +2088,12 @@ class _MainContentState extends State<_MainContent> {
                 availableHeight: constraints.maxHeight,
                 project: widget.project,
                 keyboardVisible: widget.keyboardVisible && _mainEditorFocused,
-                liquidGlass: liquidGlass,
+                liquidGlass: widget.liquidGlass,
                 initPhase: widget.initPhase,
               ),
             ),
-        ],
+          ],
         );
-        // Wrap the whole stack in OCLiquidGlassGroup so that OCLiquidGlass
-        // descendants (bottom sheet) can see the editor pixels behind them.
-        if (liquidGlass) {
-          return OCLiquidGlassGroup(settings: _kGlassSettings, child: stack);
-        }
         return stack;
       },
     );
@@ -1932,18 +2102,46 @@ class _MainContentState extends State<_MainContent> {
 
 // ── Drawer content ────────────────────────────────────────────────────────────
 
-class _DrawerContent extends StatelessWidget {
+class _DrawerContent extends StatefulWidget {
   final Project project;
   final VoidCallback onClose;
   final ValueChanged<int> onTabChange;
   final void Function(String apkPath)? onApkTap;
+  final bool liquidGlass;
 
   const _DrawerContent({
     required this.project,
     required this.onClose,
     required this.onTabChange,
     this.onApkTap,
+    this.liquidGlass = false,
   });
+
+  @override
+  State<_DrawerContent> createState() => _DrawerContentState();
+}
+
+class _DrawerContentState extends State<_DrawerContent> {
+  bool _showGit = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Wire git-init → file tree refresh so .git dir stays hidden after init.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<GitProvider>().onTreeRefreshNeeded = () {
+        if (mounted) context.read<EditorProvider>().loadProject(widget.project.path);
+      };
+    });
+  }
+
+  @override
+  void dispose() {
+    // Clear callback to avoid dangling reference after drawer is destroyed.
+    try { context.read<GitProvider>().onTreeRefreshNeeded = null; } catch (_) {}
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1952,46 +2150,52 @@ class _DrawerContent extends StatelessWidget {
       children: [
         // Icon rail — 64px
         _DrawerRail(
-          project: project,
-          onClose: onClose,
-          onTabChange: onTabChange,
+          project: widget.project,
+          onClose: widget.onClose,
+          onTabChange: widget.onTabChange,
+          liquidGlass: widget.liquidGlass,
+          showGit: _showGit,
+          onToggleGit: () => setState(() => _showGit = !_showGit),
         ),
         // Divider
-        VerticalDivider(width: 1, thickness: 1, color: cs.outlineVariant),
-        // File tree with 2D scroll
+        VerticalDivider(width: 1, thickness: 1, color: widget.liquidGlass ? Colors.transparent : cs.outlineVariant),
+        // Panel content
         Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                height: 48,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  project.name,
-                  style: TextStyle(
-                    color: cs.onSurface,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              Divider(height: 1, color: cs.outlineVariant),
-              Expanded(
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: SizedBox(
-                    width: 600,
-                    child: FileTreePanel(
-                      onFileSelected: onClose,
-                      onApkTap: onApkTap,
+          child: _showGit
+              ? GitPanel(onClose: widget.onClose)
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      height: 48,
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        widget.project.name,
+                        style: TextStyle(
+                          color: cs.onSurface,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
-                  ),
+                    Divider(height: 1, color: widget.liquidGlass ? Colors.transparent : cs.outlineVariant),
+                    Expanded(
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: SizedBox(
+                          width: 600,
+                          child: FileTreePanel(
+                            onFileSelected: widget.onClose,
+                            onApkTap: widget.onApkTap,
+                            liquidGlass: widget.liquidGlass,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-            ],
-          ),
         ),
       ],
     );
@@ -2002,20 +2206,27 @@ class _DrawerRail extends StatelessWidget {
   final Project project;
   final VoidCallback onClose;
   final ValueChanged<int> onTabChange;
+  final bool liquidGlass;
+  final bool showGit;
+  final VoidCallback onToggleGit;
 
   const _DrawerRail({
     required this.project,
     required this.onClose,
     required this.onTabChange,
+    this.liquidGlass = false,
+    required this.showGit,
+    required this.onToggleGit,
   });
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final gitChanges = context.select<GitProvider, int>((g) => g.totalChanges);
     return SizedBox(
       width: _kRailWidth,
       child: Container(
-        color: cs.surface,
+        color: liquidGlass ? Colors.transparent : cs.surface,
         child: Column(
           children: [
             const SizedBox(height: 16),
@@ -2023,7 +2234,6 @@ class _DrawerRail extends StatelessWidget {
             Tooltip(
               message: 'FL IDE',
               child: CircleAvatar(
-                backgroundColor: cs.primary,
                 radius: 22,
               child:Image.asset("assets/logo.png",width: 200, height: 200, fit: BoxFit.cover, ),
               ),
@@ -2046,6 +2256,37 @@ class _DrawerRail extends StatelessWidget {
               bg: cs.primaryContainer,
               fg: cs.onPrimaryContainer,
               onTap: () => _showPlatformPickerSheet(context, project),
+            ),
+            // ── Git button ───────────────────────────────────────────────
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                _CircleRailBtn(
+                  icon: Icons.source_outlined,
+                  tooltip: 'Source Control',
+                  bg: showGit ? cs.primary : cs.primaryContainer,
+                  fg: showGit ? cs.onPrimary : cs.onPrimaryContainer,
+                  onTap: onToggleGit,
+                ),
+                if (gitChanges > 0)
+                  Positioned(
+                    right: 2,
+                    top: 2,
+                    child: Container(
+                      width: 16,
+                      height: 16,
+                      decoration: BoxDecoration(
+                        color: cs.error,
+                        shape: BoxShape.circle,
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        gitChanges > 99 ? '99+' : '$gitChanges',
+                        style: TextStyle(color: cs.onError, fontSize: 9, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+              ],
             ),
             _CircleRailBtn(
               icon: Icons.settings_outlined,
@@ -2140,6 +2381,7 @@ class _BottomSheetPanelState extends State<_BottomSheetPanel>
   static const int _kToolCount = 7; // TERMINAL PROBLEMS VARIABLES CALL-STACK DEBUG-CONSOLE OUTPUT LOGCAT
 
   double _height = _kPeek;
+  final ValueNotifier<double> _heightNotifier = ValueNotifier(_kPeek);
   late AnimationController _animCtrl;
   late Animation<double> _anim;
 
@@ -2157,7 +2399,13 @@ class _BottomSheetPanelState extends State<_BottomSheetPanel>
       vsync: this,
       duration: const Duration(milliseconds: 280),
     );
-    _animCtrl.addListener(() => setState(() => _height = _anim.value));
+    // Update only the notifier per animation frame — no setState means no
+    // full-widget rebuild at 60 fps. Only the ValueListenableBuilder around
+    // the SizedBox wrapper reacts to these changes.
+    _animCtrl.addListener(() {
+      _height = _anim.value;
+      _heightNotifier.value = _anim.value;
+    });
   }
 
   void _onTabChanged() {
@@ -2239,7 +2487,10 @@ class _BottomSheetPanelState extends State<_BottomSheetPanel>
         if (mounted) _snapTo(widget.availableHeight);
       });
     } else if (_height > widget.availableHeight) {
-      setState(() => _height = widget.availableHeight);
+      setState(() {
+        _height = widget.availableHeight;
+        _heightNotifier.value = _height;
+      });
     }
   }
 
@@ -2249,6 +2500,7 @@ class _BottomSheetPanelState extends State<_BottomSheetPanel>
     _combinedTabCtrl.removeListener(_onTabChanged);
     _combinedTabCtrl.dispose();
     _animCtrl.dispose();
+    _heightNotifier.dispose();
     super.dispose();
   }
 
@@ -2282,6 +2534,7 @@ class _BottomSheetPanelState extends State<_BottomSheetPanel>
     setState(() {
       _height =
           (_height - d.delta.dy).clamp(_kPeek, widget.availableHeight);
+      _heightNotifier.value = _height;
     });
   }
 
@@ -2305,6 +2558,7 @@ class _BottomSheetPanelState extends State<_BottomSheetPanel>
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final isDark = cs.brightness == Brightness.dark;
     return DragTarget<OpenFile>(
       onAcceptWithDetails: (details) {
         final editor = context.read<EditorProvider>();
@@ -2331,17 +2585,20 @@ class _BottomSheetPanelState extends State<_BottomSheetPanel>
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Divider(height: 1, thickness: 1, color: cs.outlineVariant),
+                            Divider(height: 1, thickness: 1, color: widget.liquidGlass ? Colors.transparent : cs.outlineVariant),
                             // LSP / build progress indicator
-                            Consumer2<LspProvider, DebugProvider>(
-                              builder: (c, lsp, dbg, _) {
-                                final loading = lsp.status == LspStatus.starting ||
+                            Consumer3<LspProvider, DebugProvider,
+                                RemoteGitBuildProvider>(
+                              builder: (c, lsp, dbg, remote, _) {
+                                final loading =
+                                    lsp.status == LspStatus.starting ||
                                     lsp.status == LspStatus.warming /* ||
                                     dbg.status == DebugStatus.starting ||
-                                    dbg.isBuilding */;
+                                    dbg.isBuilding ||
+                                    remote.isRunning */;
                                 return loading
                                     ? LinearProgressIndicator(
-                                      year2023: true,
+                                        year2023: true,
                                         minHeight: 2,
                                         backgroundColor: cs.outlineVariant,
                                         borderRadius: BorderRadius.circular(10),
@@ -2350,28 +2607,40 @@ class _BottomSheetPanelState extends State<_BottomSheetPanel>
                               },
                             ),
                             // Peek bar / special chars bar (animated switch)
-                            AnimatedSwitcher(
-                              duration: const Duration(milliseconds: 200),
-                              child: widget.keyboardVisible
-                                  ? const _SpecialCharsBar()
-                                  : Builder(builder: (context) {
-                                      final p3 = _stage3Progress;
-                                      if (p3 >= 1.0) return const SizedBox.shrink();
-                                      return ClipRect(
-                                        child: SizedBox(
-                                          height: _kPeekBarH * (1.0 - p3),
-                                          width: double.infinity,
-                                          child: Transform.translate(
-                                            offset: Offset(0, _kPeekBarH * p3),
-                                            child: _PeekBar(initPhase: widget.initPhase),
-                                          ),
-                                        ),
-                                      );
-                                    }),
+                            // ValueListenableBuilder isolates per-frame height
+                            // reads to this subtree only — no setState needed.
+                            ValueListenableBuilder<double>(
+                              valueListenable: _heightNotifier,
+                              builder: (_, h, peekBarChild) {
+                                if (widget.keyboardVisible) {
+                                  return const _SpecialCharsBar();
+                                }
+                                final full = widget.availableHeight;
+                                final p3 = h <= _kMid
+                                    ? 0.0
+                                    : h >= full
+                                        ? 1.0
+                                        : (h - _kMid) / (full - _kMid);
+                                if (p3 >= 1.0) return const SizedBox.shrink();
+                                return AnimatedSwitcher(
+                                  duration: const Duration(milliseconds: 200),
+                                  child: ClipRect(
+                                    child: SizedBox(
+                                      height: _kPeekBarH * (1.0 - p3),
+                                      width: double.infinity,
+                                      child: Transform.translate(
+                                        offset: Offset(0, _kPeekBarH * p3),
+                                        child: peekBarChild,
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              },
+                              child: _PeekBar(initPhase: widget.initPhase),
                             ),
                             // ── Single unified tab bar ──────────────────
                             ColoredBox(
-                              color: cs.surface,
+                              color: widget.liquidGlass ? Colors.transparent : cs.surface,
                               child: TabBar(
                                 controller: _combinedTabCtrl,
                                 isScrollable: true,
@@ -2427,81 +2696,183 @@ class _BottomSheetPanelState extends State<_BottomSheetPanel>
                           ],
                         ),
                       ),
-                      Divider(height: 1, color: cs.outlineVariant),
+                      Divider(height: 1, color: widget.liquidGlass ? Colors.transparent : cs.outlineVariant),
                       // ── Content area ────────────────────────────────
                       Expanded(
-                        child: isFileTab
-                            ? Consumer2<ExtensionsProvider, SettingsProvider>(
-                                builder: (c, ext, sett, _) => EditorArea(
-                                  editorTheme: ext.activeEditorTheme ??
-                                      editorThemeFromScheme(Theme.of(c).colorScheme),
-                                  showSymbolBar: false,
-                                  fontSize: sett.fontSize,
-                                  fontFamily: sett.fontFamily,
-                                  configureProps: sett.applyToProps,
-                                  showTabBar: false,
-                                  forBottomPanel: true,
-                                  onDiagnosticTap: () {
-                                    // _BottomSheetPanelState can call its own
-                                    // methods directly — no key lookup needed.
-                                    selectToolTab(1); // 1 = PROBLEMS
-                                    expandToMid();
-                                  },
-                                ),
+                        child: widget.liquidGlass
+                            ? Material(
+                                type: MaterialType.transparency,
+                                child: isFileTab
+                                    ? Consumer2<ExtensionsProvider, SettingsProvider>(
+                                        builder: (c, ext, sett, _) => EditorArea(
+                                          editorTheme: ext.activeEditorTheme ??
+                                              editorThemeFromScheme(Theme.of(c).colorScheme),
+                                          showSymbolBar: false,
+                                          fontSize: sett.fontSize,
+                                          fontFamily: sett.fontFamily,
+                                          configureProps: sett.applyToProps,
+                                          showTabBar: false,
+                                          forBottomPanel: true,
+                                          onDiagnosticTap: () {
+                                            selectToolTab(1);
+                                            expandToMid();
+                                          },
+                                        ),
+                                      )
+                                    : IndexedStack(
+                                        index: (tabIdx - bf.length).clamp(0, _kToolCount - 1),
+                                        children: [
+                                          TerminalTabs(
+                                            initialWorkDir: widget.project.path,
+                                            autoStart: false,
+                                            liquidGlass: widget.liquidGlass,
+                                          ),
+                                          _ProblemsPanel(
+                                            onNavigated: () => _snapTo(_kPeek),
+                                          ),
+                                          const DebugVariablesPanel(),
+                                          const DebugCallStackPanel(),
+                                          DebugOutputPanel(
+                                            onNavigate: (path, line) async {
+                                              final editor = context.read<EditorProvider>();
+                                              await editor.openFile(path);
+                                              final f = editor.openFiles
+                                                  .where((f) => f.path == path)
+                                                  .firstOrNull;
+                                              f?.controller?.cursor.moveTo(
+                                                CharPosition(line - 1, 0),
+                                              );
+                                            },
+                                          ),
+                                          const _OutputPanel(),
+                                          _LogcatPanel(project: widget.project),
+                                        ],
+                                      ),
                               )
-                            : IndexedStack(
-                                index: (tabIdx - bf.length).clamp(0, _kToolCount - 1),
-                                children: [
-                                  TerminalTabs(
-                                    initialWorkDir: widget.project.path,
-                                    autoStart: false,
+                            : isFileTab
+                                ? Consumer2<ExtensionsProvider, SettingsProvider>(
+                                    builder: (c, ext, sett, _) => EditorArea(
+                                      editorTheme: ext.activeEditorTheme ??
+                                          editorThemeFromScheme(Theme.of(c).colorScheme),
+                                      showSymbolBar: false,
+                                      fontSize: sett.fontSize,
+                                      fontFamily: sett.fontFamily,
+                                      configureProps: sett.applyToProps,
+                                      showTabBar: false,
+                                      forBottomPanel: true,
+                                      onDiagnosticTap: () {
+                                        selectToolTab(1);
+                                        expandToMid();
+                                      },
+                                    ),
+                                  )
+                                : IndexedStack(
+                                    index: (tabIdx - bf.length).clamp(0, _kToolCount - 1),
+                                    children: [
+                                      TerminalTabs(
+                                        initialWorkDir: widget.project.path,
+                                        autoStart: false,
+                                      ),
+                                      _ProblemsPanel(
+                                        onNavigated: () => _snapTo(_kPeek),
+                                      ),
+                                      const DebugVariablesPanel(),
+                                      const DebugCallStackPanel(),
+                                      // DEBUG CONSOLE — DAP build/run output
+                                      DebugOutputPanel(
+                                        onNavigate: (path, line) async {
+                                          final editor = context.read<EditorProvider>();
+                                          await editor.openFile(path);
+                                          final f = editor.openFiles
+                                              .where((f) => f.path == path)
+                                              .firstOrNull;
+                                          f?.controller?.cursor.moveTo(
+                                            CharPosition(line - 1, 0),
+                                          );
+                                        },
+                                      ),
+                                      // OUTPUT — general logs (git, sync, LSP, etc.)
+                                      const _OutputPanel(),
+                                      // LOGCAT — live app logs via adb logcat
+                                      _LogcatPanel(project: widget.project),
+                                    ],
                                   ),
-                                  _ProblemsPanel(
-                                    onNavigated: () => _snapTo(_kPeek),
-                                  ),
-                                  const DebugVariablesPanel(),
-                                  const DebugCallStackPanel(),
-                                  // DEBUG CONSOLE — DAP build/run output
-                                  DebugOutputPanel(
-                                    onNavigate: (path, line) async {
-                                      final editor = context.read<EditorProvider>();
-                                      await editor.openFile(path);
-                                      final f = editor.openFiles
-                                          .where((f) => f.path == path)
-                                          .firstOrNull;
-                                      f?.controller?.cursor.moveTo(
-                                        CharPosition(line - 1, 0),
-                                      );
-                                    },
-                                  ),
-                                  // OUTPUT — general logs (git, sync, LSP, etc.)
-                                  const _OutputPanel(),
-                                  // LOGCAT — live app logs via adb logcat
-                                  _LogcatPanel(project: widget.project),
-                                ],
-                              ),
                       ),
                     ],
                   );  // panelContent Column
-            return SizedBox(
-              height: _height,
-              child: widget.liquidGlass
-                  ? OCLiquidGlass(
-                      height: _height,
-                      color: cs.surface.withValues(alpha: 0.08),
-                      borderRadius: 16.0,
-                      child: ClipRRect(
-                        borderRadius: const BorderRadius.vertical(
-                            top: Radius.circular(16)),
-                        child: panelContent,
-                      ),
-                    )
-                  : ClipRect(
-                      child: Material(
-                        color: panelColor,
-                        child: panelContent,
-                      ),
+            // ValueListenableBuilder isolates per-frame height changes to only
+            // the SizedBox wrapper. The heavy panelContent is passed as the
+            // static `child` and is NOT rebuilt on each animation frame.
+            return ValueListenableBuilder<double>(
+              valueListenable: _heightNotifier,
+              builder: (_, h, child) {
+                if (!widget.liquidGlass) {
+                  return SizedBox(
+                    height: h,
+                    child: ClipRect(
+                      child: Material(color: panelColor, child: child),
                     ),
+                  );
+                }
+
+                // Começa completamente transparente e fica mais sólido conforme
+                // o usuário abre o sheet. As laterais do glass são escondidas
+                // estendendo o widget 20dp para cada lado (off-screen).
+                final full = widget.availableHeight;
+                final double glassAlpha, frost, thickness;
+                if (h <= _kPeek) {
+                  glassAlpha = 0.0; frost = 14.0; thickness = 6.0;
+                } else if (h <= _kMid) {
+                  final t = ((h - _kPeek) / (_kMid - _kPeek)).clamp(0.0, 1.0);
+                  glassAlpha = 0.0  + 0.55 * t;
+                  frost      = 14.0 + (4.0  - 14.0) * t;
+                  thickness  = 6.0  + (42.0 - 6.0)  * t;
+                } else {
+                  final t = ((h - _kMid) / (full - _kMid)).clamp(0.0, 1.0);
+                  glassAlpha = 0.55 + (0.93 - 0.55) * t;
+                  frost      = 4.0  + (1.0  - 4.0)  * t;
+                  thickness  = 42.0 + (58.0 - 42.0) * t;
+                }
+
+                // Estende o glass 24dp além da tela nos lados e em baixo,
+                // colocando as bordas laterais/inferior do efeito fora do viewport.
+                // Apenas a borda SUPERIOR fica visível — que é a desejada.
+                const kBleed = 24.0;
+                return SizedBox(
+                  height: h,
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Positioned(
+                        left: -kBleed, right: -kBleed,
+                        top: 0, bottom: -kBleed,
+                        child: LiquidGlass.withOwnLayer(
+                          settings: LiquidGlassSettings(
+                            glassColor: cs.surface.withValues(alpha: glassAlpha),
+                            blur: frost,
+                            thickness: thickness,
+                            lightIntensity: isDark ? 0.7 : 1.0,
+                            ambientStrength: isDark ? 0.2 : 0.5,
+                            lightAngle: math.pi / 4,
+                            refractiveIndex: 1.21,
+                            saturation: 1.5,
+                            chromaticAberration: 0.5,
+                          ),
+                          shape: LiquidRoundedRectangle(borderRadius: 0),
+                          child: GlassGlow(
+                            child: Padding(
+                              padding: const EdgeInsets.only(
+                                left: kBleed, right: kBleed, bottom: kBleed),
+                              child: child!,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+              child: panelContent,
             );
           },
         );
@@ -3024,8 +3395,9 @@ class _ProblemSectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final liquidGlass = context.select<SettingsProvider, bool>((s) => s.liquidGlass);
     return Container(
-      color: cs.surfaceContainerHighest.withValues(alpha: 0.5),
+      color: liquidGlass ? Colors.transparent : cs.surfaceContainerHighest.withValues(alpha: 0.5),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       child: Row(
         children: [
@@ -3171,9 +3543,11 @@ class _LogcatPanelState extends State<_LogcatPanel> {
         return Column(
           children: [
             // ── Toolbar ──────────────────────────────────────────────────────
-            Container(
+            Builder(builder: (context) {
+              final liquidGlass = context.select<SettingsProvider, bool>((s) => s.liquidGlass);
+              return Container(
               height: 36,
-              color: cs.surfaceContainerHighest.withValues(alpha: 0.5),
+              color: liquidGlass ? Colors.transparent : cs.surfaceContainerHighest.withValues(alpha: 0.5),
               padding: const EdgeInsets.symmetric(horizontal: 8),
               child: Row(
                 children: [
@@ -3269,7 +3643,8 @@ class _LogcatPanelState extends State<_LogcatPanel> {
                     ),
                 ],
               ),
-            ),
+            );
+            }),
             const Divider(height: 1),
             // ── Log lines ────────────────────────────────────────────────────
             Expanded(

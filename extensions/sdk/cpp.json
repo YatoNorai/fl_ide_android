@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "sdk": "cpp",
+  "sdk_version": "latest",
+  "display_name": "C / C++",
+  "description": "C e C++ para Termux no Android ARM64. Inclui o compilador clang via pkg, clangd (LSP), cmake, ninja e lldb-vscode (adaptador DAP).",
+  "package": {
+    "type": "pkg",
+    "arch": "arm64",
+    "size_mb": 180
+  },
+  "package_author": {
+    "name": "Termux / LLVM Project",
+    "github": "https://github.com/termux/termux-packages"
+  },
+  "json_author": {
+    "name": "Yato",
+    "date": "2026-04-19"
+  },
+  "install_steps": [
+    {
+      "type": "shell",
+      "command": "pkg update -y 2>&1 && pkg install -y clang cmake ninja binutils 2>&1",
+      "description": "Instalando clang, cmake, ninja e binutils"
+    },
+    {
+      "type": "shell",
+      "command": "clang --version 2>&1 && clang++ --version 2>&1",
+      "description": "Verificando instalação do clang"
+    },
+    {
+      "type": "shell",
+      "command": "pkg install -y clangd 2>&1 || echo 'AVISO: clangd pode estar incluído no pacote clang'",
+      "description": "Instalando clangd (Language Server)"
+    },
+    {
+      "type": "shell",
+      "command": "clangd --version 2>&1 && echo 'OK: clangd instalado'",
+      "description": "Verificando clangd"
+    },
+    {
+      "type": "shell",
+      "command": "pkg install -y lldb 2>&1 && echo 'OK: lldb instalado' || echo 'AVISO: lldb não disponível para DAP'",
+      "description": "Instalando lldb (debugger DAP)"
+    }
+  ],
+  "config_steps": [
+    {
+      "type": "shell",
+      "command": "test -f $PREFIX/bin/clangd && echo 'clangd OK' || echo 'ERRO: clangd não encontrado'",
+      "description": "Verificando clangd"
+    },
+    {
+      "type": "shell",
+      "command": "test -f $PREFIX/bin/lldb-vscode && echo 'lldb-vscode OK' || test -f $PREFIX/bin/lldb-dap && echo 'lldb-dap OK' || echo 'AVISO: adaptador DAP não encontrado'",
+      "description": "Verificando adaptador DAP (lldb-vscode ou lldb-dap)"
+    },
+    {
+      "type": "shell",
+      "command": "cmake --version 2>&1 && ninja --version 2>&1",
+      "description": "Verificando cmake e ninja"
+    }
+  ],
+  "cleanup_steps": [],
+  "uninstall_steps": [
+    {
+      "type": "shell",
+      "command": "pkg remove -y clang cmake ninja binutils lldb 2>&1 || true",
+      "description": "Removendo clang, cmake, ninja e lldb"
+    }
+  ],
+  "verify_binary": "clang",
+  "verify_command": "clang --version",
+  "run_config": {
+    "run": "clang -o app main.c && ./app",
+    "supports_devices": false,
+    "build_debug": "cmake -DCMAKE_BUILD_TYPE=Debug -GNinja . && ninja",
+    "build_release": "cmake -DCMAKE_BUILD_TYPE=Release -GNinja . && ninja"
+  },
+  "sdk_config": {
+    "new_project_cmd": "mkdir -p $name && cd $name && printf '#include <stdio.h>\\n\\nint main() {\\n    printf(\"Hello, World!\\\\n\");\\n    return 0;\\n}\\n' > main.c && printf 'cmake_minimum_required(VERSION 3.10)\\nproject($name)\\nadd_executable($name main.c)\\n' > CMakeLists.txt",
+    "default_entry_file": "main.c",
+    "file_extensions": ["c", "cpp", "cc", "cxx", "h", "hpp", "hxx"],
+    "sync_command": "cmake -GNinja . && ninja",
+    "sync_trigger_file": "CMakeLists.txt",
+    "format_command": "clang-format -i **/*.c **/*.cpp **/*.h **/*.hpp"
+  },
+  "lsp_config": {
+    "server_binary": "$PREFIX/bin/clangd",
+    "server_args": ["--background-index"],
+    "language_ids": ["c", "cpp"]
+  },
+  "dap_config": {
+    "adapter_binary": "$PREFIX/bin/lldb-vscode",
+    "adapter_args": [],
+    "adapter_id": "lldb",
+    "launch_program": "${workspaceFolder}/app",
+    "build_done_strings": []
+  }
+}

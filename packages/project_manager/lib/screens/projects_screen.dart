@@ -72,75 +72,83 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       ),
       body: Consumer<ProjectManagerProvider>(
         builder: (context, pm, _) {
-          return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
-              child: Text(
-                s.recentProjects,
-                style: GoogleFonts.openSans(
-                  color: cs.onSurface,
-                  fontSize: 26,
-                  fontWeight: FontWeight.w700,
-                ),
+          final titleWidget = Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+            child: Text(
+              s.recentProjects,
+              style: GoogleFonts.openSans(
+                color: cs.onSurface,
+                fontSize: 26,
+                fontWeight: FontWeight.w700,
               ),
             ),
-            Expanded(
-              child: pm.projects.isEmpty && !widget.isSshActive
-                  ? Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.folder_off_outlined,
-                              size: 48, color: cs.outlineVariant),
-                          const SizedBox(height: 12),
-                          Text(
-                            s.noProjects,
-                            style: GoogleFonts.openSans(
-                                color: cs.onSurfaceVariant, fontSize: 15),
-                          ),
-                        ],
-                      ),
-                    )
-                  : widget.isSshActive
-                      // ── SSH mode: show only remote projects ──────────
-                      ? _buildSshList(context, cs, pm)
-                      // ── Local mode: show local projects ──────────────
-                      : ListView(
-                          padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-                          children: List.generate(pm.projects.length, (i) {
-                            final p = pm.projects[i];
-                            final isFirst = i == 0;
-                            final isLast = i == pm.projects.length - 1;
-                            final radius = BorderRadius.vertical(
-                              top: isFirst
-                                  ? const Radius.circular(20)
-                                  : const Radius.circular(4),
-                              bottom: isLast
-                                  ? const Radius.circular(20)
-                                  : const Radius.circular(4),
-                            );
-                            return Padding(
-                              padding: const EdgeInsets.only(bottom: 2),
-                              child: _ProjectTile(
-                                project: p,
-                                borderRadius: radius,
-                                onTap: () {
-                                  pm.openProject(p);
-                                  Navigator.of(context)
-                                      .popUntil((r) => r.isFirst);
-                                },
-                                onDelete: () =>
-                                    _confirmDelete(context, pm, p),
-                              ),
-                            );
-                          }),
+          );
+
+          // Estado vazio — título fixo, não há o que rolar
+          if (pm.projects.isEmpty && !widget.isSshActive) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                titleWidget,
+                Expanded(
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.folder_off_outlined,
+                            size: 48, color: cs.outlineVariant),
+                        const SizedBox(height: 12),
+                        Text(
+                          s.noProjects,
+                          style: GoogleFonts.openSans(
+                              color: cs.onSurfaceVariant, fontSize: 15),
                         ),
-            ),
-       
-          ],
-        );
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            );
+          }
+
+          // SSH mode
+          if (widget.isSshActive) {
+            return _buildSshList(context, cs, pm, titleWidget);
+          }
+
+          // Lista local — título rola com a lista
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+            children: [
+              titleWidget,
+              ...List.generate(pm.projects.length, (i) {
+                final p = pm.projects[i];
+                final isFirst = i == 0;
+                final isLast = i == pm.projects.length - 1;
+                final radius = BorderRadius.vertical(
+                  top: isFirst
+                      ? const Radius.circular(20)
+                      : const Radius.circular(4),
+                  bottom: isLast
+                      ? const Radius.circular(20)
+                      : const Radius.circular(4),
+                );
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 2),
+                  child: _ProjectTile(
+                    project: p,
+                    borderRadius: radius,
+                    onTap: () {
+                      pm.openProject(p);
+                      Navigator.of(context).popUntil((r) => r.isFirst);
+                    },
+                    onDelete: () => _confirmDelete(context, pm, p),
+                  ),
+                );
+              }),
+              const SizedBox(height: 100),
+            ],
+          );
         },
       ),
       extendBody: true,
@@ -168,87 +176,98 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   }
 
   Widget _buildSshList(
-      BuildContext context, ColorScheme cs, ProjectManagerProvider pm) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-          child: Row(
-            children: [
-              Icon(Icons.computer_rounded, size: 16, color: cs.secondary),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'SSH: ${widget.sshHost ?? ""}',
-                  style: GoogleFonts.openSans(
-                    color: cs.secondary,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
+      BuildContext context, ColorScheme cs, ProjectManagerProvider pm,
+      Widget titleWidget) {
+    final sshHeader = Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+      child: Row(
+        children: [
+          Icon(Icons.computer_rounded, size: 16, color: cs.secondary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'SSH: ${widget.sshHost ?? ""}',
+              style: GoogleFonts.openSans(
+                color: cs.secondary,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
               ),
-              if (_refreshing)
-                const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              else if (widget.onRefreshSsh != null)
-                IconButton(
-                  icon: const Icon(Icons.refresh, size: 18),
-                  onPressed: _doRefresh,
-                  tooltip: 'Refresh SSH projects',
-                  visualDensity: VisualDensity.compact,
-                ),
-            ],
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
-        ),
-        Expanded(
-          child: pm.remoteProjects.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.folder_off_outlined,
-                          size: 48, color: cs.outlineVariant),
-                      const SizedBox(height: 12),
-                      Text(
-                        _refreshing ? 'Carregando...' : 'Nenhum projeto remoto encontrado',
-                        style: GoogleFonts.openSans(
-                            color: cs.onSurfaceVariant, fontSize: 15),
-                      ),
-                    ],
+          if (_refreshing)
+            const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          else if (widget.onRefreshSsh != null)
+            IconButton(
+              icon: const Icon(Icons.refresh, size: 18),
+              onPressed: _doRefresh,
+              tooltip: 'Refresh SSH projects',
+              visualDensity: VisualDensity.compact,
+            ),
+        ],
+      ),
+    );
+
+    if (pm.remoteProjects.isEmpty) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          titleWidget,
+          sshHeader,
+          Expanded(
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.folder_off_outlined,
+                      size: 48, color: cs.outlineVariant),
+                  const SizedBox(height: 12),
+                  Text(
+                    _refreshing ? 'Carregando...' : 'Nenhum projeto remoto encontrado',
+                    style: GoogleFonts.openSans(
+                        color: cs.onSurfaceVariant, fontSize: 15),
                   ),
-                )
-              : ListView(
-                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-                  children: List.generate(pm.remoteProjects.length, (i) {
-                    final project = pm.remoteProjects[i];
-                    final isFirst = i == 0;
-                    final isLast = i == pm.remoteProjects.length - 1;
-                    final radius = BorderRadius.vertical(
-                      top: isFirst
-                          ? const Radius.circular(20)
-                          : const Radius.circular(4),
-                      bottom: isLast
-                          ? const Radius.circular(20)
-                          : const Radius.circular(4),
-                    );
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 2),
-                      child: _SshProjectTile(
-                        name: project.name,
-                        borderRadius: radius,
-                        onTap: widget.onSshProjectTap != null
-                            ? () => widget.onSshProjectTap!(project)
-                            : null,
-                      ),
-                    );
-                  }),
-                ),
-        ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+      children: [
+        titleWidget,
+        sshHeader,
+        ...List.generate(pm.remoteProjects.length, (i) {
+          final project = pm.remoteProjects[i];
+          final isFirst = i == 0;
+          final isLast = i == pm.remoteProjects.length - 1;
+          final radius = BorderRadius.vertical(
+            top: isFirst
+                ? const Radius.circular(20)
+                : const Radius.circular(4),
+            bottom: isLast
+                ? const Radius.circular(20)
+                : const Radius.circular(4),
+          );
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 2),
+            child: _SshProjectTile(
+              name: project.name,
+              borderRadius: radius,
+              onTap: widget.onSshProjectTap != null
+                  ? () => widget.onSshProjectTap!(project)
+                  : null,
+            ),
+          );
+        }),
+        const SizedBox(height: 100),
       ],
     );
   }

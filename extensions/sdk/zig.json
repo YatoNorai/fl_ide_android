@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "sdk": "zig",
+  "sdk_version": "latest",
+  "display_name": "Zig",
+  "description": "Zig para Termux no Android ARM64. Inclui o compilador Zig via pkg e zls (Zig Language Server) para autocompletar, diagnósticos e navegação de código.",
+  "package": {
+    "type": "pkg",
+    "arch": "arm64",
+    "size_mb": 80
+  },
+  "package_author": {
+    "name": "Termux / Zig Software Foundation",
+    "github": "https://github.com/termux/termux-packages"
+  },
+  "json_author": {
+    "name": "Yato",
+    "date": "2026-04-19"
+  },
+  "install_steps": [
+    {
+      "type": "shell",
+      "command": "pkg update -y 2>&1 && pkg install -y zig 2>&1",
+      "description": "Instalando Zig via pkg"
+    },
+    {
+      "type": "shell",
+      "command": "zig version 2>&1",
+      "description": "Verificando instalação do Zig"
+    },
+    {
+      "type": "shell",
+      "command": "pkg install -y zls 2>&1 && echo 'OK: zls instalado' || echo 'AVISO: zls não disponível via pkg, tentando compilação'",
+      "description": "Instalando zls (LSP) via pkg"
+    },
+    {
+      "type": "shell",
+      "command": "zls --version 2>&1 && echo 'OK: zls OK' || echo 'AVISO: zls não encontrado'",
+      "description": "Verificando zls"
+    }
+  ],
+  "config_steps": [
+    {
+      "type": "shell",
+      "command": "test -f $PREFIX/bin/zls && echo 'zls OK' || echo 'AVISO: zls não encontrado'",
+      "description": "Verificando zls"
+    },
+    {
+      "type": "shell",
+      "command": "zig version 2>&1",
+      "description": "Verificando Zig"
+    }
+  ],
+  "cleanup_steps": [],
+  "uninstall_steps": [
+    {
+      "type": "shell",
+      "command": "pkg remove -y zig zls 2>&1 || true",
+      "description": "Removendo Zig e zls"
+    }
+  ],
+  "verify_binary": "zig",
+  "verify_command": "zig version",
+  "run_config": {
+    "run": "zig run main.zig",
+    "supports_devices": false,
+    "build_debug": "zig build",
+    "build_release": "zig build -Doptimize=ReleaseFast"
+  },
+  "sdk_config": {
+    "new_project_cmd": "mkdir -p $name && cd $name && zig init && echo 'OK: projeto Zig criado'",
+    "default_entry_file": "src/main.zig",
+    "file_extensions": ["zig", "zon"],
+    "sync_command": null,
+    "sync_trigger_file": null,
+    "format_command": "zig fmt ."
+  },
+  "lsp_config": {
+    "server_binary": "$PREFIX/bin/zls",
+    "server_args": [],
+    "language_ids": ["zig"]
+  }
+}

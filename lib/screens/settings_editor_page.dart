@@ -188,6 +188,34 @@ class EditorSettingsPage extends StatelessWidget {
           ),
           settingsSwitchTile(
             context,
+            title: s.organizeImportsOnSave,
+            subtitle: s.organizeImportsOnSaveSub,
+            value: vm.organizeImportsOnSave,
+            onChanged: vm.setOrganizeImportsOnSave,
+            borderRadius: const BorderRadius.vertical(
+              top: Radius.circular(5),
+              bottom: Radius.circular(5),
+            ),
+            iconBg: Colors.teal,
+            icon: FontAwesomeIcons.arrowsUpDown,
+            infoText: s.organizeImportsOnSaveInfo,
+          ),
+          settingsSwitchTile(
+            context,
+            title: s.fixAllOnSave,
+            subtitle: s.fixAllOnSaveSub,
+            value: vm.fixAllOnSave,
+            onChanged: vm.setFixAllOnSave,
+            borderRadius: const BorderRadius.vertical(
+              top: Radius.circular(5),
+              bottom: Radius.circular(5),
+            ),
+            iconBg: Colors.green,
+            icon: FontAwesomeIcons.wandMagicSparkles,
+            infoText: s.fixAllOnSaveInfo,
+          ),
+          settingsSwitchTile(
+            context,
             title: s.stickyScroll,
             subtitle: s.stickyScrollSub,
             value: vm.stickyScroll,
@@ -388,11 +416,25 @@ class EditorSettingsPage extends StatelessWidget {
             onChanged: vm.setReadOnly,
             borderRadius: const BorderRadius.vertical(
               top: Radius.circular(5),
-              bottom: Radius.circular(30),
+              bottom: Radius.circular(5),
             ),
             iconBg: Colors.grey,
             icon: FontAwesomeIcons.lock,
             infoText: s.readOnlyInfo,
+          ),
+          settingsSwitchTile(
+            context,
+            title: s.immersiveScroll,
+            subtitle: s.immersiveScrollSub,
+            value: vm.immersiveScroll,
+            onChanged: vm.setImmersiveScroll,
+            borderRadius: const BorderRadius.vertical(
+              top: Radius.circular(5),
+              bottom: Radius.circular(30),
+            ),
+            iconBg: Colors.indigo,
+            icon: FontAwesomeIcons.arrowsUpDown,
+            infoText: s.immersiveScrollInfo,
           ),
           const SizedBox(height: 32),
         ],
@@ -461,7 +503,7 @@ class EditorSettingsPage extends StatelessWidget {
                       },
                     );
                   }).toList(),
-                
+
               );
             },
           );
@@ -470,3 +512,4 @@ class EditorSettingsPage extends StatelessWidget {
     );
   }
 }
+

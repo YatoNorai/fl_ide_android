@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "sdk": "ruby",
+  "sdk_version": "latest",
+  "display_name": "Ruby",
+  "description": "Ruby para Termux no Android ARM64. Inclui o interpretador Ruby via pkg e Solargraph (LSP) instalado via gem para autocompletar, documentação e diagnósticos.",
+  "package": {
+    "type": "pkg",
+    "arch": "arm64",
+    "size_mb": 80
+  },
+  "package_author": {
+    "name": "Termux / Ruby Team",
+    "github": "https://github.com/termux/termux-packages"
+  },
+  "json_author": {
+    "name": "Yato",
+    "date": "2026-04-19"
+  },
+  "install_steps": [
+    {
+      "type": "shell",
+      "command": "pkg update -y 2>&1 && pkg install -y ruby 2>&1",
+      "description": "Instalando Ruby via pkg"
+    },
+    {
+      "type": "shell",
+      "command": "ruby --version 2>&1 && gem --version 2>&1",
+      "description": "Verificando instalação do Ruby"
+    },
+    {
+      "type": "shell",
+      "command": "gem install solargraph 2>&1 && echo 'OK: Solargraph instalado'",
+      "description": "Instalando Solargraph (LSP) via gem"
+    },
+    {
+      "type": "shell",
+      "command": "solargraph version 2>&1 && echo 'OK: Solargraph OK'",
+      "description": "Verificando Solargraph"
+    }
+  ],
+  "config_steps": [
+    {
+      "type": "shell",
+      "command": "test -f $PREFIX/bin/solargraph && echo 'solargraph OK' || echo 'AVISO: solargraph não encontrado em $PREFIX/bin'",
+      "description": "Verificando solargraph"
+    },
+    {
+      "type": "shell",
+      "command": "gem list | grep solargraph 2>&1",
+      "description": "Listando gems relacionados ao Solargraph"
+    }
+  ],
+  "cleanup_steps": [],
+  "uninstall_steps": [
+    {
+      "type": "shell",
+      "command": "gem uninstall -ax solargraph 2>&1 || true",
+      "description": "Removendo Solargraph"
+    },
+    {
+      "type": "shell",
+      "command": "pkg remove -y ruby 2>&1 || true",
+      "description": "Removendo Ruby"
+    }
+  ],
+  "verify_binary": "ruby",
+  "verify_command": "ruby --version",
+  "run_config": {
+    "run": "ruby main.rb",
+    "supports_devices": false,
+    "build_debug": null,
+    "build_release": null
+  },
+  "sdk_config": {
+    "new_project_cmd": "mkdir -p $name && cd $name && printf '# Hello, World!\\nputs \"Hello, World!\"\\n' > main.rb",
+    "default_entry_file": "main.rb",
+    "file_extensions": ["rb", "rbw", "gemspec"],
+    "sync_command": "bundle install",
+    "sync_trigger_file": "Gemfile",
+    "format_command": null
+  },
+  "lsp_config": {
+    "server_binary": "$PREFIX/bin/solargraph",
+    "server_args": ["stdio"],
+    "language_ids": ["ruby"]
+  }
+}

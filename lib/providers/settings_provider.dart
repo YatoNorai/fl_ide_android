@@ -33,12 +33,14 @@ class SettingsProvider extends ChangeNotifier {
   static const _kUseAmoled         = 'useAmoled';
   static const _kUseDynamicColors  = 'useDynamicColors';
   static const _kLiquidGlass       = 'liquidGlass';
+  static const _kImmersiveScroll   = 'immersiveScroll';
 
   bool _followSystemTheme  = true;
   bool _useDarkMode        = false;
   bool _useAmoled          = false;
   bool _useDynamicColors   = true;
   bool _liquidGlass        = false;
+  bool _immersiveScroll    = true;
 
   // ── Editor ────────────────────────────────────────────────────────────────
   static const _kFontSize                 = 'ed_fontSize';
@@ -47,6 +49,8 @@ class SettingsProvider extends ChangeNotifier {
   static const _kSymbolPairAutoClose      = 'ed_symbolPairAutoClose';
   static const _kAutoCompletion           = 'ed_autoCompletion';
   static const _kFormatOnSave             = 'ed_formatOnSave';
+  static const _kOrganizeImportsOnSave    = 'ed_organizeImportsOnSave';
+  static const _kFixAllOnSave             = 'ed_fixAllOnSave';
   static const _kStickyScroll             = 'ed_stickyScroll';
   static const _kTabSize                  = 'ed_tabSize';
   static const _kUseSpaces               = 'ed_useSpaces';
@@ -73,6 +77,8 @@ class SettingsProvider extends ChangeNotifier {
   bool   _symbolPairAutoClose    = true;
   bool   _autoCompletion         = true;
   bool   _formatOnSave           = false;
+  bool   _organizeImportsOnSave  = false;
+  bool   _fixAllOnSave           = false;
   bool   _stickyScroll           = false;
   int    _tabSize                = 4;
   bool   _useSpaces              = true;
@@ -119,6 +125,7 @@ class SettingsProvider extends ChangeNotifier {
   bool         get useAmoled          => _useAmoled;
   bool         get useDynamicColors   => _useDynamicColors;
   bool         get liquidGlass        => _liquidGlass;
+  bool         get immersiveScroll    => _immersiveScroll;
 
   // ── Getters: Editor ───────────────────────────────────────────────────────
   double get fontSize               => _fontSize;
@@ -127,6 +134,8 @@ class SettingsProvider extends ChangeNotifier {
   bool   get symbolPairAutoClose    => _symbolPairAutoClose;
   bool   get autoCompletion         => _autoCompletion;
   bool   get formatOnSave           => _formatOnSave;
+  bool   get organizeImportsOnSave  => _organizeImportsOnSave;
+  bool   get fixAllOnSave           => _fixAllOnSave;
   bool   get stickyScroll           => _stickyScroll;
   int    get tabSize                => _tabSize;
   bool   get useSpaces              => _useSpaces;
@@ -147,9 +156,67 @@ class SettingsProvider extends ChangeNotifier {
   bool   get readOnly              => _readOnly;
   String get fontFamily            => _fontFamily;
 
+  /// A snapshot of all editor-config fields used by [applyToProps] plus
+  /// [fontSize] / [fontFamily].  Returned as a record so [context.select]
+  /// can compare it by value and skip rebuilds when unrelated settings change.
+  ({
+    double fontSize,
+    String fontFamily,
+    bool wordWrap,
+    bool autoIndent,
+    bool symbolPairAutoClose,
+    bool autoCompletion,
+    bool formatOnSave,
+    bool organizeImportsOnSave,
+    bool fixAllOnSave,
+    bool stickyScroll,
+    int tabSize,
+    bool useSpaces,
+    int cursorBlinkMs,
+    bool showLineNumbers,
+    bool fixedGutter,
+    bool showMinimap,
+    bool showLightbulb,
+    bool showFoldArrows,
+    bool showBlockLines,
+    bool highlightCurrentLine,
+    bool highlightActiveBlock,
+    String lineHighlightStyle,
+    bool showDiagnosticIndicators,
+    bool showEditorStatusBar,
+    bool readOnly,
+  }) get editorConfigSnapshot => (
+    fontSize:                _fontSize,
+    fontFamily:              _fontFamily,
+    wordWrap:                _wordWrap,
+    autoIndent:              _autoIndent,
+    symbolPairAutoClose:     _symbolPairAutoClose,
+    autoCompletion:          _autoCompletion,
+    formatOnSave:            _formatOnSave,
+    organizeImportsOnSave:   _organizeImportsOnSave,
+    fixAllOnSave:            _fixAllOnSave,
+    stickyScroll:            _stickyScroll,
+    tabSize:                 _tabSize,
+    useSpaces:               _useSpaces,
+    cursorBlinkMs:           _cursorBlinkMs,
+    showLineNumbers:         _showLineNumbers,
+    fixedGutter:             _fixedGutter,
+    showMinimap:             _showMinimap,
+    showLightbulb:           _showLightbulb,
+    showFoldArrows:          _showFoldArrows,
+    showBlockLines:          _showBlockLines,
+    highlightCurrentLine:    _highlightCurrentLine,
+    highlightActiveBlock:    _highlightActiveBlock,
+    lineHighlightStyle:      _lineHighlightStyle,
+    showDiagnosticIndicators: _showDiagnosticIndicators,
+    showEditorStatusBar:     _showEditorStatusBar,
+    readOnly:                _readOnly,
+  );
+
   // ── Getters: Run & Debug ──────────────────────────────────────────────────
   Map<String, String> get lspPaths => Map.unmodifiable(_lspPaths);
   String lspPathFor(String ext) => _lspPaths[ext.toLowerCase()] ?? '';
+  Map<String, String> get debugPlatforms => Map.unmodifiable(_debugPlatforms);
   /// Returns the saved debug platform name for a given SDK type name, or null.
   String? debugPlatformFor(String sdkTypeName) => _debugPlatforms[sdkTypeName];
 
@@ -203,6 +270,7 @@ class SettingsProvider extends ChangeNotifier {
     _useAmoled          = p.getBool(_kUseAmoled)         ?? false;
     _useDynamicColors   = p.getBool(_kUseDynamicColors)  ?? true;
     _liquidGlass        = p.getBool(_kLiquidGlass)       ?? false;
+    _immersiveScroll    = p.getBool(_kImmersiveScroll)   ?? true;
 
     _fontSize               = p.getDouble(_kFontSize)                ?? 14.0;
     _wordWrap               = p.getBool(_kWordWrap)                  ?? false;
@@ -210,6 +278,8 @@ class SettingsProvider extends ChangeNotifier {
     _symbolPairAutoClose    = p.getBool(_kSymbolPairAutoClose)       ?? true;
     _autoCompletion         = p.getBool(_kAutoCompletion)            ?? true;
     _formatOnSave           = p.getBool(_kFormatOnSave)              ?? false;
+    _organizeImportsOnSave  = p.getBool(_kOrganizeImportsOnSave)     ?? false;
+    _fixAllOnSave           = p.getBool(_kFixAllOnSave)              ?? false;
     _stickyScroll           = p.getBool(_kStickyScroll)              ?? false;
     _tabSize                = p.getInt(_kTabSize)                    ?? 4;
     _useSpaces              = p.getBool(_kUseSpaces)                 ?? true;
@@ -257,6 +327,9 @@ class SettingsProvider extends ChangeNotifier {
     _sshKeyPath      = p.getString(_kSshKeyPath)            ?? '';
     _sshUseKey       = p.getBool(_kSshUseKey)               ?? false;
     _sshProjectsPath = p.getString(_kSshProjectsPath)       ?? '';
+
+    _remoteGitBuild = p.getBool(_kRemoteGitBuild)  ?? false;
+    _githubToken    = p.getString(_kGithubToken)    ?? '';
   }
 
   // ── Language setters ──────────────────────────────────────────────────────
@@ -324,6 +397,13 @@ class SettingsProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> setImmersiveScroll(bool val) async {
+    _immersiveScroll = val;
+    final p = await _getPrefs();
+    await p.setBool(_kImmersiveScroll, val);
+    notifyListeners();
+  }
+
   // ── Editor setters ────────────────────────────────────────────────────────
   Future<void> setFontSize(double val) async {
     _fontSize = val;
@@ -364,6 +444,20 @@ class SettingsProvider extends ChangeNotifier {
     _formatOnSave = val;
     final p = await _getPrefs();
     await p.setBool(_kFormatOnSave, val);
+    notifyListeners();
+  }
+
+  Future<void> setOrganizeImportsOnSave(bool val) async {
+    _organizeImportsOnSave = val;
+    final p = await _getPrefs();
+    await p.setBool(_kOrganizeImportsOnSave, val);
+    notifyListeners();
+  }
+
+  Future<void> setFixAllOnSave(bool val) async {
+    _fixAllOnSave = val;
+    final p = await _getPrefs();
+    await p.setBool(_kFixAllOnSave, val);
     notifyListeners();
   }
 
@@ -520,13 +614,14 @@ class SettingsProvider extends ChangeNotifier {
   }
 
   // ── Apply to EditorProps ──────────────────────────────────────────────────
-  /// Mutates [props] in-place with the current editor settings.
   void applyToProps(EditorProps props) {
     props.wordWrap               = _wordWrap;
     props.autoIndent             = _autoIndent;
     props.symbolPairAutoCompletion = _symbolPairAutoClose;
     props.autoCompletion         = _autoCompletion;
     props.formatOnSave           = _formatOnSave;
+    props.organizeImportsOnSave  = _organizeImportsOnSave;
+    props.fixAllOnSave           = _fixAllOnSave;
     props.stickyScroll           = _stickyScroll;
     props.tabSize                = _tabSize;
     props.useSpacesForTabs       = _useSpaces;
@@ -635,6 +730,30 @@ class SettingsProvider extends ChangeNotifier {
     _sshProjectsPath = v;
     final p = await _getPrefs();
     await p.setString(_kSshProjectsPath, v);
+    notifyListeners();
+  }
+
+  // ── Remote Git Build ──────────────────────────────────────────────────────
+  static const _kRemoteGitBuild = 'git_remoteBuild';
+  static const _kGithubToken   = 'git_githubToken';
+
+  bool   _remoteGitBuild = false;
+  String _githubToken   = '';
+
+  bool   get remoteGitBuild => _remoteGitBuild;
+  String get githubToken    => _githubToken;
+
+  Future<void> setRemoteGitBuild(bool v) async {
+    _remoteGitBuild = v;
+    final p = await _getPrefs();
+    await p.setBool(_kRemoteGitBuild, v);
+    notifyListeners();
+  }
+
+  Future<void> setGithubToken(String v) async {
+    _githubToken = v.trim();
+    final p = await _getPrefs();
+    await p.setString(_kGithubToken, v.trim());
     notifyListeners();
   }
 }

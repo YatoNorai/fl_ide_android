@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "sdk": "htmlCss",
+  "sdk_version": "latest",
+  "display_name": "HTML / CSS",
+  "description": "HTML, CSS e SCSS para Termux no Android ARM64. Inclui vscode-langservers-extracted (LSP) instalado via npm para autocompletar, validação e diagnósticos.",
+  "package": {
+    "type": "npm",
+    "arch": "arm64",
+    "size_mb": 50
+  },
+  "package_author": {
+    "name": "Microsoft / vscode-langservers",
+    "github": "https://github.com/hrsh7th/vscode-langservers-extracted"
+  },
+  "json_author": {
+    "name": "Yato",
+    "date": "2026-04-19"
+  },
+  "install_steps": [
+    {
+      "type": "shell",
+      "command": "pkg update -y 2>&1 && pkg install -y nodejs 2>&1",
+      "description": "Instalando Node.js via pkg"
+    },
+    {
+      "type": "shell",
+      "command": "node --version 2>&1 && npm --version 2>&1",
+      "description": "Verificando Node.js e npm"
+    },
+    {
+      "type": "shell",
+      "command": "npm install -g vscode-langservers-extracted 2>&1 && echo 'OK: vscode-langservers instalado'",
+      "description": "Instalando vscode-langservers-extracted via npm"
+    },
+    {
+      "type": "shell",
+      "command": "node $(npm root -g)/vscode-langservers-extracted/bin/vscode-html-language-server.js --version 2>&1 && echo 'OK: HTML LSP OK'",
+      "description": "Verificando HTML Language Server"
+    },
+    {
+      "type": "shell",
+      "command": "node $(npm root -g)/vscode-langservers-extracted/bin/vscode-css-language-server.js --version 2>&1 && echo 'OK: CSS LSP OK'",
+      "description": "Verificando CSS Language Server"
+    }
+  ],
+  "config_steps": [
+    {
+      "type": "shell",
+      "command": "test -d $(npm root -g 2>/dev/null)/vscode-langservers-extracted && echo 'vscode-langservers OK' || echo 'AVISO: vscode-langservers não encontrado'",
+      "description": "Verificando vscode-langservers-extracted"
+    }
+  ],
+  "cleanup_steps": [],
+  "uninstall_steps": [
+    {
+      "type": "shell",
+      "command": "npm uninstall -g vscode-langservers-extracted 2>&1 || true",
+      "description": "Removendo vscode-langservers-extracted"
+    }
+  ],
+  "verify_binary": "node",
+  "verify_command": "node --version",
+  "run_config": {
+    "run": "python3 -m http.server 8080",
+    "supports_devices": false,
+    "build_debug": null,
+    "build_release": null
+  },
+  "sdk_config": {
+    "new_project_cmd": "mkdir -p $name && cd $name && printf '<!DOCTYPE html>\\n<html lang=\"en\">\\n<head>\\n  <meta charset=\"UTF-8\">\\n  <title>$name</title>\\n  <link rel=\"stylesheet\" href=\"style.css\">\\n</head>\\n<body>\\n  <h1>Hello, World!</h1>\\n  <script src=\"script.js\"></script>\\n</body>\\n</html>\\n' > index.html && printf 'body { font-family: sans-serif; }\\n' > style.css && printf 'console.log(\"Hello!\");\\n' > script.js",
+    "default_entry_file": "index.html",
+    "file_extensions": ["html", "htm", "css", "scss", "less", "svg"],
+    "sync_command": null,
+    "sync_trigger_file": null,
+    "format_command": null
+  },
+  "lsp_config": {
+    "server_binary": "$PREFIX/bin/node",
+    "server_args": ["$(npm root -g)/vscode-langservers-extracted/bin/vscode-html-language-server.js", "--stdio"],
+    "language_ids": ["html", "css", "scss", "less"]
+  }
+}

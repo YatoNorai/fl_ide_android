@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "sdk": "bash",
+  "sdk_version": "latest",
+  "display_name": "Bash / Shell",
+  "description": "Scripting Bash/Shell para Termux no Android ARM64. Inclui bash via pkg e bash-language-server (LSP) instalado via npm para autocompletar, diagnósticos e hover de documentação.",
+  "package": {
+    "type": "pkg",
+    "arch": "arm64",
+    "size_mb": 20
+  },
+  "package_author": {
+    "name": "Termux / GNU Bash",
+    "github": "https://github.com/termux/termux-packages"
+  },
+  "json_author": {
+    "name": "Yato",
+    "date": "2026-04-19"
+  },
+  "install_steps": [
+    {
+      "type": "shell",
+      "command": "pkg update -y 2>&1 && pkg install -y bash 2>&1",
+      "description": "Instalando bash via pkg"
+    },
+    {
+      "type": "shell",
+      "command": "bash --version 2>&1",
+      "description": "Verificando instalação do bash"
+    },
+    {
+      "type": "shell",
+      "command": "pkg install -y nodejs 2>&1 || true",
+      "description": "Instalando Node.js (necessário para bash-language-server)"
+    },
+    {
+      "type": "shell",
+      "command": "npm install -g bash-language-server 2>&1 && echo 'OK: bash-language-server instalado'",
+      "description": "Instalando bash-language-server via npm"
+    },
+    {
+      "type": "shell",
+      "command": "node $(npm root -g)/bash-language-server/out/cli.js --version 2>&1 && echo 'OK: bash-language-server OK'",
+      "description": "Verificando bash-language-server"
+    }
+  ],
+  "config_steps": [
+    {
+      "type": "shell",
+      "command": "test -d $(npm root -g 2>/dev/null)/bash-language-server && echo 'bash-language-server OK' || echo 'AVISO: bash-language-server não encontrado'",
+      "description": "Verificando bash-language-server"
+    }
+  ],
+  "cleanup_steps": [],
+  "uninstall_steps": [
+    {
+      "type": "shell",
+      "command": "npm uninstall -g bash-language-server 2>&1 || true",
+      "description": "Removendo bash-language-server"
+    }
+  ],
+  "verify_binary": "bash",
+  "verify_command": "bash --version",
+  "run_config": {
+    "run": "bash main.sh",
+    "supports_devices": false,
+    "build_debug": null,
+    "build_release": null
+  },
+  "sdk_config": {
+    "new_project_cmd": "mkdir -p $name && cd $name && printf '#!/data/data/com.termux/files/usr/bin/bash\\necho \"Hello, World!\"\\n' > main.sh && chmod +x main.sh",
+    "default_entry_file": "main.sh",
+    "file_extensions": ["sh", "bash", "zsh"],
+    "sync_command": null,
+    "sync_trigger_file": null,
+    "format_command": null
+  },
+  "lsp_config": {
+    "server_binary": "$PREFIX/bin/node",
+    "server_args": ["$(npm root -g)/bash-language-server/out/cli.js", "start"],
+    "language_ids": ["shellscript", "bash"]
+  }
+}
