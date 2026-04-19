@@ -3,7 +3,7 @@
   "sdk": "haskell",
   "sdk_version": "latest",
   "display_name": "Haskell",
-  "description": "Haskell para Termux no Android ARM64. Inclui GHC e cabal via pkg, e HLS (Haskell Language Server) para autocompletar e diagnósticos. Requer ~700 MB de espaço livre.",
+  "description": "Haskell para Termux no Android ARM64. Inclui GHC e cabal via pkg. Nota: o GHC 9.12 do Termux ainda não é suportado pelo HLS — LSP disponível quando HLS for compatível.",
   "package": {
     "type": "pkg",
     "arch": "arm64",
@@ -20,13 +20,23 @@
   "install_steps": [
     {
       "type": "shell",
-      "command": "pkg update -y 2>&1 && pkg install -y ghc cabal-install 2>&1 && echo 'OK: GHC e cabal instalados'",
-      "description": "Instalando GHC e cabal via pkg"
+      "command": "pkg update -y 2>&1 && pkg install -y ghc 2>&1 && echo 'OK: GHC instalado'",
+      "description": "Instalando GHC (compilador Haskell) via pkg"
     },
     {
       "type": "shell",
-      "command": "ghc --version 2>&1 && cabal --version 2>&1",
-      "description": "Verificando GHC e cabal"
+      "command": "ghc --version 2>&1",
+      "description": "Verificando GHC"
+    },
+    {
+      "type": "shell",
+      "command": "pkg install -y cabal-install 2>&1 && echo 'OK: cabal instalado'",
+      "description": "Instalando cabal (gerenciador de pacotes)"
+    },
+    {
+      "type": "shell",
+      "command": "cabal --version 2>&1",
+      "description": "Verificando cabal"
     },
     {
       "type": "shell",
@@ -35,13 +45,8 @@
     },
     {
       "type": "shell",
-      "command": "pkg install -y haskell-language-server 2>&1 && echo 'OK: HLS instalado via pkg' || echo 'AVISO: HLS não disponível via pkg — instalando via cabal (pode demorar vários minutos)'",
-      "description": "Tentando instalar HLS via pkg"
-    },
-    {
-      "type": "shell",
-      "command": "test -f $PREFIX/bin/haskell-language-server-wrapper && echo 'HLS OK' || (cabal install haskell-language-server --overwrite-policy=always 2>&1 && echo 'OK: HLS instalado via cabal')",
-      "description": "Verificando HLS ou instalando via cabal como fallback"
+      "command": "GHC_VER=$(ghc --numeric-version 2>/dev/null) && echo \"GHC versão instalada: $GHC_VER\" && echo 'NOTA: HLS requer GHC <= 9.10.x. O Termux fornece GHC 9.12.x, que ainda não é suportado pelo haskell-language-server. O LSP ficará disponível quando o HLS for atualizado. Use runghc/cabal para rodar projetos normalmente.'",
+      "description": "Informação sobre compatibilidade HLS"
     },
     {
       "type": "shell",
@@ -52,21 +57,21 @@
   "config_steps": [
     {
       "type": "shell",
-      "command": "test -f $PREFIX/bin/haskell-language-server-wrapper && echo 'HLS (pkg) OK' || test -f $HOME/.cabal/bin/haskell-language-server-wrapper && echo 'HLS (cabal) OK' || echo 'AVISO: HLS não encontrado'",
-      "description": "Verificando HLS"
+      "command": "ghc --version 2>&1 && cabal --version 2>&1",
+      "description": "Verificando GHC e cabal"
     },
     {
       "type": "shell",
-      "command": "ghc --version 2>&1",
-      "description": "Verificando GHC"
+      "command": "echo 'Haskell pronto. HLS indisponível para GHC 9.12 — aguarde atualização do HLS.'",
+      "description": "Status da instalação"
     }
   ],
   "cleanup_steps": [],
   "uninstall_steps": [
     {
       "type": "shell",
-      "command": "pkg remove -y haskell-language-server ghc cabal-install 2>&1 || true",
-      "description": "Removendo HLS, GHC e cabal via pkg"
+      "command": "pkg remove -y ghc cabal-install 2>&1 || true",
+      "description": "Removendo GHC e cabal"
     },
     {
       "type": "shell",
@@ -96,7 +101,7 @@
     "format_command": null
   },
   "lsp_config": {
-    "server_binary": "$PREFIX/bin/haskell-language-server-wrapper",
+    "server_binary": "$HOME/.cabal/bin/haskell-language-server-wrapper",
     "server_args": ["--lsp"],
     "language_ids": ["haskell"]
   }

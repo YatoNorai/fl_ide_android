@@ -2123,6 +2123,7 @@ class _DrawerContent extends StatefulWidget {
 
 class _DrawerContentState extends State<_DrawerContent> {
   bool _showGit = false;
+  GitProvider? _git;
 
   @override
   void initState() {
@@ -2130,7 +2131,8 @@ class _DrawerContentState extends State<_DrawerContent> {
     // Wire git-init → file tree refresh so .git dir stays hidden after init.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      context.read<GitProvider>().onTreeRefreshNeeded = () {
+      _git = context.read<GitProvider>();
+      _git!.onTreeRefreshNeeded = () {
         if (mounted) context.read<EditorProvider>().loadProject(widget.project.path);
       };
     });
@@ -2138,8 +2140,8 @@ class _DrawerContentState extends State<_DrawerContent> {
 
   @override
   void dispose() {
-    // Clear callback to avoid dangling reference after drawer is destroyed.
-    try { context.read<GitProvider>().onTreeRefreshNeeded = null; } catch (_) {}
+    // Use saved reference — context is deactivated at this point.
+    _git?.onTreeRefreshNeeded = null;
     super.dispose();
   }
 

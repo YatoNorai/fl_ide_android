@@ -3,7 +3,7 @@
   "sdk": "ruby",
   "sdk_version": "latest",
   "display_name": "Ruby",
-  "description": "Ruby para Termux no Android ARM64. Inclui o interpretador Ruby via pkg e Solargraph (LSP) instalado via gem para autocompletar, documentação e diagnósticos.",
+  "description": "Ruby para Termux no Android ARM64. Inclui o interpretador Ruby via pkg e Solargraph (LSP) instalado via gem. Usa libxml2/libxslt do sistema para evitar falhas de compilação do nokogiri.",
   "package": {
     "type": "pkg",
     "arch": "arm64",
@@ -20,13 +20,18 @@
   "install_steps": [
     {
       "type": "shell",
-      "command": "pkg update -y 2>&1 && pkg install -y ruby clang make binutils libffi 2>&1",
-      "description": "Instalando Ruby e ferramentas de build (necessárias para gems nativas)"
+      "command": "pkg update -y 2>&1 && pkg install -y ruby clang make binutils libxml2 libxslt pkg-config 2>&1 && echo 'OK: Ruby e dependências de build instalados'",
+      "description": "Instalando Ruby e bibliotecas nativas (libxml2, libxslt) para gems"
     },
     {
       "type": "shell",
       "command": "ruby --version 2>&1 && gem --version 2>&1",
       "description": "Verificando instalação do Ruby"
+    },
+    {
+      "type": "shell",
+      "command": "gem install nokogiri --no-document -- --use-system-libraries 2>&1 && echo 'OK: nokogiri instalado com system libraries'",
+      "description": "Instalando nokogiri usando bibliotecas do sistema (evita falha de compilação)"
     },
     {
       "type": "shell",
@@ -55,8 +60,8 @@
   "uninstall_steps": [
     {
       "type": "shell",
-      "command": "gem uninstall -ax solargraph 2>&1 || true",
-      "description": "Removendo Solargraph"
+      "command": "gem uninstall -ax solargraph nokogiri 2>&1 || true",
+      "description": "Removendo Solargraph e nokogiri"
     },
     {
       "type": "shell",

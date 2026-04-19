@@ -85,27 +85,14 @@ Future<T?> showThemedDialog<T>({
           statusBarBrightness: isDark ? Brightness.dark : Brightness.light,
         ),
         child: SizedBox.expand(
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              // ── Backdrop blur + scrim ──────────────────────────────────────
-              Positioned.fill(
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
-                  child: GestureDetector(
-                    onTap: barrierDismissible
-                        ? () => Navigator.of(dialogContext).pop()
-                        : null,
-                    behavior: HitTestBehavior.opaque,
-                    child: ColoredBox(
-                      color: Colors.black.withValues(alpha: 0.35),
-                    ),
-                  ),
-                ),
-              ),
-
-              // ── Card ──────────────────────────────────────────────────────
-              Center(
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+            child: GestureDetector(
+              onTap: barrierDismissible
+                  ? () => Navigator.of(dialogContext).pop()
+                  : null,
+              behavior: HitTestBehavior.opaque,
+              child:  Center(
                 child: GestureDetector(
                   onTap: () {},
                   child: Material(
@@ -190,7 +177,7 @@ Future<T?> showThemedDialog<T>({
                   ),
                 ),
               ),
-            ],
+            ),
           ),
         ),
       );

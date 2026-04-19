@@ -3,15 +3,15 @@
   "sdk": "r",
   "sdk_version": "latest",
   "display_name": "R",
-  "description": "R para ciência de dados no Termux Android ARM64. Inclui o interpretador R via pkg e r-languageserver instalado via install.packages() para autocompletar e diagnósticos.",
+  "description": "R para ciência de dados no Termux Android ARM64. Inclui o interpretador R via tur-repo e r-languageserver instalado via install.packages() para autocompletar e diagnósticos.",
   "package": {
     "type": "pkg",
     "arch": "arm64",
     "size_mb": 120
   },
   "package_author": {
-    "name": "Termux / R Project",
-    "github": "https://github.com/termux/termux-packages"
+    "name": "Termux User Repository / R Project",
+    "github": "https://github.com/termux-user-repository/tur"
   },
   "json_author": {
     "name": "Yato",
@@ -20,8 +20,13 @@
   "install_steps": [
     {
       "type": "shell",
-      "command": "pkg update -y 2>&1 && pkg install -y r 2>&1",
-      "description": "Instalando R via pkg"
+      "command": "pkg update -y 2>&1 && pkg install -y tur-repo 2>&1 && echo 'OK: tur-repo adicionado'",
+      "description": "Adicionando Termux User Repository (necessário para R)"
+    },
+    {
+      "type": "shell",
+      "command": "pkg update -y 2>&1 && pkg install -y r-base 2>&1 && echo 'OK: R instalado'",
+      "description": "Instalando R via tur-repo"
     },
     {
       "type": "shell",
@@ -55,7 +60,7 @@
     },
     {
       "type": "shell",
-      "command": "pkg remove -y r 2>&1 || true",
+      "command": "pkg remove -y r-base 2>&1 || true",
       "description": "Removendo R"
     }
   ],

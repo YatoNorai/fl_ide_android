@@ -3,15 +3,15 @@
   "sdk": "csharp",
   "sdk_version": "latest",
   "display_name": "C# (.NET)",
-  "description": "C# e .NET para Termux no Android ARM64. Inclui o .NET SDK via instalação manual e csharp-ls (LSP) via dotnet tool para autocompletar e diagnósticos.",
+  "description": "C# e .NET para Termux no Android ARM64. Instala via tur-repo (pkg) ou dotnet-install.sh oficial da Microsoft como fallback. LSP: csharp-ls via dotnet tool.",
   "package": {
-    "type": "manual",
+    "type": "pkg",
     "arch": "arm64",
     "size_mb": 400
   },
   "package_author": {
     "name": "Microsoft / .NET Foundation",
-    "github": "https://github.com/nickcoutsos/dotnet-termux"
+    "github": "https://github.com/termux-user-repository/tur"
   },
   "json_author": {
     "name": "Yato",
@@ -20,39 +20,44 @@
   "install_steps": [
     {
       "type": "shell",
-      "command": "pkg update -y 2>&1 && pkg install -y curl 2>&1",
-      "description": "Instalando dependências"
+      "command": "pkg update -y 2>&1 && pkg install -y tur-repo 2>&1 && pkg update -y 2>&1 && echo 'OK: tur-repo adicionado'",
+      "description": "Adicionando Termux User Repository (tur-repo)"
     },
     {
       "type": "shell",
-      "command": "echo \"Baixando .NET SDK ARM64...\" && curl -L \"https://github.com/termux-user-repository/dotnet-packages/releases/latest/download/dotnet-sdk-arm64.tar.gz\" -o $TMPDIR/dotnet.tar.gz 2>&1 && mkdir -p $HOME/.dotnet && tar -xzf $TMPDIR/dotnet.tar.gz -C $HOME/.dotnet 2>&1 && rm $TMPDIR/dotnet.tar.gz && echo 'OK: .NET SDK extraído'",
-      "description": "Baixando e instalando .NET SDK ARM64"
+      "command": "pkg install -y dotnet-sdk-8 2>&1 && echo 'OK: .NET SDK instalado via pkg' || pkg install -y dotnet-sdk-9 2>&1 && echo 'OK: .NET SDK 9 instalado via pkg' || echo 'AVISO: dotnet não encontrado no pkg — será instalado via script oficial'",
+      "description": "Instalando .NET SDK via tur-repo (dotnet-sdk-8 ou dotnet-sdk-9)"
     },
     {
       "type": "shell",
-      "command": "grep -qxF 'export DOTNET_ROOT=\"$HOME/.dotnet\"' $HOME/.bashrc || echo 'export DOTNET_ROOT=\"$HOME/.dotnet\"' >> $HOME/.bashrc; grep -qxF 'export PATH=\"$PATH:$HOME/.dotnet:$HOME/.dotnet/tools\"' $HOME/.bashrc || echo 'export PATH=\"$PATH:$HOME/.dotnet:$HOME/.dotnet/tools\"' >> $HOME/.bashrc",
-      "description": "Adicionando DOTNET_ROOT e paths ao .bashrc"
+      "command": "if ! command -v dotnet >/dev/null 2>&1; then mkdir -p $HOME/.dotnet && curl -fsSL https://raw.githubusercontent.com/dotnet/install-scripts/main/src/dotnet-install.sh -o $TMPDIR/dotnet-install.sh 2>&1 && chmod +x $TMPDIR/dotnet-install.sh && $TMPDIR/dotnet-install.sh --channel 8.0 --install-dir $HOME/.dotnet --architecture arm64 --no-path 2>&1 && rm $TMPDIR/dotnet-install.sh && echo 'OK: .NET SDK instalado via dotnet-install.sh'; else echo 'dotnet já instalado via pkg, pulando download'; fi",
+      "description": "Fallback: dotnet-install.sh (GitHub) caso pkg não tenha dotnet"
     },
     {
       "type": "shell",
-      "command": "export DOTNET_ROOT=$HOME/.dotnet && export PATH=$PATH:$HOME/.dotnet && dotnet --version 2>&1 && echo 'OK: dotnet OK'",
+      "command": "if ! command -v dotnet >/dev/null 2>&1; then export PATH=$PATH:$HOME/.dotnet; fi && dotnet --version 2>&1 && echo 'OK: dotnet funcionando'",
       "description": "Verificando .NET SDK"
     },
     {
       "type": "shell",
-      "command": "export DOTNET_ROOT=$HOME/.dotnet && export PATH=$PATH:$HOME/.dotnet:$HOME/.dotnet/tools && dotnet tool install --global csharp-ls 2>&1 && echo 'OK: csharp-ls instalado'",
+      "command": "grep -qxF 'export PATH=\"$PATH:$HOME/.dotnet:$HOME/.dotnet/tools\"' $HOME/.bashrc || echo 'export PATH=\"$PATH:$HOME/.dotnet:$HOME/.dotnet/tools\"' >> $HOME/.bashrc",
+      "description": "Adicionando $HOME/.dotnet/tools ao PATH"
+    },
+    {
+      "type": "shell",
+      "command": "export PATH=$PATH:$HOME/.dotnet:$HOME/.dotnet/tools && dotnet tool install --global csharp-ls 2>&1 && echo 'OK: csharp-ls instalado'",
       "description": "Instalando csharp-ls (LSP) via dotnet tool"
     }
   ],
   "config_steps": [
     {
       "type": "shell",
-      "command": "test -f $HOME/.dotnet/tools/csharp-ls && echo 'csharp-ls OK' || echo 'AVISO: csharp-ls não encontrado'",
+      "command": "test -f $HOME/.dotnet/tools/csharp-ls && echo 'csharp-ls OK' || echo 'AVISO: csharp-ls não encontrado em $HOME/.dotnet/tools'",
       "description": "Verificando csharp-ls"
     },
     {
       "type": "shell",
-      "command": "export DOTNET_ROOT=$HOME/.dotnet && export PATH=$PATH:$HOME/.dotnet && dotnet --version 2>&1",
+      "command": "dotnet --version 2>&1 || (export PATH=$PATH:$HOME/.dotnet && dotnet --version 2>&1)",
       "description": "Verificando versão do .NET"
     }
   ],
@@ -60,17 +65,17 @@
   "uninstall_steps": [
     {
       "type": "shell",
-      "command": "export DOTNET_ROOT=$HOME/.dotnet && export PATH=$PATH:$HOME/.dotnet:$HOME/.dotnet/tools && dotnet tool uninstall --global csharp-ls 2>&1 || true",
+      "command": "export PATH=$PATH:$HOME/.dotnet:$HOME/.dotnet/tools && dotnet tool uninstall --global csharp-ls 2>&1 || true",
       "description": "Removendo csharp-ls"
     },
     {
       "type": "shell",
-      "command": "rm -rf $HOME/.dotnet 2>&1 || true",
-      "description": "Removendo .NET SDK"
+      "command": "pkg remove -y dotnet-sdk-8 dotnet-sdk-9 2>&1 || true && rm -rf $HOME/.dotnet 2>&1 || true",
+      "description": "Removendo .NET SDK (pkg e instalação manual)"
     },
     {
       "type": "shell",
-      "command": "sed -i '/DOTNET_ROOT/d; /\\.dotnet/d' $HOME/.bashrc 2>&1 || true",
+      "command": "sed -i '/\\.dotnet/d' $HOME/.bashrc 2>&1 || true",
       "description": "Limpando .bashrc"
     }
   ],
