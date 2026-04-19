@@ -79,16 +79,16 @@
       "description": "Limpando .bashrc"
     }
   ],
-  "verify_binary": "dotnet",
-  "verify_command": "dotnet --version",
+  "verify_binary": "mono",
+  "verify_command": "mono --version",
   "run_config": {
-    "run": "dotnet run",
+    "run": "if command -v dotnet >/dev/null 2>&1; then dotnet run; else mcs -out:app.exe *.cs && mono app.exe; fi",
     "supports_devices": false,
-    "build_debug": "dotnet build",
-    "build_release": "dotnet publish -c Release"
+    "build_debug": "if command -v dotnet >/dev/null 2>&1; then dotnet build; else mcs -out:app.exe *.cs; fi",
+    "build_release": "if command -v dotnet >/dev/null 2>&1; then dotnet publish -c Release; else mcs -optimize -out:app.exe *.cs; fi"
   },
   "sdk_config": {
-    "new_project_cmd": "dotnet new console -n $name 2>/dev/null || (mkdir -p $name && printf 'using System;\\nclass Program { static void Main() { Console.WriteLine(\"Hello, World!\"); } }\\n' > $name/Program.cs) && echo 'OK: projeto C# criado'",
+    "new_project_cmd": "mkdir -p $name && printf 'using System;\\nclass Program { static void Main() { Console.WriteLine(\"Hello, World!\"); } }\\n' > $name/Program.cs && echo 'OK: projeto C# criado'",
     "default_entry_file": "Program.cs",
     "file_extensions": ["cs", "csproj", "sln"],
     "sync_command": "dotnet restore",
