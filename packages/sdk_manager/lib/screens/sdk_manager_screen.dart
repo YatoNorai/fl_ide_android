@@ -138,43 +138,46 @@ class _SdkTile extends StatelessWidget {
                         color: cs.onSurface.withValues(alpha: 0.6),
                         fontSize: 13,
                         height: 1.4)),
-                // ── Action buttons row ──
+                // ── Action buttons ──
                 const SizedBox(height: 10),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    if (installed) ...[
-                      OutlinedButton.icon(
-                        onPressed: () => _openInstall(context, def),
-                        icon: const Icon(Icons.update_rounded, size: 16),
-                        label: const Text('Update'),
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 6),
-                          minimumSize: Size.zero,
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          textStyle: const TextStyle(
-                              fontSize: 13, fontWeight: FontWeight.w500),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: Wrap(
+                    alignment: WrapAlignment.end,
+                    spacing: 8,
+                    runSpacing: 6,
+                    children: [
+                      if (installed)
+                        OutlinedButton.icon(
+                          onPressed: () => _openInstall(context, def),
+                          icon: const Icon(Icons.update_rounded, size: 16),
+                          label: const Text('Update'),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 6),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            textStyle: const TextStyle(
+                                fontSize: 12, fontWeight: FontWeight.w500),
+                          ),
+                        )
+                      else
+                        FilledButton.icon(
+                          onPressed:
+                              loading ? null : () => _openInstall(context, def),
+                          icon: const Icon(Icons.download_rounded, size: 16),
+                          label: const Text('Install'),
+                          style: FilledButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 6),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            textStyle: const TextStyle(
+                                fontSize: 12, fontWeight: FontWeight.w600),
+                          ),
                         ),
-                      ),
-                    ] else ...[
-                      FilledButton.icon(
-                        onPressed: loading
-                            ? null
-                            : () => _openInstall(context, def),
-                        icon: const Icon(Icons.download_rounded, size: 16),
-                        label: const Text('Install'),
-                        style: FilledButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 6),
-                          minimumSize: Size.zero,
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          textStyle: const TextStyle(
-                              fontSize: 13, fontWeight: FontWeight.w600),
-                        ),
-                      ),
                     ],
-                  ],
+                  ),
                 ),
               ],
             ),

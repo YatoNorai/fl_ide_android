@@ -697,71 +697,81 @@ class _SdkCard extends StatelessWidget {
                     fontSize: 12,
                     color: colors.onSurface.withValues(alpha: 0.6),
                     height: 1.45)),
-            const SizedBox(height: 10),
-            // Footer row
+            const SizedBox(height: 8),
+            // Author info row — always fits, no button here
             Row(
               children: [
                 Icon(Icons.person_outline_rounded,
                     size: 13,
                     color: colors.onSurface.withValues(alpha: 0.4)),
                 const SizedBox(width: 4),
-                Text(ext.packageAuthor.name,
-                    style: GoogleFonts.openSans(
-                        fontSize: 11,
-                        color: colors.onSurface.withValues(alpha: 0.5))),
+                Flexible(
+                  child: Text(ext.packageAuthor.name,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.openSans(
+                          fontSize: 11,
+                          color: colors.onSurface.withValues(alpha: 0.5))),
+                ),
                 const SizedBox(width: 10),
                 Icon(Icons.edit_outlined,
                     size: 13,
                     color: colors.onSurface.withValues(alpha: 0.4)),
                 const SizedBox(width: 4),
-                Text('${ext.jsonAuthor.name} · ${ext.jsonAuthor.date}',
-                    style: GoogleFonts.openSans(
-                        fontSize: 11,
-                        color: colors.onSurface.withValues(alpha: 0.5))),
-                const Spacer(),
-                if (installed) ...[
-                  FilledButton.icon(
-                    onPressed: () async {
-                      await showSdkExtensionUninstallDialog(context, ext);
-                      if (context.mounted) {
-                        context.read<ExtensionsProvider>().refreshSdkStates();
-                      }
-                    },
-                    style: FilledButton.styleFrom(
-                      backgroundColor: colors.error,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 8),
-                      minimumSize: Size.zero,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      textStyle:  GoogleFonts.openSans(
-                          fontSize: 12, fontWeight: FontWeight.w600),
-                    ),
-                    icon: const Icon(Icons.delete_outline_rounded, size: 14),
-                    label: Text(s.extUninstall),
-                  ),
-
-
-                ] else ...[
-                  FilledButton.icon(
-                    onPressed: () async {
-                      await showSdkExtensionInstallDialog(context, ext);
-                      if (context.mounted) {
-                        context.read<ExtensionsProvider>().refreshSdkStates();
-                      }
-                    },
-                    style: FilledButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 8),
-                      minimumSize: Size.zero,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      textStyle:  GoogleFonts.openSans(
-                          fontSize: 12, fontWeight: FontWeight.w600),
-                    ),
-                    icon: const Icon(Icons.download_rounded, size: 14),
-                    label: Text(s.extInstall),
-                  ),
-                ],
+                Flexible(
+                  child: Text('${ext.jsonAuthor.name} · ${ext.jsonAuthor.date}',
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.openSans(
+                          fontSize: 11,
+                          color: colors.onSurface.withValues(alpha: 0.5))),
+                ),
               ],
+            ),
+            const SizedBox(height: 8),
+            // Action button — separate row, always right-aligned
+            Align(
+              alignment: Alignment.centerRight,
+              child: installed
+                  ? FilledButton.icon(
+                      onPressed: () async {
+                        await showSdkExtensionUninstallDialog(context, ext);
+                        if (context.mounted) {
+                          context
+                              .read<ExtensionsProvider>()
+                              .refreshSdkStates();
+                        }
+                      },
+                      style: FilledButton.styleFrom(
+                        backgroundColor: colors.error,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 6),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        textStyle: GoogleFonts.openSans(
+                            fontSize: 12, fontWeight: FontWeight.w600),
+                      ),
+                      icon: const Icon(Icons.delete_outline_rounded, size: 14),
+                      label: Text(s.extUninstall),
+                    )
+                  : FilledButton.icon(
+                      onPressed: () async {
+                        await showSdkExtensionInstallDialog(context, ext);
+                        if (context.mounted) {
+                          context
+                              .read<ExtensionsProvider>()
+                              .refreshSdkStates();
+                        }
+                      },
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 6),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        textStyle: GoogleFonts.openSans(
+                            fontSize: 12, fontWeight: FontWeight.w600),
+                      ),
+                      icon: const Icon(Icons.download_rounded, size: 14),
+                      label: Text(s.extInstall),
+                    ),
             ),
           ],
         ),

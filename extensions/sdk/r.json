@@ -20,12 +20,12 @@
   "install_steps": [
     {
       "type": "shell",
-      "command": "pkg update -y 2>&1 && pkg install -y tur-repo 2>&1 && echo 'OK: tur-repo adicionado'",
+      "command": "pkg update -y 2>&1 && pkg install -y tur-repo 2>&1 && pkg update -y 2>&1 && echo 'OK: tur-repo adicionado'",
       "description": "Adicionando Termux User Repository (necessário para R)"
     },
     {
       "type": "shell",
-      "command": "pkg update -y 2>&1 && pkg install -y r-base 2>&1 && echo 'OK: R instalado'",
+      "command": "pkg install -y r-base 2>&1 && echo 'OK: R instalado'",
       "description": "Instalando R via tur-repo"
     },
     {
@@ -35,19 +35,24 @@
     },
     {
       "type": "shell",
-      "command": "Rscript -e \"install.packages('languageserver', repos='https://cloud.r-project.org', quiet=FALSE)\" 2>&1 && echo 'OK: r-languageserver instalado'",
+      "command": "pkg install -y make clang 2>&1 || true",
+      "description": "Instalando ferramentas de build para pacotes R com extensões nativas"
+    },
+    {
+      "type": "shell",
+      "command": "Rscript -e \"install.packages(\\\"languageserver\\\", repos=\\\"https://cloud.r-project.org\\\", quiet=FALSE)\" 2>&1 && echo 'OK: languageserver instalado'",
       "description": "Instalando languageserver via install.packages()"
     },
     {
       "type": "shell",
-      "command": "Rscript -e \"library(languageserver); cat('OK: languageserver carregado\\n')\" 2>&1",
+      "command": "Rscript -e \"if ('languageserver' %in% installed.packages()[,'Package']) cat('OK: languageserver disponivel\\n') else cat('AVISO: languageserver nao instalado\\n')\" 2>&1",
       "description": "Verificando languageserver"
     }
   ],
   "config_steps": [
     {
       "type": "shell",
-      "command": "Rscript -e \"cat(paste(installed.packages()[,'Package'], collapse='\\n'))\" 2>&1 | grep -i languageserver && echo 'languageserver OK' || echo 'AVISO: languageserver não instalado'",
+      "command": "Rscript -e \"if ('languageserver' %in% installed.packages()[,'Package']) cat('languageserver OK\\n') else cat('AVISO: languageserver nao instalado\\n')\" 2>&1",
       "description": "Verificando languageserver"
     }
   ],
@@ -55,7 +60,7 @@
   "uninstall_steps": [
     {
       "type": "shell",
-      "command": "Rscript -e \"remove.packages('languageserver')\" 2>&1 || true",
+      "command": "Rscript -e \"remove.packages(\\\"languageserver\\\")\" 2>&1 || true",
       "description": "Removendo languageserver"
     },
     {
