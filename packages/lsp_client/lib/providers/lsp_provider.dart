@@ -733,6 +733,28 @@ class LspProvider extends ChangeNotifier {
     // kotlin-language-server ships all its JARs under server/lib/.
     final libDir = Directory('${RuntimeEnvir.kotlinLsHome}/lib');
     if (!libDir.existsSync()) {
+      // Try alternative Termux package installation paths.
+      final altPaths = [
+        '${RuntimeEnvir.usrPath}/share/kotlin-language-server/server',
+        '${RuntimeEnvir.homePath}/.local/share/kotlin-language-server/server',
+      ];
+      for (final alt in altPaths) {
+        final altLib = Directory('$alt/lib');
+        if (altLib.existsSync()) {
+          debugPrint('[LspProvider] kotlin-ls found at alternative path: $alt');
+          final altJars = altLib.listSync().whereType<File>()
+              .where((f) => f.path.endsWith('.jar'))
+              .map((f) => f.path)
+              .toList()..sort();
+          if (altJars.isNotEmpty) {
+            return [java, '-Xmx384m', '-Xms64m', '-Xss2m',
+              '-XX:TieredStopAtLevel=1', '-XX:+UseSerialGC',
+              '-Dkotlin.daemon.enabled=false',
+              '-classpath', altJars.join(':'),
+              'org.javacs.kt.MainKt'];
+          }
+        }
+      }
       debugPrint('[LspProvider] kotlin-ls lib dir not found at ${libDir.path}');
       return null;
     }

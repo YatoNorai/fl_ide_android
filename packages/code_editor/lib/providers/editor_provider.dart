@@ -549,6 +549,7 @@ class EditorProvider extends ChangeNotifier {
         return YamlLanguage();
       case 'kt':
       case 'kts':
+      case 'java':
         return KotlinLanguage();
       case 'xml':
         return XmlLanguage();

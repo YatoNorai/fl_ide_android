@@ -68,6 +68,10 @@ class GitProvider extends ChangeNotifier {
 
   Timer? _refreshTimer;
 
+  /// Called with each git operation log line so the workspace can route it
+  /// to the OUTPUT tab. Set by the workspace that owns this provider.
+  void Function(String)? onOperationLog;
+
   /// Callback to reload the file tree after git init creates the `.git` dir.
   VoidCallback? onTreeRefreshNeeded;
 
@@ -155,7 +159,7 @@ class GitProvider extends ChangeNotifier {
   Future<void> _fetchBranch() async {
     try {
       final r = await _run(['branch', '--show-current']);
-      _currentBranch = r.stdout.trim();
+      _currentBranch = r.stdout.toString().trim();
 
       final revList = await _run([
         'rev-list', '--left-right', '--count', 'HEAD...@{upstream}',
@@ -181,7 +185,7 @@ class GitProvider extends ChangeNotifier {
     final staged = <GitFileChange>[];
     final unstaged = <GitFileChange>[];
 
-    for (final line in r.stdout.split('\n')) {
+    for (final line in r.stdout.toString().split('\n')) {
       if (line.length < 2) continue;
       final x = line[0]; // staged status
       final y = line[1]; // unstaged status
@@ -232,7 +236,7 @@ class GitProvider extends ChangeNotifier {
         'ls-files', '--others', '--ignored', '--exclude-standard',
       ]);
       if (r.exitCode != 0) return {};
-      return r.stdout
+      return r.stdout.toString()
           .split('\n')
           .map((l) => l.trim())
           .where((l) => l.isNotEmpty)
@@ -245,7 +249,7 @@ class GitProvider extends ChangeNotifier {
   Future<void> _fetchBranches() async {
     final r = await _run(['branch', '-a', '--format=%(refname:short) %(HEAD)']);
     if (r.exitCode != 0) return;
-    _branches = r.stdout
+    _branches = r.stdout.toString()
         .split('\n')
         .where((l) => l.trim().isNotEmpty)
         .map((l) {
@@ -324,7 +328,7 @@ class GitProvider extends ChangeNotifier {
   /// Returns true if at least one remote is configured.
   Future<bool> hasRemote() async {
     final r = await _run(['remote']);
-    return r.exitCode == 0 && r.stdout.trim().isNotEmpty;
+    return r.exitCode == 0 && r.stdout.toString().trim().isNotEmpty;
   }
 
   /// Adds a remote (default name: origin).
@@ -339,7 +343,10 @@ class GitProvider extends ChangeNotifier {
   }
 
   Future<String?> push() async {
+    onOperationLog?.call('[git] push → ${_upstream.isNotEmpty ? _upstream : "origin"}\n');
     var r = await _run(['push']);
+    if (r.stdout.toString().trim().isNotEmpty) onOperationLog?.call(r.stdout.toString());
+    if (r.stderr.toString().trim().isNotEmpty) onOperationLog?.call(r.stderr.toString());
     if (r.exitCode != 0) {
       final stderr = r.stderr.toString();
       // No remote at all → caller must configure one first.
@@ -364,7 +371,10 @@ class GitProvider extends ChangeNotifier {
   static const String kNoRemoteError = '__no_remote__';
 
   Future<String?> pull() async {
+    onOperationLog?.call('[git] pull\n');
     final r = await _run(['pull']);
+    if (r.stdout.toString().trim().isNotEmpty) onOperationLog?.call(r.stdout.toString());
+    if (r.stderr.toString().trim().isNotEmpty) onOperationLog?.call(r.stderr.toString());
     if (r.exitCode != 0) return r.stderr.trim();
     _pendingSync = false;
     await refresh();
@@ -372,7 +382,10 @@ class GitProvider extends ChangeNotifier {
   }
 
   Future<String?> fetch() async {
+    onOperationLog?.call('[git] fetch --all\n');
     final r = await _run(['fetch', '--all']);
+    if (r.stdout.toString().trim().isNotEmpty) onOperationLog?.call(r.stdout.toString());
+    if (r.stderr.toString().trim().isNotEmpty) onOperationLog?.call(r.stderr.toString());
     if (r.exitCode != 0) return r.stderr.trim();
     await _fetchBranch();
     notifyListeners();

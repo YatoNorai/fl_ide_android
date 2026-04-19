@@ -121,6 +121,7 @@ sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 ln -sf "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "$PREFIX/bin/sdkmanager"
 ln -sf "$ANDROID_HOME/platform-tools/adb" "$PREFIX/bin/adb" 2>/dev/null || true
 echo 'export PATH="$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools"' >> ~/.bashrc
+pkg install -y kotlin-language-server 2>/dev/null || true
 mkdir -p "$PREFIX/opt/java-language-server"
 wget -q https://github.com/georgewfraser/java-language-server/releases/latest/download/java-language-server.tar.gz
 tar xzf java-language-server.tar.gz -C "$PREFIX/opt/java-language-server"
@@ -164,7 +165,11 @@ ls "$PREFIX/opt/lemminx/lemminx.jar"
       verifyBinary: 'node',
       verifyCmd: 'node --version',
       cleanupScript: 'pkg uninstall -y nodejs-lts 2>/dev/null || true',
-      installScript: 'pkg update -y && pkg install -y nodejs-lts',
+      installScript: r'''
+pkg update -y && pkg install -y nodejs-lts
+npm install -g @vscode/js-debug 2>/dev/null || true
+echo "✓ Node.js instalado: $(node --version)"
+''',
       buildCommand: 'npm run build',
       sdkConfig: SdkConfig(
         newProjectCmd: r'mkdir -p $name && cd $name && npm init -y',
@@ -172,6 +177,14 @@ ls "$PREFIX/opt/lemminx/lemminx.jar"
         fileExtensions: ['js', 'ts', 'mjs', 'cjs', 'json'],
         syncCommand: 'npm install',
         syncTriggerFile: 'package.json',
+        runCommand: 'node index.js',
+      ),
+      dapConfig: DapConfig(
+        adapterBinary: 'node',
+        adapterArgs: [r'$PREFIX/lib/node_modules/@vscode/js-debug/dist/src/debugAdapter.js'],
+        adapterId: 'node2',
+        launchProgram: 'index.js',
+        buildDoneStrings: ['Debugger attached', 'Listening for connections'],
       ),
     ),
 
@@ -208,12 +221,25 @@ pip install pylsp debugpy
       verifyBinary: 'swift',
       verifyCmd: 'swift --version',
       cleanupScript: 'pkg uninstall -y swift 2>/dev/null || true',
-      installScript: 'pkg update -y && pkg install -y swift',
+      installScript: r'''
+pkg update -y && pkg install -y swift lldb
+[ ! -f "$PREFIX/bin/lldb-vscode" ] && [ -f "$PREFIX/bin/lldb-dap" ] && \
+  ln -sf "$PREFIX/bin/lldb-dap" "$PREFIX/bin/lldb-vscode" 2>/dev/null || true
+echo "✓ Swift instalado: $(swift --version 2>&1 | head -1)"
+''',
       buildCommand: 'swift build',
       sdkConfig: SdkConfig(
         newProjectCmd: r'mkdir -p $name && cd $name && swift package init --type executable',
         defaultEntryFile: 'Sources/main.swift',
         fileExtensions: ['swift', 'json', 'md'],
+        runCommand: 'swift run',
+      ),
+      dapConfig: DapConfig(
+        adapterBinary: r'$PREFIX/bin/lldb-vscode',
+        adapterArgs: [],
+        adapterId: 'lldb',
+        launchProgram: r'.build/debug/$name',
+        buildDoneStrings: ['stop reason', 'Loaded symbols'],
       ),
     ),
 
@@ -251,15 +277,26 @@ pip install pylsp debugpy
       installScript: r'''
 pkg update -y && pkg install -y openjdk-17
 pkg install -y kotlin-language-server 2>/dev/null || true
+mkdir -p "$HOME/.local/kotlin-debug-adapter"
+wget -q -O /tmp/kda.zip https://github.com/fwcd/kotlin-debug-adapter/releases/latest/download/adapter.zip 2>/dev/null \
+  && unzip -qo /tmp/kda.zip -d "$HOME/.local/kotlin-debug-adapter" && rm /tmp/kda.zip || true
 echo "✓ Kotlin Multiplatform pronto"
 ''',
       buildCommand: './gradlew assembleDebug',
       sdkConfig: SdkConfig(
-        newProjectCmd: r'''mkdir -p $name/shared/src/commonMain/kotlin $name/androidApp/src/main/kotlin && cd $name && printf 'fun greeting(): String = "Hello, KMP!"\n' > shared/src/commonMain/kotlin/Greeting.kt''',
-        defaultEntryFile: 'shared/src/commonMain/kotlin/Greeting.kt',
+        newProjectCmd: r'mkdir -p $name',
+        defaultEntryFile: 'androidApp/src/main/kotlin/MainActivity.kt',
         fileExtensions: ['kt', 'kts', 'xml', 'gradle', 'json'],
         syncCommand: './gradlew --refresh-dependencies',
         syncTriggerFile: 'settings.gradle.kts',
+        runCommand: './gradlew :androidApp:assembleDebug',
+      ),
+      dapConfig: DapConfig(
+        adapterBinary: r'$PREFIX/bin/java',
+        adapterArgs: ['-jar', r'$HOME/.local/kotlin-debug-adapter/adapter.jar'],
+        adapterId: 'kotlin',
+        launchProgram: '.',
+        buildDoneStrings: ['Adapter started', 'Listening'],
       ),
     ),
 
@@ -271,6 +308,8 @@ echo "✓ Kotlin Multiplatform pronto"
       cleanupScript: 'pkg uninstall -y clang cmake make 2>/dev/null || true',
       installScript: r'''
 pkg update -y && pkg install -y clang clang-tools-extra lldb cmake make
+[ ! -f "$PREFIX/bin/lldb-vscode" ] && [ -f "$PREFIX/bin/lldb-dap" ] && \
+  ln -sf "$PREFIX/bin/lldb-dap" "$PREFIX/bin/lldb-vscode" 2>/dev/null || true
 echo "✓ C/C++ toolchain instalado"
 ''',
       buildCommand: 'cmake --build build',
@@ -296,8 +335,10 @@ echo "✓ C/C++ toolchain instalado"
       verifyCmd: 'rustc --version',
       cleanupScript: r'pkg uninstall -y rust 2>/dev/null || true',
       installScript: r'''
-pkg update -y && pkg install -y rust
+pkg update -y && pkg install -y rust lldb
 cargo install rust-analyzer 2>&1 || pkg install -y rust-analyzer 2>/dev/null || true
+[ ! -f "$PREFIX/bin/lldb-vscode" ] && [ -f "$PREFIX/bin/lldb-dap" ] && \
+  ln -sf "$PREFIX/bin/lldb-dap" "$PREFIX/bin/lldb-vscode" 2>/dev/null || true
 echo "✓ Rust instalado: $(rustc --version)"
 ''',
       buildCommand: 'cargo build',
@@ -333,6 +374,7 @@ echo "✓ Lua instalado: $(lua -v)"
         newProjectCmd: r'''mkdir -p $name && printf 'print("Hello, World!")\n' > $name/main.lua''',
         defaultEntryFile: 'main.lua',
         fileExtensions: ['lua'],
+        runCommand: 'lua main.lua',
       ),
     ),
 
@@ -355,6 +397,7 @@ echo "✓ Ruby instalado: $(ruby --version)"
         syncCommand: 'bundle install',
         syncTriggerFile: 'Gemfile',
         formatCommand: 'rubocop -A .',
+        runCommand: 'ruby main.rb',
       ),
     ),
 
@@ -376,6 +419,7 @@ echo "✓ PHP instalado: $(php --version | head -1)"
         fileExtensions: ['php', 'phtml', 'html'],
         syncCommand: 'composer install',
         syncTriggerFile: 'composer.json',
+        runCommand: 'php index.php',
       ),
     ),
 
@@ -395,6 +439,7 @@ echo "✓ bash-language-server instalado"
         newProjectCmd: r'''mkdir -p $name && printf '#!/usr/bin/env bash\necho "Hello, World!"\n' > $name/main.sh && chmod +x $name/main.sh''',
         defaultEntryFile: 'main.sh',
         fileExtensions: ['sh', 'bash'],
+        runCommand: 'bash main.sh',
       ),
     ),
 
@@ -444,6 +489,7 @@ echo "✓ .NET instalado: $(dotnet --version)"
         syncCommand: 'dotnet restore',
         syncTriggerFile: '*.csproj',
         formatCommand: 'dotnet format',
+        runCommand: 'dotnet run',
       ),
     ),
 
@@ -468,6 +514,7 @@ echo "✓ Scala e Metals LSP instalados"
         fileExtensions: ['scala', 'sc', 'sbt'],
         syncCommand: 'sbt update',
         syncTriggerFile: 'build.sbt',
+        runCommand: 'scala main.scala',
       ),
     ),
 
@@ -487,6 +534,7 @@ echo "✓ R instalado: $(Rscript --version)"
         newProjectCmd: r'''mkdir -p $name && printf '# Hello World\ncat("Hello, World!\n")\n' > $name/main.R''',
         defaultEntryFile: 'main.R',
         fileExtensions: ['r', 'R', 'Rmd'],
+        runCommand: 'Rscript main.R',
       ),
     ),
 
@@ -497,7 +545,9 @@ echo "✓ R instalado: $(Rscript --version)"
       verifyCmd: 'zig version',
       cleanupScript: 'pkg uninstall -y zig zls 2>/dev/null || true',
       installScript: r'''
-pkg update -y && pkg install -y zig zls
+pkg update -y && pkg install -y zig zls lldb
+[ ! -f "$PREFIX/bin/lldb-vscode" ] && [ -f "$PREFIX/bin/lldb-dap" ] && \
+  ln -sf "$PREFIX/bin/lldb-dap" "$PREFIX/bin/lldb-vscode" 2>/dev/null || true
 echo "✓ Zig instalado: $(zig version)"
 ''',
       buildCommand: 'zig build run',
@@ -506,6 +556,14 @@ echo "✓ Zig instalado: $(zig version)"
         defaultEntryFile: 'src/main.zig',
         fileExtensions: ['zig'],
         formatCommand: 'zig fmt .',
+        runCommand: 'zig run src/main.zig',
+      ),
+      dapConfig: DapConfig(
+        adapterBinary: r'$PREFIX/bin/lldb-vscode',
+        adapterArgs: [],
+        adapterId: 'lldb',
+        launchProgram: 'zig-out/bin/main',
+        buildDoneStrings: ['stop reason', 'Loaded symbols'],
       ),
     ),
 
@@ -528,6 +586,7 @@ echo "✓ Haskell instalado: $(ghc --version)"
         fileExtensions: ['hs', 'lhs', 'cabal'],
         syncCommand: 'cabal update',
         syncTriggerFile: '*.cabal',
+        runCommand: 'runghc main.hs',
       ),
     ),
 
@@ -554,6 +613,7 @@ echo "✓ Elixir instalado: $(elixir --version | head -1)"
         syncCommand: 'mix deps.get',
         syncTriggerFile: 'mix.exs',
         formatCommand: 'mix format',
+        runCommand: 'mix run',
       ),
     ),
 

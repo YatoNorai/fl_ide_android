@@ -321,6 +321,13 @@ class BuildProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Appends [text] to the OUTPUT log without changing build status.
+  /// Used by GitProvider to route push/pull/fetch logs to the OUTPUT tab.
+  void appendLog(String text) {
+    _result = _result.copyWith(output: _result.output + text);
+    notifyListeners();
+  }
+
   void cancelSync() {
     _syncProcess?.kill();
     _syncProcess = null;

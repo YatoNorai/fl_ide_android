@@ -620,6 +620,106 @@ fs.watch = function (filename, options, listener) {
     _client = null;
   }
 
+  /// Triggers a GitHub Actions workflow and streams the run log to the
+  /// DEBUG CONSOLE. Requires `gh` CLI to be installed and authenticated.
+  Future<void> startGitHubBuild(Project project, {String workflow = 'build.yml'}) async {
+    if (_status != DebugStatus.idle) return;
+    _error = null;
+    _output = '';
+    _isBuilding = true;
+    _status = DebugStatus.starting;
+    notifyListeners();
+
+    try {
+      // Trigger the workflow
+      final trigger = await Process.run(
+        'gh', ['workflow', 'run', workflow],
+        workingDirectory: project.path,
+        environment: RuntimeEnvir.baseEnv,
+        runInShell: true,
+      );
+      if (trigger.exitCode != 0) {
+        throw Exception(
+          trigger.stderr.toString().trim().isNotEmpty
+              ? trigger.stderr.toString().trim()
+              : 'gh workflow run failed (exit ${trigger.exitCode}). '
+                'Is `gh` installed and authenticated?\n'
+                'Run: pkg install gh && gh auth login',
+        );
+      }
+
+      _output += '[GitHub] Workflow "$workflow" triggered. Aguardando run...\n';
+      _status = DebugStatus.running;
+      notifyListeners();
+
+      // Brief pause to let GitHub register the run
+      await Future.delayed(const Duration(seconds: 4));
+
+      // Get the latest run ID
+      final listResult = await Process.run(
+        'gh', ['run', 'list', '--limit', '1', '--json', 'databaseId,status'],
+        workingDirectory: project.path,
+        environment: RuntimeEnvir.baseEnv,
+        runInShell: true,
+      );
+      final runId = _extractGhRunId(listResult.stdout.toString());
+      if (runId == null) {
+        throw Exception('Não foi possível obter o ID do run. Verifique se o repositório tem a action "$workflow".');
+      }
+
+      _output += '[GitHub] Monitorando run #$runId...\n';
+      notifyListeners();
+
+      // Stream the run log
+      _metroProcess = await Process.start(
+        'gh', ['run', 'watch', runId, '--exit-status'],
+        workingDirectory: project.path,
+        environment: RuntimeEnvir.baseEnv,
+        runInShell: true,
+      );
+
+      void handleLine(String line) {
+        if (_disposed) return;
+        _output += '$line\n';
+        notifyListeners();
+      }
+
+      _buildStdoutSub = _metroProcess!.stdout
+          .transform(const Utf8Decoder(allowMalformed: true))
+          .transform(const LineSplitter())
+          .listen(handleLine);
+      _buildStderrSub = _metroProcess!.stderr
+          .transform(const Utf8Decoder(allowMalformed: true))
+          .transform(const LineSplitter())
+          .listen(handleLine);
+
+      final code = await _metroProcess!.exitCode;
+      _isBuilding = false;
+      if (code != 0 && _error == null) {
+        _error = 'GitHub build falhou (exit $code).';
+      } else if (code == 0) {
+        _output += '\n✔ GitHub build concluído com sucesso!\n';
+      }
+      if (!_disposed) notifyListeners();
+      Future.microtask(_cleanup);
+    } catch (e) {
+      _error = e.toString();
+      _isBuilding = false;
+      debugPrint('[GitHub Build] error: $e');
+      await _cleanup();
+    }
+  }
+
+  String? _extractGhRunId(String json) {
+    try {
+      final list = jsonDecode(json) as List;
+      if (list.isNotEmpty) {
+        return list.first['databaseId']?.toString();
+      }
+    } catch (_) {}
+    return null;
+  }
+
   /// Cancel all active subscriptions and kill all child processes.
   /// Every kill() is guarded individually so one failure never skips the rest.
   Future<void> _cleanup() async {

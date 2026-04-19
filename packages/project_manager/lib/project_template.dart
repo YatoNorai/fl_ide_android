@@ -158,6 +158,11 @@ class ProjectTemplate {
       )}';
     }
 
+    // ── Kotlin Multiplatform ──────────────────────────────────────────────────
+    if (sdk == SdkType.kotlinMultiplatform && !remoteIsWindows) {
+      return '$base && ${_kmpProjectScaffold(projectPath, projectName)}';
+    }
+
     // ── React Native ──────────────────────────────────────────────────────────
     if (sdk == SdkType.reactNative && !remoteIsWindows) {
       var rnCmd = rnTemplate == ReactNativeTemplate.tabs
@@ -2212,6 +2217,249 @@ public class ${name}Fragment extends Fragment {
     printf '\nandroid.aapt2FromMavenOverride=%s\n' "$AAPT2_BIN" >> "$GPROPS"
     echo "✓ aapt2 override → $AAPT2_BIN"
   fi
+) 2>&1''';
+  }
+
+  // ── Kotlin Multiplatform project scaffold ─────────────────────────────────
+  // Creates a complete compilable KMP project with:
+  //   :shared — commonMain + androidMain Kotlin sources
+  //   :androidApp — Android app that calls into :shared
+
+  static String _kmpProjectScaffold(String projectPath, String projectName) {
+    final safePkg = projectName
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]'), '_');
+    final pkg      = 'com.example.$safePkg';
+    final pkgDir   = pkg.replaceAll('.', '/');
+    final safeName = projectName.replaceAll('"', r'\"').replaceAll("'", r"\'");
+    final themeName = projectName
+        .split(RegExp(r'[_\-\s]+'))
+        .map((w) => w.isEmpty ? '' : '${w[0].toUpperCase()}${w.substring(1)}')
+        .join()
+        .replaceAll(RegExp(r'[^a-zA-Z0-9]'), '');
+
+    return r'''
+(
+set -e
+SDK_ROOT="${ANDROID_HOME:-$PREFIX/opt/android-sdk}"
+
+# ── Directory structure ───────────────────────────────────────────────────────
+mkdir -p "''' + projectPath + r'''/shared/src/commonMain/kotlin/''' + pkgDir + r'''/shared"
+mkdir -p "''' + projectPath + r'''/shared/src/androidMain/kotlin/''' + pkgDir + r'''/shared"
+mkdir -p "''' + projectPath + r'''/androidApp/src/main/kotlin/''' + pkgDir + r'''"
+mkdir -p "''' + projectPath + r'''/androidApp/src/main/res/values"
+mkdir -p "''' + projectPath + r'''/gradle/wrapper"
+
+# ── settings.gradle.kts ───────────────────────────────────────────────────────
+cat > "''' + projectPath + r'''/settings.gradle.kts" << '__KMP_EOF__'
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+rootProject.name = "''' + safeName + r'''"
+include(":shared", ":androidApp")
+__KMP_EOF__
+
+# ── build.gradle.kts (root) ───────────────────────────────────────────────────
+cat > "''' + projectPath + r'''/build.gradle.kts" << '__KMP_EOF__'
+plugins {
+    kotlin("multiplatform") version "1.9.23" apply false
+    kotlin("android") version "1.9.23" apply false
+    id("com.android.application") version "8.2.2" apply false
+    id("com.android.library") version "8.2.2" apply false
+}
+__KMP_EOF__
+
+# ── shared/build.gradle.kts ───────────────────────────────────────────────────
+cat > "''' + projectPath + r'''/shared/build.gradle.kts" << '__KMP_EOF__'
+plugins {
+    kotlin("multiplatform")
+    id("com.android.library")
+}
+kotlin {
+    androidTarget {
+        compilations.all {
+            kotlinOptions { jvmTarget = "1.8" }
+        }
+    }
+    sourceSets {
+        val commonMain by getting
+        val androidMain by getting
+    }
+}
+android {
+    namespace = "''' + pkg + r'''.shared"
+    compileSdk = 34
+    defaultConfig { minSdk = 24 }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
+    }
+}
+__KMP_EOF__
+
+# ── androidApp/build.gradle.kts ───────────────────────────────────────────────
+cat > "''' + projectPath + r'''/androidApp/build.gradle.kts" << '__KMP_EOF__'
+plugins {
+    id("com.android.application")
+    kotlin("android")
+}
+android {
+    namespace = "''' + pkg + r'''"
+    compileSdk = 34
+    defaultConfig {
+        applicationId = "''' + pkg + r'''"
+        minSdk = 24
+        targetSdk = 34
+        versionCode = 1
+        versionName = "1.0"
+    }
+    buildTypes {
+        release { isMinifyEnabled = false }
+    }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
+    }
+    kotlinOptions { jvmTarget = "1.8" }
+}
+dependencies {
+    implementation(project(":shared"))
+    implementation("androidx.core:core-ktx:1.12.0")
+    implementation("androidx.appcompat:appcompat:1.6.1")
+    implementation("com.google.android.material:material:1.11.0")
+}
+__KMP_EOF__
+
+# ── Greeting.kt (commonMain) ──────────────────────────────────────────────────
+cat > "''' + projectPath + r'''/shared/src/commonMain/kotlin/''' + pkgDir + r'''/shared/Greeting.kt" << '__KMP_EOF__'
+package ''' + pkg + r'''.shared
+
+expect class Platform() {
+    val name: String
+}
+
+class Greeting {
+    private val platform = Platform()
+    fun greet(): String = "Hello, KMP! Running on ${platform.name}"
+}
+__KMP_EOF__
+
+# ── Platform.android.kt (androidMain) ─────────────────────────────────────────
+cat > "''' + projectPath + r'''/shared/src/androidMain/kotlin/''' + pkgDir + r'''/shared/Platform.android.kt" << '__KMP_EOF__'
+package ''' + pkg + r'''.shared
+
+import android.os.Build
+
+actual class Platform actual constructor() {
+    actual val name: String = "Android ${Build.VERSION.SDK_INT}"
+}
+__KMP_EOF__
+
+# ── MainActivity.kt ───────────────────────────────────────────────────────────
+cat > "''' + projectPath + r'''/androidApp/src/main/kotlin/''' + pkgDir + r'''/MainActivity.kt" << '__KMP_EOF__'
+package ''' + pkg + r'''
+
+import android.os.Bundle
+import android.widget.TextView
+import androidx.appcompat.app.AppCompatActivity
+import ''' + pkg + r'''.shared.Greeting
+
+class MainActivity : AppCompatActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val tv = TextView(this).apply {
+            text = Greeting().greet()
+            textSize = 20f
+            setPadding(48, 48, 48, 48)
+        }
+        setContentView(tv)
+    }
+}
+__KMP_EOF__
+
+# ── AndroidManifest.xml ───────────────────────────────────────────────────────
+cat > "''' + projectPath + r'''/androidApp/src/main/AndroidManifest.xml" << '__KMP_EOF__'
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application
+        android:allowBackup="true"
+        android:label="@string/app_name"
+        android:theme="@style/Theme.AppCompat.DayNight.NoActionBar">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
+__KMP_EOF__
+
+# ── strings.xml ───────────────────────────────────────────────────────────────
+cat > "''' + projectPath + r'''/androidApp/src/main/res/values/strings.xml" << '__KMP_EOF__'
+<resources>
+    <string name="app_name">''' + safeName + r'''</string>
+</resources>
+__KMP_EOF__
+
+# ── themes.xml ────────────────────────────────────────────────────────────────
+cat > "''' + projectPath + r'''/androidApp/src/main/res/values/themes.xml" << '__KMP_EOF__'
+<resources>
+    <style name="Theme.''' + themeName + r'''" parent="Theme.AppCompat.DayNight.NoActionBar" />
+</resources>
+__KMP_EOF__
+
+# ── local.properties ──────────────────────────────────────────────────────────
+printf "sdk.dir=%s\n" "$SDK_ROOT" > "''' + projectPath + r'''/local.properties"
+
+# ── gradle.properties ─────────────────────────────────────────────────────────
+AAPT2_BIN=$(find "$SDK_ROOT/build-tools" -name aapt2 2>/dev/null | sort -rV | head -1)
+AAPT2_LINE=""
+[ -n "$AAPT2_BIN" ] && AAPT2_LINE="android.aapt2FromMavenOverride=$AAPT2_BIN"
+cat > "''' + projectPath + r'''/gradle.properties" << __KMP_EOF__
+org.gradle.jvmargs=-Xmx512m -Dfile.encoding=UTF-8
+android.useAndroidX=true
+kotlin.code.style=official
+kotlin.mpp.stability.nowarn=true
+$AAPT2_LINE
+__KMP_EOF__
+
+# ── gradlew shim (delegates to system gradle) ─────────────────────────────────
+printf '#!/bin/sh\nexec gradle "$@"\n' > "''' + projectPath + r'''/gradlew"
+chmod +x "''' + projectPath + r'''/gradlew"
+
+GRADLE_VER=$(gradle --version 2>/dev/null | awk '/^Gradle /{print $2; exit}')
+GRADLE_VER=${GRADLE_VER:-8.6}
+cat > "''' + projectPath + r'''/gradle/wrapper/gradle-wrapper.properties" << __KMP_EOF__
+distributionBase=GRADLE_USER_HOME
+distributionPath=wrapper/dists
+distributionUrl=https\://services.gradle.org/distributions/gradle-$GRADLE_VER-bin.zip
+networkTimeout=10000
+validateDistributionUrl=true
+zipStoreBase=GRADLE_USER_HOME
+zipStorePath=wrapper/dists
+__KMP_EOF__
+
+if command -v gradle > /dev/null 2>&1; then
+  (cd "''' + projectPath + r'''" && gradle wrapper --gradle-version="$GRADLE_VER" --quiet 2>/dev/null) || true
+  printf '#!/bin/sh\nexec gradle "$@"\n' > "''' + projectPath + r'''/gradlew"
+  chmod +x "''' + projectPath + r'''/gradlew"
+fi
+
+echo "✓ Projeto KMP criado: ''' + safeName + r'''"
 ) 2>&1''';
   }
 }

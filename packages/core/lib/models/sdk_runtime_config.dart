@@ -24,6 +24,10 @@ class SdkConfig {
   /// Empty string = no format step.
   final String formatCommand;
 
+  /// Command to run/execute the project in the terminal (e.g. `node index.js`).
+  /// Used when no DAP adapter is available. Empty = use the SDK's buildCommand.
+  final String runCommand;
+
   const SdkConfig({
     required this.newProjectCmd,
     required this.defaultEntryFile,
@@ -31,6 +35,7 @@ class SdkConfig {
     this.syncCommand = '',
     this.syncTriggerFile = '',
     this.formatCommand = '',
+    this.runCommand = '',
   });
 
   factory SdkConfig.fromJson(Map<String, dynamic> j) => SdkConfig(
@@ -41,6 +46,7 @@ class SdkConfig {
         syncCommand: (j['sync_command'] as String?) ?? '',
         syncTriggerFile: (j['sync_trigger_file'] as String?) ?? '',
         formatCommand: (j['format_command'] as String?) ?? '',
+        runCommand: (j['run_command'] as String?) ?? '',
       );
 }
 

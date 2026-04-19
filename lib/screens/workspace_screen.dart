@@ -148,6 +148,12 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
 
+      // Route git operation logs (push, pull, fetch) to the OUTPUT tab.
+      context.read<GitProvider>().onOperationLog = (log) {
+        if (!mounted) return;
+        context.read<BuildProvider>().appendLog(log);
+      };
+
       // Phase 1: creating / loading project
       if (widget.isNewProject) {
         setState(() => _initPhase = _InitPhase.creatingProject);
@@ -966,6 +972,14 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     });
   }
 
+  Future<void> _startGitHubBuild(BuildContext context) async {
+    final dbg = context.read<DebugProvider>();
+    if (dbg.isActive) return;
+    _sheetKey.currentState?.selectToolTab(4); // DEBUG CONSOLE
+    _sheetKey.currentState?.expandToMid();
+    dbg.startGitHubBuild(widget.project);
+  }
+
   void _closeDrawer()    => _drawerCtrl.reverse();
   void _closeAiDrawer()  => _aiDrawerCtrl.reverse();
   void _toggleDrawer() {
@@ -1276,16 +1290,36 @@ class _WorkspaceAppBarState extends State<_WorkspaceAppBar> {
     final dapConfig = ext?.dapConfig ??
         SdkDefinition.forType(widget.project.sdk).dapConfig;
 
-    // React Native has no DAP adapter — launch Metro bundler as a run session.
-    if (!dapConfig.hasDap && widget.project.sdk == SdkType.reactNative) {
-      context.read<DebugProvider>().startMetroSession(widget.project);
-      return;
-    }
+    // Treat adapter as unavailable when the binary doesn't exist on this device
+    // (e.g. lldb-vscode not installed yet). Falls through to terminal run.
+    final dapAvailable = dapConfig.hasDap &&
+        File(dapConfig.resolvedBinary).existsSync();
 
-    // Android native has no DAP adapter — run Gradle build instead.
-    if (!dapConfig.hasDap && widget.project.sdk == SdkType.androidSdk) {
-      final buildCmd = SdkDefinition.forType(SdkType.androidSdk).buildCommand;
-      context.read<DebugProvider>().startBuildSession(widget.project, buildCmd);
+    if (!dapAvailable) {
+      switch (widget.project.sdk) {
+        case SdkType.reactNative:
+          context.read<DebugProvider>().startMetroSession(widget.project);
+        case SdkType.androidSdk:
+        case SdkType.kotlinMultiplatform:
+          final buildCmd = SdkDefinition.forType(widget.project.sdk).buildCommand;
+          context.read<DebugProvider>().startBuildSession(widget.project, buildCmd);
+        default:
+          // Generic terminal run for all other SDKs without a DAP adapter.
+          final def = SdkDefinition.forType(widget.project.sdk);
+          final cmd = def.sdkConfig.runCommand.isNotEmpty
+              ? def.sdkConfig.runCommand
+              : def.buildCommand;
+          if (cmd.isNotEmpty) {
+            final termProv = context.read<TerminalProvider>();
+            if (termProv.sessions.isNotEmpty) {
+              widget.sheetKey.currentState?.selectToolTab(0); // TERMINAL tab
+              widget.sheetKey.currentState?.expandToMid();
+              termProv.sessions.first.writeCommand(
+                'cd "${widget.project.path}" && $cmd',
+              );
+            }
+          }
+      }
       return;
     }
 
